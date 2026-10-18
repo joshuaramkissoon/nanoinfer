@@ -34,10 +34,10 @@ export const PANELS: PanelDef[] = [
     Component: RunIt,
     intro: (
       <>
-        <h2>Generate, on any rung of the climb</h2>
+        <h2>Generate, on any stage of the climb</h2>
         <p>
-          The generation loop from <a href="/learn/the-loop">chapter 8</a>, with every version of the engine selectable,
-          from the first correct one to the fastest GPU rung. Pick a version, press Generate: that engine writes the text,
+          The generation loop from <a href="/learn/the-loop">Chapter 8</a>, with every version of the engine selectable,
+          from the first correct one to the fastest GPU stage. Pick a version, press Generate: that engine writes the text,
           you see how fast it went in this tab, and the figures below redraw from that run.
         </p>
       </>
@@ -101,14 +101,14 @@ export const PANELS: PanelDef[] = [
         <h2>Every head at once</h2>
         <p>
           <a href="/learn/attention">Chapter 5</a> showed one head at a time. GPT-2 has 12 layers × 12 heads; here they all are,
-          on the text from fig. 1.
+          on the text from fig 1.
         </p>
       </>
     ),
     caption: (
       <>
         <b>What you're looking at:</b> each small square is one head's attention pattern: row = the token doing the looking,
-        column = the earlier token it looks at, darker = more attention. <b>Try:</b> click a square to enlarge it; the
+        column = the earlier token it looks at; the further a cell's colour is from the background, the more attention. <b>Try:</b> click a square to enlarge it; the
         diagonal-line heads look at the previous token, the left-edge heads at the first token.
       </>
     ),
@@ -122,14 +122,16 @@ export const PANELS: PanelDef[] = [
       <>
         <h2>Your machine's speed limit</h2>
         <p>
-          <a href="/learn/speed-limit">Chapter 10</a>'s division, done with this tab's own measured memory bandwidth.
+          <a href="/learn/speed-limit">Chapter 10</a>'s division, done with the memory bandwidth this tab measures for the
+          backend that ran fig 1: the CPU probe for a CPU stage, the WebGPU probe for a GPU stage.
         </p>
       </>
     ),
     caption: (
       <>
-        <b>What you're looking at:</b> the fastest decode this tab could manage (memory bandwidth ÷ bytes per token), and how
-        close the engine gets. <b>Try:</b> switch the weight type: halving the bytes doubles the ceiling.
+        <b>What you're looking at:</b> the fastest decode this tab could manage for the run in fig 1 (its backend's memory
+        bandwidth ÷ the bytes its number format reads per token), and how close the engine got. <b>Try:</b> pick another
+        number format: halving the bytes doubles the speed limit.
       </>
     ),
   },
@@ -142,15 +144,16 @@ export const PANELS: PanelDef[] = [
         <h2>Every operation on the roofline</h2>
         <p>
           <a href="/learn/memory-or-maths">Chapter 9</a>'s chart, with each of the engine's operations plotted from the run in
-          fig. 1, against roofs measured in this tab.
+          fig 1, against roofs measured in this tab for the backend it ran on.
         </p>
       </>
     ),
     caption: (
       <>
         <b>What you're looking at:</b> across, work per byte; up, arithmetic per second achieved. Dots are operations from the
-        last run. Dots near the slanted roof are memory-bound, near the flat roof compute-bound. <b>Try:</b> switch stages in
-        fig. 1 and rerun: the matmul dots climb toward the roof.
+        last run. Dots near the slanted roof are memory-bound, near the flat roof compute-bound. A GPU stage runs the whole
+        token as one GPU job, so it shows as a single dot under the GPU's memory roof. <b>Try:</b> switch CPU stages in fig 1
+        and rerun: the matmul dots climb toward the roof.
       </>
     ),
   },
@@ -180,10 +183,10 @@ export const PANELS: PanelDef[] = [
     Component: Ladder,
     intro: (
       <>
-        <h2>Every rung of the climb</h2>
+        <h2>Every stage of the climb</h2>
         <p>
           Part three of the course grouped the optimisations into six milestones. This is every individual stage, native and
-          in the browser (including the WebGPU rungs), each still runnable.
+          in the browser (including the WebGPU stages), each still runnable.
         </p>
       </>
     ),

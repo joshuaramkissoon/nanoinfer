@@ -14,7 +14,7 @@ const K = 5;
  * The logit lens: stop the network after every layer, push the residual stream
  * through GPT-2's own final LayerNorm and LM head, and read off what it would
  * say. Rows are depth (embedding at the bottom, layer 12 on top), columns are
- * positions in the text from fig. 1.
+ * positions in the text from fig 1.
  */
 export default function LogitLens() {
   const status = useEngine((s) => s.status);
@@ -61,7 +61,7 @@ export default function LogitLens() {
     return (
       <div ref={viewRef}>
         {ready || src === "live" ? (
-          <div className="nv-empty">{computing ? "decoding the residual stream after every layer…" : "waiting for fig. 1 to finish…"}</div>
+          <div className="nv-empty">{computing ? "decoding the residual stream after every layer…" : "waiting for fig 1 to finish…"}</div>
         ) : (
           <NeedsEngine>What GPT-2 would say if you stopped it after each layer.</NeedsEngine>
         )}

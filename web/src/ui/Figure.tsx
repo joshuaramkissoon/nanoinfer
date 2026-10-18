@@ -38,7 +38,7 @@ export function Figure({
       <figure className={`nv-fig${narrow ? " narrow" : ""}`} id={id} style={{ margin: undefined }} data-source={src ?? global}>
         <div className="nv-fig-head">
           <div className="nv-fig-title">
-            <span className="n">fig. {String(n).padStart(2, "0")}</span>
+            <span className="n">fig {n}</span>
             {title}
           </div>
           <div className="nv-prov">{prov ?? <Provenance source={src ?? global} />}</div>

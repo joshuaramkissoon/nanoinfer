@@ -12,13 +12,13 @@ export default function App() {
     void boot();
   }, []);
   return (
-    <main className="nv lr" data-askable data-ask-title="The lab: the engine room">
+    <main className="nv lr" data-askable data-ask-title="The lab">
       <TopBar here="lab" crumb={<span> / lab</span>} />
 
       <header className="nv-col nv-hero" data-ask-section>
-        <div className="nv-kicker">part 4 · the lab</div>
+        <div className="nv-kicker">the lab</div>
         <h1 className="nv-h1">
-          The engine room: everything, <em>running in this tab</em>.
+          The lab: every stage of the engine, running in this tab.
         </h1>
         <p className="nv-lead">
           This is for after the <a href="/learn">course</a>. Every figure here is drawn from the engine as it runs, with
@@ -40,7 +40,7 @@ export default function App() {
       <footer className="nv-col nv-footer">
         nanoinfer · GPT-2 124M weights by OpenAI (MIT) · engine, kernels and tokenizer written from scratch · three wasm builds
         (simd128, relaxed-SIMD, threads), picked by what your browser supports · weights downloaded as f16 and widened to f32
-        on load · WebGPU is a later rung of the ladder.
+        on load · WebGPU stages run where the browser supports them.
       </footer>
     </main>
   );
