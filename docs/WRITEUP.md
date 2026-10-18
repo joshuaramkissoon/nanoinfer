@@ -348,6 +348,75 @@ chart in this post is the real engine, running in your browser.
 - **Line:** "The static server was busy 100% of the time and still made people wait
   four seconds to hear the first word."
 
+### Machine note for every GPU number above (quiet re-run, 18 Oct)
+
+- Stages 8a–10 were first measured at load 15–30. On a quiet machine the GPU
+  reads at **~105 GB/s** (not 77–85), metal-lanes Q4 decodes at **817 tok/s**
+  (not ~600), and the batching curve tops out at **6,453 tok/s** (Q4, B=256;
+  part of that is the 64 × 64 GEMM from 128 rows). `bench/batching.json` holds
+  the quiet run. Use these numbers in the post; the shapes of the curves did
+  not change.
+
+### GPU stage 8b: metal-kv8 (the KV cache in 8 bits)
+
+- **Hypothesis:** at context ~1000 the f16 KV cache is ~40% on top of the Q4
+  weights per decode token; int8 + one scale per (position, head) halves it.
+- **Result:** −1.5% at 64 tokens of context, +4.6% at 512, **+5.4% at 960**
+  (618 → 651 tok/s); KL vs an f32 cache 9e-5. A third of what the byte count
+  promises.
+- **Aha:** "context makes decode slower" is only partly bytes. The 0.4 ms
+  that 900 extra positions add is mostly attention work (dequant, softmax
+  merge, an extra dispatch), not DRAM traffic.
+- **Viz:** stacked bar per token (weights / KV / other) at P = 64, 512, 960,
+  f16 vs int8 KV.
+- **Line:** "Halving the cache's bytes bought 5%: the cache was never just bytes."
+
+### GPU stage 11: speculative decoding (a small model guesses, the big one checks)
+
+- **Hypothesis:** batch-1 decode is memory-bound, so a target forward over
+  k + 1 rows costs about one step. Let gpt2 (Q4, ~750 tok/s) guess k tokens and
+  gpt2-medium/large (f16) check them in one forward: E = (1 − α^{k+1})/(1 − α)
+  tokens per target forward, speedup E/(kc + 1). Output identical to the
+  target's greedy output (asserted every run).
+- **Result:** gpt2-medium 106–132 → 180–371 tok/s (**1.6–2.9×**); gpt2-large
+  54–63 → 88–268 tok/s (**1.6–4.25×**): a 774M model at 268 tok/s on a base
+  M4. Best k = 7 where α ≈ 1, 4–6 otherwise.
+- **Aha:** tokens per forward follow the formula to within a few %; the
+  speedup lands at 75–90% of it because verifying k + 1 rows isn't quite free
+  and each round has three CPU↔GPU waits. And there's a cliff at k = 8: 9 rows
+  round up to the 16-row kernel.
+- **Aha 2:** α depends on the text more than on the models: license
+  boilerplate and lists 0.99–1.0, prose 0.80–0.93, wikitext 0.80–0.84, and code
+  0.88 with gpt2-medium but 0.65 with gpt2-large. A bigger target wins mainly
+  because the draft gets relatively cheaper (c 0.16 → 0.08).
+- **Viz:** token playback (`bench/specdec.json` `playback`, k = 4): draft tokens
+  appear grey, turn green when accepted, red at the first rejection, the
+  target's correction slides in; beside it measured speedup vs k with the
+  formula curve per prompt, α in the legend.
+- **Line:** "The big model never generates faster. It just gets to say 'yes,
+  yes, yes, no' four tokens at a time."
+- **Caveat for the post:** greedy GPT-2 loops after ~50 tokens, inflating α on
+  every prompt; say so, or use 48-token continuations for the headline.
+
+### WebGPU: the same climb through a portable API (crates/webgpu)
+
+- **Hypothesis:** WebGPU is how a browser tab reaches the GPU. Same rules as
+  Metal (dispatches are cheap inside a pass, round trips are expensive), but
+  through a translation layer and without Metal's SIMD-group intrinsics.
+- **Result (native wgpu on Metal, quiet machine):** 16 → **451 tok/s** decode
+  over 13 rungs (naive → one submit → workgroup matvec → parallel LN/attention
+  → f16 → Q8 → GPU argmax → GPU-resident loop → tiled prefill → Q8 head),
+  prefill 400 → 2,676 tok/s. **75–85% of hand-written Metal at every
+  rung** (Q8 resident 451 vs 600).
+- **Aha:** the gap isn't dispatch overhead (1.8 µs vs 0.76 µs per dispatch is
+  4% of a token); it's the matvec kernel (59 vs 79 GB/s) without `simd_sum`.
+  Kernel fusion, worth a lot on Metal, did nothing here.
+- **Viz:** the Metal and WebGPU ladders side by side, same rung names
+  (`bench/webgpu.json` carries the paired Metal numbers), plus the probe row:
+  per-dispatch / per-pass / round-trip costs.
+- **Line:** "A portable API costs you about a fifth, and almost none of it is
+  where you'd expect."
+
 ### Stage 3: neon (hand-written SIMD), a null result
 
 - **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per

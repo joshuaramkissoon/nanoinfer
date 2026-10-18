@@ -1056,6 +1056,262 @@ p99 15.3 ms; 256 → 62 ms / 19.5 ms; 512 → 56 ms / 18.9 ms.
   prefill budget is the knob between TTFT and TPOT (Sarathi's point): 32
   tokens per iteration halves the p99 TPOT jitter but quintuples TTFT.
 
+
+### Salvage note (18 Oct, evening)
+
+The Metal round-2 and WebGPU agents were stopped mid-work by a kernel
+watchdog panic (too many concurrent benches/builds from parallel agents).
+Their uncommitted code built and passed every test as left (`cargo test`
+per crate, `--test-threads=2`). Everything below was re-measured afterwards
+on a **quiet machine** (load 2–5, one heavy process at a time), so the
+numbers are higher than the round-2 entries above, which ran at load 15–30.
+Same session re-check of the round-1 probe: GPU read bandwidth is
+**~105 GB/s median** (32–512 MB, float4 grid-stride), not the 77–85 GB/s
+measured under load; a dispatch inside one command buffer costs 0.76 µs,
+commit + wait ~130 µs. So the practical decode ceiling is ~105 GB/s, ~88% of
+the 120 GB/s spec, and the earlier "most of the gap is the GPU's 80 GB/s"
+was contention, not the hardware.
+
+Quiet re-run of the single-stream best (prompt 64 + 64, 7 runs): metal-lanes
+Q4 **817 tok/s** decode (was 592 ± 47 at load 30), 6,800 tok/s prefill.
+
+### Metal stage 8b: metal-kv8 (Q8 KV cache)
+
+**Hypothesis.** At context ~1000 the f16 KV cache is 12 layers × 1000 × 768
+× 2 (K, V) × 2 B ≈ 37 MB per decode token, ~40% on top of the 89 MB of Q4
+weights. Store each (position, head) slice of 64 values as int8 + one f32
+scale (68 B instead of 128 B): ~47% fewer KV bytes, so expect up to ~15% at
+long context and nothing at short context.
+
+**What changed.** `shaders/kv8.metal`: `kv_quant8` (one threadgroup per
+(token, head, K|V): amax via simd_max, scale = amax/127, round), and copies of
+the f16-KV flash attention kernels (`attn_prefill_flash_q8`,
+`attn_decode_split_q8`) that dequantise each key/value on load with its
+scale. `Recipe.kv_q8`; stage `metal-kv8` = metal-lanes with the Q8 cache. The
+qkv matvec loses its fused f16 KV-write epilogue (it writes f32 K/V into the
+qkv buffer, then `kv_quant8` runs): +12 dispatches per token (113).
+
+**Quality** (`tests/reference.rs`, f32 weights so only the cache differs,
+context 300): KL vs the f32 cache 9.0e-5 after a 150-token prefill chunk,
+8.8e-8 on the decode step; same top-1.
+
+**Numbers** (Q4 weights, 64 decode tokens, 7 runs, interleaved, load 2–4):
+
+| prompt | metal-lanes (f16 KV) | metal-kv8 | Δ |
+|---|---|---|---|
+| 64 | 817 ± 10 | 804 ± 9 | −1.5% |
+| 512 | 697 ± 11 | 729 ± 7 | +4.6% |
+| 960 | 618 ± 4 | 651 ± 2 | +5.4% |
+
+**What surprised me.** Half the KV bytes buys a third of what bandwidth
+predicts (+5% at 960 vs ~15%). Decode at P=960 is 1.62 ms vs 1.22 ms at
+P=64: the 0.4 ms that context adds is mostly *not* bytes. At 37 MB / 105 GB/s
+the f16 cache costs ~0.35 ms of pure transfer, but the split-K attention
+kernels also pay for the dequant, the scale loads and the online-softmax
+merge; the int8 cache removes ~0.17 ms of transfer and adds a dispatch per
+layer. At short context the extra dispatch makes it a net loss. Kept as a
+stage (it is the right move for long contexts and for batching, where KV
+dominates memory), not as the default.
+
+### GEMM sweep: 64 × 64 tiles for big batches (`examples/gemm_sweep.rs`)
+
+**Hypothesis.** The round-1 prefill GEMM (`matmul_mma_*`, 32 × 64 output
+tile, weights staged as f32) is what batched decode uses from 32 rows. At
+128+ rows a 64 × 64 tile with the weight tile kept as half
+(`matmul_mma2_*`) halves the activation traffic per FLOP and the threadgroup
+memory per weight.
+
+**Numbers** (GFLOP/s, old / new, Q4; Q8 and f16 alike; max |diff| ≤ 2e-4,
+f16 bit-identical):
+
+| shape | n=32 | 64 | 128 | 256 | 512 |
+|---|---|---|---|---|---|
+| qkv 2304×768 | 929 / 547 | 966 / 1049 | 1048 / 2169 | 2204 / 2025 | 1761 / 2530 |
+| fc 3072×768 | 1718 / 1062 | 1993 / 1962 | 2110 / 2291 | 2218 / 2423 | 2254 / 2535 |
+| fc_proj 768×3072 | 919 / 553 | 1493 / 1053 | 1704 / 1715 | 2004 / 1883 | 2049 / 2214 |
+| lm_head 50257×768 | 2089 / 1312 | 2175 / 2501 | 2231 / 2575 | 2249 / 2616 | 2273 / 2596 |
+
+Below 64 rows half of the bigger tile is padding (−40%); from 128 rows it is
++5–15% on most shapes. `Batch::gemm` switches to `matmul_mma2` at
+`GEMM2_MIN_ROWS = 128` (not F32). The single-stream prefill path still uses
+the old kernel.
+
+### Batching curve, re-run (metal-batch, quiet machine, mma2 from 128 rows)
+
+Prompt 64, 64 GPU-resident decode steps, median of 3, load 2–4
+(`bench/batching.json`, which the web page reads):
+
+| B | Q4 agg | Q4 step ms | Q4 per stream | Q8 agg | f16 agg | f16 step ms | f32 agg | f32 step ms |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 788 | 1.27 | 788 | 629 | 372 | 2.69 | 198 | 5.06 |
+| 2 | 1412 | 1.42 | 706 | 1173 | 720 | 2.78 | 390 | 5.13 |
+| 4 | 2188 | 1.83 | 547 | 2045 | 1268 | 3.15 | 733 | 5.46 |
+| 8 | 2448 | 3.27 | 306 | 2349 | 2205 | 3.63 | 1380 | 5.80 |
+| 16 | 2858 | 5.60 | 179 | 2811 | 2922 | 5.48 | 1815 | 8.81 |
+| 32 | 4005 | 7.99 | 125 | 3983 | 3398 | 9.42 | 3157 | 10.1 |
+| 64 | 5111 | 12.5 | 80 | 5161 | 4637 | 13.8 | 4610 | 13.9 |
+| 128 | 6042 | 21.2 | 47 | 6048 | 5927 | 21.6 | 4995 | 25.6 |
+| 256 | **6453** | 39.7 | 25 | 6402 | 6178 | 41.4 | 5607 | 45.7 |
+
+vs the loaded run above: B=1 +20% (788 vs 657), B=256 +29% (6453 vs 4986; Q8
+B=128 +26%). The quiet machine accounts for most of the small-B gain; the
+B ≥ 128 gain is mostly the 64 × 64 GEMM (1.6 TFLOP/s at B=256, ~37% of f32
+peak). The ridge is unchanged: f32 step time flat to B=8 (+15%), f16 to B≈4–8,
+Q4/Q8 to B≈2–4. At B ≥ 64 the dtypes converge again (4.6–5.2k tok/s at 64,
+5.6–6.5k at 256).
+
+### Metal stage 11: speculative decoding (metal-spec)
+
+**Hypothesis.** A small draft model guesses k tokens; the target checks all
+of them in one forward over k + 1 rows. Batch-1 decode is memory-bound, so
+verifying k + 1 rows costs about one target step. With per-token acceptance
+α and draft cost c (draft step / target step), greedy speculative decoding
+emits E = (1 − α^{k+1}) / (1 − α) tokens per target forward and the speedup
+is E / (k·c + 1) (Leviathan et al.). Output is exactly the target's greedy
+output, by construction (the batched forward is batch-invariant, stage 9).
+
+**What changed.** `crates/cli/src/metal_spec.rs` (`nanoinfer metal-spec`),
+on two `Batch` engines (target f16, draft gpt2-124M Q4). Per round: one
+draft forward over the not-yet-seen tokens, then k − 1 draft tokens on the
+GPU-resident loop (one wait); one target forward over [g, d1..dk] with
+logits for every row; accept the longest matching prefix plus the target's
+own next token; roll both KV caches back with `truncate` (paged, so rollback
+is a length change). Baseline: the target alone on its GPU-resident loop.
+Output is checked equal to the target's greedy output on every run. Six
+prompts (code, list, license text, prose, story, Q&A, wikitext), 128 tokens,
+median of 3 (2 for gpt2-large), k = 1..8 (`bench/specdec.json`, which also
+carries per-token accept/reject playback for k = 4).
+
+**Numbers, gpt2-medium f16 target** (target alone 106–132 tok/s, draft
+alone ~700–800 tok/s, c ≈ 0.16–0.17; speedup measured / formula E/(kc+1)):
+
+| prompt | α | k=1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | best |
+|---|---|---|---|---|---|---|---|---|---|---|
+| code | 0.88 | 1.37/1.62 | 1.55/1.98 | 1.81/2.23 | 1.84/2.39 | 1.82/2.41 | 1.84/2.50 | 1.78/2.47 | 1.54/2.47 | 230 tok/s |
+| list | 1.00 | 1.45/1.71 | 1.80/2.25 | 2.06/2.66 | 2.26/2.99 | 2.49/3.26 | 2.64/3.49 | **2.93**/3.68 | 2.61/3.84 | 371 |
+| license | 0.99 | 1.46/1.71 | 1.85/2.24 | 2.19/2.66 | 2.41/2.99 | 2.45/3.25 | 2.61/3.47 | 2.88/3.65 | 2.57/3.80 | 367 |
+| prose | 0.80 | 1.26/1.53 | 1.41/1.86 | 1.44/1.94 | 1.59/2.01 | 1.42/2.07 | 1.44/1.99 | 1.35/1.95 | 1.19/2.01 | 210 |
+| story | 0.84 | 1.41/1.57 | 1.59/2.02 | 1.74/2.18 | 1.75/2.17 | 1.80/2.37 | 1.68/2.32 | 1.73/2.40 | 1.58/2.40 | 210 |
+| qa | 0.99 | 1.52/1.73 | 1.89/2.28 | 2.12/2.67 | 2.52/3.00 | 2.63/3.34 | 2.91/3.49 | 3.01/3.67 | 2.81/3.96 | 325 |
+| wikitext | 0.80 | 1.41/1.54 | 1.62/1.86 | 1.70/1.99 | 1.70/2.05 | 1.68/2.06 | 1.69/2.12 | 1.68/2.05 | 1.52/1.99 | 180 |
+
+**gpt2-large f16 target** (target alone 54–63 tok/s, c ≈ 0.075–0.08):
+
+| prompt | α | k=1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | best |
+|---|---|---|---|---|---|---|---|---|---|---|
+| code | 0.65 | 1.49/1.46 | 1.48/1.71 | 1.64/1.88 | 1.64/1.93 | 1.64/1.92 | 1.58/1.96 | 1.56/1.87 | 1.30/1.84 | 88 tok/s |
+| list | 1.00 | 1.70/1.86 | 2.19/2.60 | 2.78/3.25 | 3.14/3.83 | 3.44/4.34 | 3.79/4.79 | 4.12/5.21 | 3.70/5.58 | 249 |
+| license | 0.99 | 1.60/1.84 | 2.07/2.56 | 2.71/3.18 | 3.09/3.71 | 3.42/4.19 | 3.73/4.60 | **4.25**/4.97 | 3.66/5.30 | 268 |
+| prose | 0.93 | 1.66/1.80 | 2.03/2.40 | 2.43/2.92 | 2.85/3.33 | 3.01/3.60 | 3.26/3.80 | 3.24/4.01 | 2.68/4.16 | 200 |
+| story | 0.95 | 1.67/1.81 | 1.94/2.42 | 2.60/3.04 | 2.67/3.38 | 2.99/3.75 | 3.27/4.15 | 3.62/4.41 | 3.03/4.51 | 226 |
+| qa | 0.98 | 1.64/1.86 | 2.14/2.60 | 2.59/3.15 | 2.97/3.68 | 3.46/4.33 | 3.80/4.53 | 3.78/4.89 | 3.69/5.57 | 238 |
+| wikitext | 0.84 | 1.56/1.68 | 1.91/2.26 | 2.20/2.64 | 2.21/2.76 | 2.38/2.92 | 2.47/3.12 | 2.44/3.12 | 2.05/3.12 | 153 |
+
+**What surprised me.**
+- **Tokens per forward match the formula almost exactly** (e.g. license k=7:
+  7.94 measured vs 7.75 predicted; prose k=4 3.26 vs 3.34), but the *speedup*
+  lands at 75–90% of E/(kc+1). Two costs the formula leaves out: verifying
+  k + 1 rows is not free (gpt2-medium: 8.6–10 ms at k=1 vs 7.9 ms for one
+  target step, 11 ms at k=7), and each round has three CPU↔GPU waits (draft
+  first step, draft resident loop, verify), ~0.13 ms each.
+- **A cliff at k = 8.** Verify jumps from ~11 ms (8 rows) to ~14 ms (9 rows)
+  for gpt2-medium, 20 → 25.5 ms for gpt2-large. The batched matvec rounds the
+  row count up to a power of two (`nb = n.next_power_of_two()`), so 9 rows run
+  the NB = 16 kernel with 7 rows of padding and twice the accumulators.
+  Best k is 7 wherever α ≈ 1, 4–6 elsewhere: right at the edge of the
+  8-row kernel.
+- **The bigger the target, the bigger the win**: gpt2-large reaches **4.25×**
+  (63 → 268 tok/s) because c halves (0.08 vs 0.16), exactly the formula's
+  lever. A 774M model decoding at 268 tok/s on a base M4 is faster than
+  gpt2-medium alone (128).
+- **α is a property of the text, not of the models.** Boilerplate (license,
+  month lists, Q&A format) gets α ≈ 0.99–1.0 and 2.9–4.3×; natural prose and
+  wikitext 0.80–0.84 and 1.6–2.5×. Code is the odd one: 0.88 with
+  gpt2-medium but **0.65 with gpt2-large** (large writes different code than
+  small does; nothing to do with how predictable code is). Caveat: greedy
+  GPT-2 falls into repetition loops after ~50 tokens, which inflates α on
+  every prompt (the list and Q&A prompts loop almost immediately).
+- k = 1 already gives 1.3–1.7×: one free draft token per target step.
+
+### Failures and dead ends (round 2)
+
+- None of the salvaged code had to be fixed; the crash left it building.
+- The first spec-decoding numbers (in `bench/specdec.json` before this
+  re-run, load 5.7) looked noisy (speedup non-monotonic in k by ±0.4×); the
+  quiet re-run is smooth up to the k = 8 cliff, so the noise was the
+  machine.
+
+## WebGPU (crates/webgpu: wgpu 30, WGSL; native on wgpu's Metal backend)
+
+**Why.** The browser page runs the CPU engine as wasm; WebGPU is how a tab
+gets the GPU. `crates/webgpu` is the same Rust host code and the same WGSL
+kernels for both targets: natively through wgpu's Metal backend (this bench)
+and in a tab through wgpu's WebGPU backend compiled to wasm
+(`crates/wasm/src/webgpu.rs`, `--features webgpu` in `crates/wasm/build.sh`).
+Everything GPU-facing is `async` (a tab cannot block on the GPU). Stages are
+recipes, like Metal's. `tests/reference.rs`: every stage matches HF.
+
+**Probe** (`nanoinfer webgpu-probe`, quiet machine, vs the Metal probe in
+the same session):
+
+| | wgpu → Metal | Metal direct |
+|---|---|---|
+| GPU time per dispatch inside one pass (1000 dispatches, timestamps) | **1.8 µs** | 0.76 µs |
+| wall per dispatch, 1000 in one pass (CPU encode included) | 2.3 µs | — |
+| CPU encode per dispatch (set pipeline + bind groups + dispatch) | 0.15–0.22 µs | 0.08–0.18 µs |
+| one pass per dispatch (1000 passes, one submit) | 28 µs per pass | — |
+| submit 1 dispatch + wait (onSubmittedWorkDone) | 165 µs | ~130 µs (commit + wait) |
+| submit + copy + mapAsync 4 bytes | 196 µs | — |
+| read bandwidth (256 MB) | 102 GB/s | 105 GB/s |
+
+So the same rules as Metal, with every fixed cost ~2× larger: a dispatch
+inside a pass is 1.8 µs, a round trip ~165 µs, and a *compute pass* is
+expensive (28 µs each), so the whole forward goes in one pass. Bandwidth
+reaches the same ~100 GB/s: wgpu's overhead is per dispatch, not per byte.
+
+**Stage table** (GPT-2 124M, prompt 64 + 64 greedy, 5 runs, load ~2;
+Metal rung doing the same thing measured in the same session;
+`bench/webgpu.json`):
+
+| stage | what changed | decode tok/s | prefill tok/s | disp/token | Metal equivalent |
+|---|---|---|---|---|---|
+| webgpu-naive | WGSL port of the CPU kernels, submit + wait per op | 16.2 | 400 | 137 | metal-naive 19.4 |
+| webgpu-onesubmit | one encoder + one submit per token | 33.9 | 490 | 137 | metal-onecb 44.6 |
+| webgpu-matvec | 64 threads per row, vec4 loads, workgroup reduction | 41.3 | 502 | 137 | |
+| webgpu-par | 256-thread LayerNorm and attention | 149 | 513 | 137 | metal-par 171 |
+| webgpu-subgroup | matvec reduced with subgroupAdd (native only) | 168 | 555 | 137 | |
+| webgpu-fused | bias+GELU, residual, KV write in matmul epilogues | 145 | 542 | 89 | |
+| webgpu-f16 | f16 weights packed in u32 | 243 | 595 | 87 | metal-f16 307 |
+| webgpu-q8 | Q8_0 weights, f16 head | 345 | 402 | 87 | metal-q8 470 |
+| webgpu-argmax | argmax on the GPU | 349 | 403 | 89 | |
+| webgpu-resident | 16 tokens per submit, one readback | 383 | 397 | 89 | |
+| webgpu-tiled | 64 × 64 tiled prefill matmul | 384 | 2,584 | 89 | |
+| webgpu-ln64 | LayerNorm on 64 threads, row in registers | 386 | 2,598 | 89 | |
+| webgpu-q8head | Q8_0 LM head too | **451** | 2,676 | 89 | metal-pipelined-q8 600 |
+
+(The original run of these stages, at load 92 during the crash, recorded
+11–299 tok/s; the quiet numbers above replace them.)
+
+**What surprised me.**
+- **WebGPU is 75–85% of hand-written Metal at every rung** (f32 par 149 vs
+  171, f16 243 vs 307, Q8 resident 451 vs 600), and the gap is *not* the
+  dispatch overhead: 89 dispatches × (1.8 − 0.76) µs ≈ 0.09 ms of a 2.2 ms
+  token (4%). It is the matvec: webgpu-q8head streams 59 GB/s while
+  metal-pipelined-q8 streams 79 GB/s. Metal has `simd_sum` and
+  `simdgroup_matrix`; the portable kernels reduce through workgroup memory.
+- **Fusion did nothing** (137 → 89 dispatches, 149 → 145 tok/s): at 1.8 µs
+  per dispatch, 48 fewer dispatches are 86 µs of a 6.7 ms f32 token.
+- **Subgroups are worth +13% (149 → 168) on f32** but only natively; Chrome
+  exposes `subgroups` behind a flag, so the browser stages build without it.
+- **The GPU-resident loop is worth +10%** (349 → 383): the ~165 µs round trip
+  is 6% of a 2.9 ms token, plus the CPU's encode time no longer sits between
+  tokens.
+- Prefill needs the tiled matmul (400 → 2,584 tok/s, 6.5×) but is still 2.5×
+  behind Metal's simdgroup_matrix GEMM (6,800), which WGSL has no
+  equivalent for.
+- GPU pass timestamps on wgpu-Metal are unreliable for small passes (they
+  report more GPU time than wall time); the table uses wall time only.
+
 ---
 
 ## Stage 3: neon (explicit SIMD), a null result
