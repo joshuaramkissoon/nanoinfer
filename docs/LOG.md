@@ -62,6 +62,7 @@ of the weights).
 | 6 spin-pool (8 threads) | 833 (rayon's 984 better) | 115.0 ± 3.5 (best seen 124) | 47–51% | 1.1–1.2× decode vs rayon |
 | 7 fast-ops (10 threads) | ~1400–1500 (interleaved; 1327 ± 301 recorded) | ~119 (interleaved) | ~49% | 1.75× prefill, 2.2× at P=512 |
 | 8 f16 weights (4–10 threads) | ~1240–1320 | ~180 (4t) | 37% of 485 / 74% of 243 | 1.5× decode |
+| 9 q8_0 + f16 head | ~1240–1330 | ~230–240 | 34% of 693 | 1.3× decode vs f16 |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -1370,3 +1371,73 @@ At 180 tok/s a token is 5.5 ms, of which the bytes need ~2.7 ms at 90 GB/s. The
 rest is per-token overhead that doesn't shrink with the bytes (next stages).
 And more threads stop helping beyond 4: the extra threads only add dispatch
 cost and E-core stragglers.
+
+---
+
+## Stage 9: Q8_0 (int8 blocks, sdot), and why the LM head stays f16
+
+**Hypothesis.** ggml's Q8_0, blocks of 32 int8 plus one scale (we keep an f32
+scale: 36 bytes per 32 weights), is "near-lossless" folklore. Quantise the
+activations the same way per matmul and each block's dot product becomes exact
+int32 arithmetic with `sdot` (`vdotq_s32`, stable: 16 int8 multiply-adds per
+instruction). Expect ~1.4× over f16 on bytes, with Δppl ≲ 0.1%.
+
+**What changed.** `quant.rs`: `BlockQ8`/`BlockQ4`, ggml's quantisation rules,
+dequantisers, error-bound tests. `kernels/q8.rs`: activation quantiser (once per
+matmul, into reusable `Scratch`, so no allocation while decoding), `dot_q8` (two
+blocks per iteration, `vdotq_s32` ×2 → `vcvtq_f32_s32` → FMA by `d_w·d_x`), and a
+scalar fallback for wasm. Prefill dequantises panels (stage 8's path).
+
+**Attempt 1: everything Q8, including the tied LM head (failed on quality).**
+Decode ~268 tok/s, but WikiText-2 (4 × 512): **ppl +4.7%, mean KL 0.046, top-1
+agreement 84.2%**, max |Δlogit| 55. Not near-lossless at all. Q4 the same way was
+a disaster: ppl 37.4 → **516**.
+
+**Finding the cause.** New diagnostic `ppl --fake-quant q8|q4|f16 --only
+<matrices> [--layers ..]`: round-trip chosen f32 matrices through a format, then
+run an exact f32 stage. That isolates weight error from kernel and activation
+effects (1 × 512 tokens, ppl 28.76 baseline):
+
+| fake-quantised | Δppl | mean KL | top-1 |
+|---|---|---|---|
+| **q4: lm_head (wte) only** | **+558%** | 2.05 | 34% |
+| q4: qkv only | +4.3% | 0.030 | 90% |
+| q4: fc only | +2.2% | 0.020 | 90% |
+| q4: fc_proj only | +0.9% | 0.012 | 94% |
+| q4: attn_proj only | +0.7% | 0.005 | 97% |
+| q8: lm_head only | +0.18% | 0.0086 | 91% |
+| q8: all 48 block matrices | −0.13% | 0.00027 | 99% |
+| f16: everything | +0.01% | 0.00001 | 100% |
+
+Then which *activations*? A temporary switch gave chosen matmuls f32 inputs
+(decode through the dequantise-to-f32 path) with the weights still Q8:
+- f32 activations for the LM head only: KL 0.038 → **0.0092**;
+- f32 activations for every block matmul instead: KL stays 0.038.
+
+So the LM head is the problem twice over: its weights (shared with the
+embedding) are the most sensitive matrix in the model, and its *input* can't be
+quantised. A throwaway probe printed why. GPT-2's `ln_f` gain has outlier
+channels (17.4 on dim 496, 17.0 on 430, 15.3 on 314, vs rms 2.05), so the LM
+head's input has a few huge channels. Quantised per block of 32, those blocks
+keep ~3 bits of precision for their other 31 values.
+
+**Tried: fold the gain into the head.** `W·(g⊙n + b) = (W·diag g)·n + W·b`. Store
+`W·diag(g)` quantised and `W·b` as an f32 per-token bias, then quantise `n`
+(normalised, no gain outliers). Exact in f32 (`stages/packed.rs::FoldedHead`).
+It helped (KL 0.039 → 0.0103, top-1 86% → 93%) but nowhere near enough.
+
+**Kept: Q8_0 blocks + f16 LM head** (`PlainHead<F16Matrix>`), what llama.cpp does
+too (it keeps `output.weight` at higher precision).
+
+| Q8 blocks + head as | Δppl | mean KL | top-1 |
+|---|---|---|---|
+| Q8 (attempt 1) | +2.9% | 0.039 | 85.6% |
+| Q8, ln_f gain folded | +1.6% | 0.010 | 93.0% |
+| **f16** | **−0.1%** | **0.00086** | **97.9%** |
+
+Bytes per token: 95.6 MB blocks + 77.2 MB head = 173 MB (spec ceiling 693 tok/s).
+
+**Numbers** (same session as stage 8): decode **~230–240 tok/s** (4–8 threads:
+232 ± 15, 231 ± 7, 239 ± 4; 10 threads 230 ± 36 / 203 ± 21), prefill ~1240–1330
+(the f32 tile path after dequantising). ~40 GB/s, 34% of its spec ceiling. The
+f16 head is 45% of the bytes now.

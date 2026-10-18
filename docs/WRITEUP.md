@@ -488,4 +488,25 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
 - **Viz:** speed-of-light gauge: switch dtype f32 → f16 and watch the ceiling needle
   double while the achieved needle moves less.
 
+### Stage 9: Q8_0 (8-bit), and the matrix you can't compress
+
+- **Hypothesis:** 8-bit blocks (32 weights share one scale) are "near-lossless", and int8 dot
+  products (`sdot`: 16 multiply-adds per instruction) are fast.
+- **First try:** everything 8-bit. Fast (~268 tok/s), but perplexity +4.7% and only 84% of
+  top tokens matched. At 4 bits the same recipe gave perplexity 516 (from 37).
+- **Detective work:** quantising one matrix at a time showed the culprit: the **LM head**,
+  the 50257 × 768 embedding table GPT-2 reuses to produce logits. At 4 bits that one matrix
+  alone multiplies perplexity 6.6×. Every other matrix costs 1–4%. Its *input* is also hard
+  to quantise: GPT-2's final LayerNorm boosts a few channels 17×, and those outliers wreck
+  8-bit rounding for their neighbours.
+- **Result:** Q8_0 blocks + an f16 LM head: perplexity −0.1% (noise), 98% top-1, decode
+  **~230–240 tok/s**. A clever fold of the LayerNorm gain into the head helped but not
+  enough.
+- **Aha:** a third of GPT-2 small is one matrix, and it's the one that hates quantisation.
+  On a 7B model the embedding is ~2% of the weights. Small-model lessons don't transfer.
+- **Viz:** "quantisation microscope": a bar per matrix, KL when only that matrix is
+  quantised, with the LM head's bar off the chart. Plus the ln_f gain plot with its
+  17× spikes.
+- **Line:** "The fastest matrix to compress was the one we couldn't afford to."
+
 ## Open questions / things to verify before publishing

@@ -33,6 +33,66 @@ pub struct PplArgs {
     /// Number of windows to evaluate.
     #[arg(long, default_value_t = 4)]
     windows: usize,
+    /// Diagnostic: before running `--stage` (an f32 stage), round-trip some
+    /// weight matrices through this format (q8 | q4 | f16): quantise, dequantise,
+    /// store back as f32. Isolates weight error from kernel/activation effects.
+    #[arg(long)]
+    fake_quant: Option<String>,
+    /// With --fake-quant: which matrices (comma list of qkv, attn_proj, fc,
+    /// fc_proj, lm_head; default all), optionally limited to --layers.
+    #[arg(long, default_value = "qkv,attn_proj,fc,fc_proj,lm_head")]
+    only: String,
+    /// With --fake-quant: comma list of layer indices (default all).
+    #[arg(long)]
+    layers: Option<String>,
+}
+
+fn round_trip(w: &mut [f32], cols: usize, fmt: &str) {
+    use nanoinfer_core::quant::*;
+    match fmt {
+        "q8" => {
+            let q = quantize_rows_q8(w, cols);
+            for (c, b) in w.as_chunks_mut::<QK>().0.iter_mut().zip(&q) {
+                *c = dequantize_q8(b);
+            }
+        }
+        "q4" => {
+            let q = quantize_rows_q4(w, cols);
+            for (c, b) in w.as_chunks_mut::<QK>().0.iter_mut().zip(&q) {
+                *c = dequantize_q4(b);
+            }
+        }
+        "f16" => w.iter_mut().for_each(|v| *v = f16_to_f32(f32_to_f16(*v))),
+        _ => panic!("--fake-quant expects q8, q4 or f16"),
+    }
+}
+
+fn fake_quant(model: &mut nanoinfer_core::Model, fmt: &str, only: &str, layers: Option<&str>) {
+    let c = model.config.n_embd;
+    let want = |name: &str| only.split(',').any(|s| s.trim() == name);
+    let layer_ok = |l: usize| layers.is_none_or(|ls| ls.split(',').any(|s| s.trim().parse() == Ok(l)));
+    for (l, layer) in model.layers.iter_mut().enumerate() {
+        if !layer_ok(l) {
+            continue;
+        }
+        if want("qkv") {
+            round_trip(&mut layer.attn_w, c, fmt);
+        }
+        if want("attn_proj") {
+            round_trip(&mut layer.proj_w, c, fmt);
+        }
+        if want("fc") {
+            round_trip(&mut layer.fc_w, c, fmt);
+        }
+        if want("fc_proj") {
+            round_trip(&mut layer.fc_proj_w, 4 * c, fmt);
+        }
+    }
+    if want("lm_head") {
+        // wte is shared with the embedding lookup, so this perturbs both uses
+        // (the packed stages only quantise the LM-head use).
+        round_trip(&mut model.wte, c, fmt);
+    }
 }
 
 fn log_softmax_at(logits: &[f32], target: usize) -> f64 {
@@ -61,6 +121,14 @@ pub fn run(weights: &Path, a: PplArgs) -> Result<(), Box<dyn std::error::Error>>
     crate::bench::prefer_performance_cores();
     let tok = crate::load_tokenizer(weights)?;
     let model = crate::load_model(weights)?;
+    let mut fq_model = None;
+    if let Some(fmt) = &a.fake_quant {
+        let mut m = model.clone();
+        fake_quant(&mut m, fmt, &a.only, a.layers.as_deref());
+        eprintln!("fake-quant {fmt}: {} (layers {})", a.only, a.layers.as_deref().unwrap_or("all"));
+        fq_model = Some(m);
+    }
+    let stage_model = fq_model.as_ref().unwrap_or(&model);
     let text = std::fs::read_to_string(&a.text)
         .map_err(|e| format!("{}: {e} (run scripts/fetch_wikitext.sh)", a.text.display()))?;
     let ids = tok.encode(&text);
@@ -68,16 +136,16 @@ pub fn run(weights: &Path, a: PplArgs) -> Result<(), Box<dyn std::error::Error>>
     let n_win = a.windows.min(ids.len() / window);
     eprintln!("ppl: stage={} vs reference={} | {n_win} windows × {window} tokens", a.stage, a.reference);
 
-    let compare = a.stage != a.reference;
+    let compare = a.stage != a.reference || a.fake_quant.is_some();
     let (mut nll, mut nll_ref, mut kl_sum, mut agree, mut max_diff, mut count) = (0.0, 0.0, 0.0, 0usize, 0f32, 0usize);
     let t0 = Instant::now();
     for w in 0..n_win {
         let chunk = &ids[w * window..(w + 1) * window];
-        let mut s = Session::with_max_seq(&model, a.stage, window);
+        let mut s = Session::with_max_seq(stage_model, a.stage, window);
         let mut r = Session::with_max_seq(&model, a.reference, window);
         for i in 0..window - 1 {
             let target = chunk[i + 1] as usize;
-            let logits = s.step(&model, &chunk[i..i + 1], &mut NoTrace)?.to_vec();
+            let logits = s.step(stage_model, &chunk[i..i + 1], &mut NoTrace)?.to_vec();
             nll -= log_softmax_at(&logits, target);
             if compare {
                 let lr = r.step(&model, &chunk[i..i + 1], &mut NoTrace)?;

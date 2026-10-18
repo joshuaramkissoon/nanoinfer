@@ -29,6 +29,7 @@ pub mod fastops;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 pub mod packed;
+pub mod q8;
 pub mod reference;
 pub mod spin;
 pub mod threaded;
