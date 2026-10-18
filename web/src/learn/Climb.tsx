@@ -14,17 +14,26 @@ export interface Milestone {
   what: string;
   /** a different measure (total across many users) */
   total?: boolean;
+  /** MB of weights read per decoded token by this step's format */
+  mb?: number;
 }
+
+/** Apple's spec read bandwidth for the M4 (GB/s). Every step's limit uses it, so the percentages compare like with like. */
+const SPEC_GBS = 120;
+/** This step's own speed limit: spec bandwidth ÷ its bytes per token (chapter 10). */
+export const limitOf = (m: Milestone) => (m.mb ? (SPEC_GBS * 1000) / m.mb : null);
 
 // Decode tokens per second, GPT-2 124M on the M4 Mac mini. The CPU steps are from
 // docs/LOG.md; the GPU and batching steps come from the bench files via
 // public/learn/data.json (re-measured on a quiet machine), so they never go stale.
+// Bytes per token (docs/LOG.md, "every stage back to back" and the Metal Q4 table): f32 494.6 MB; CPU q4-kv16 97 MB
+// (4-bit blocks with an f32 scale, 8-bit scoring matrix); GPU metal-lanes 89.3 MB (Q4_0 blocks, Q8_0 scoring matrix).
 const CPU_STEPS: Milestone[] = [
-  { key: "naive", label: "first version", tokS: 0.37, what: "recomputes the whole text for every token · 1 core" },
-  { key: "kv", label: "+ KV cache", tokS: 18.95, what: "remembers past tokens' keys and values · 1 core" },
-  { key: "arith", label: "+ faster arithmetic", tokS: 100.5, what: "16 running totals, SIMD · 1 core" },
-  { key: "threads", label: "+ many cores", tokS: 146, what: "6 threads that don't sleep, vectorised small ops" },
-  { key: "quant", label: "+ smaller numbers", tokS: 497, what: "4-bit weights, 16-bit KV cache · CPU, 4 threads" },
+  { key: "naive", label: "first version", tokS: 0.37, mb: 494.6, what: "recomputes the whole text for every token · 1 core · 32-bit" },
+  { key: "kv", label: "+ KV cache", tokS: 18.95, mb: 494.6, what: "remembers past tokens' keys and values · 1 core · 32-bit" },
+  { key: "arith", label: "+ faster arithmetic", tokS: 100.5, mb: 494.6, what: "16 running totals, SIMD · 1 core · 32-bit" },
+  { key: "threads", label: "+ many cores", tokS: 146, mb: 494.6, what: "6 threads that don't sleep, vectorised small ops · 32-bit" },
+  { key: "quant", label: "+ smaller numbers", tokS: 497, mb: 97, what: "4-bit weights, 16-bit KV cache · CPU, 4 threads" },
 ];
 
 /** The best batched point for 4-bit weights: [users, total tok/s, per-user tok/s]. */
@@ -40,7 +49,7 @@ export function milestones(d: LearnData | null): Milestone[] {
   return [
     { ...CPU_STEPS[0], tokS: d?.headline.naive.decode ?? CPU_STEPS[0].tokS },
     ...CPU_STEPS.slice(1),
-    { key: "gpu", label: "+ the GPU", tokS: gpu, what: "Metal kernels shaped for the GPU, never waiting, 4-bit · M4 GPU · quiet machine" },
+    { key: "gpu", label: "+ the GPU", tokS: gpu, mb: 89.3, what: "Metal kernels shaped for the GPU, never waiting, 4-bit · M4 GPU · quiet machine" },
     { key: "batch", label: "+ batching", tokS: total, what: `${B} users at once: ${Math.round(per)} tok/s each · M4 GPU`, total: true },
   ];
 }
@@ -52,8 +61,6 @@ export function climbFactor(d: LearnData | null): string | null {
   const p = 10 ** Math.max(0, Math.floor(Math.log10(x)) - 1);
   return (Math.round(x / p) * p).toLocaleString("en-GB");
 }
-
-const LIMIT_F32 = 243; // 120 GB/s ÷ 494.6 MB of f32 weights per token
 
 /** fig: decode tok/s per milestone, up to and including `upto`. */
 export function Climb({ upto, n }: { upto: number; n: string }) {
@@ -67,7 +74,7 @@ export function Climb({ upto, n }: { upto: number; n: string }) {
   const labelW = Math.min(150, W * 0.36);
   const row = 30, bar = 16, top = 8;
   const H = top + MILESTONES.length * row + 30;
-  const x = log(0.1, 10000, labelW + 4, W - (upto >= 6 ? 84 : 44));
+  const x = log(0.1, 10000, labelW + 4, W - (upto >= 6 ? 84 : 64));
   const cur = MILESTONES[upto];
   const prev = upto > 0 ? MILESTONES[upto - 1] : null;
   const shown = hover ?? upto;
@@ -80,10 +87,12 @@ export function Climb({ upto, n }: { upto: number; n: string }) {
         <>
           How fast the engine writes, after each optimisation: tokens per second for one user, on our M4 Mac mini. The scale is
           logarithmic: each gridline is 10× the last, so equal steps mean equal multiples. Grey bars are earlier steps, the
-          ember bar is this chapter's. The dashed line is the speed limit for 32-bit weights (chapter 10).
+          ember bar is this chapter's. Each bar sits in its own track, which ends at that step's speed limit (chapter 10):
+          {` ${SPEC_GBS}`} GB/s ÷ the bytes it reads per token. The percentage is how much of its own limit the step reached.
+          {upto >= 4 && " Smaller numbers mean fewer bytes, so from chapter 15 on the limit itself moves right."}
           {upto >= 5 &&
             " The GPU and batching bars were measured on a quiet machine (64-token prompt, then 64 tokens). An earlier GPU run, with other benchmarks competing for memory, gave about three quarters as much."}
-          {MILESTONES[upto].total && " The batching bar counts every user's tokens together, so it's allowed past the line: it's a different measure."}
+          {MILESTONES[upto].total && " The batching bar counts every user's tokens together, so a one-user limit doesn't apply to it."}
         </>
       }
     >
@@ -107,6 +116,9 @@ export function Climb({ upto, n }: { upto: number; n: string }) {
               const x1 = x(m.tokS);
               const x0 = x(0.1);
               const fill = i === upto ? cc.c1 : pal.muted;
+              const lim = limitOf(m);
+              const xl = lim ? x(lim) : x1;
+              const pct = lim ? (m.tokS / lim) * 100 : null;
               return (
                 <g key={m.key} onMouseEnter={() => on && setHover(i)} style={{ cursor: on ? "default" : undefined }}>
                   <rect x={0} y={top + i * row} width={W} height={row} fill="transparent" />
@@ -115,14 +127,25 @@ export function Climb({ upto, n }: { upto: number; n: string }) {
                   </text>
                   {on ? (
                     <>
+                      {lim && (
+                        <>
+                          <rect x={x0} y={y0} width={xl - x0} height={bar} rx={4} fill="none" stroke={pal.rule} />
+                          <line x1={xl} x2={xl} y1={y0 - 3} y2={y0 + bar + 3} stroke={pal.fg} strokeWidth={1} strokeDasharray="3 2" opacity={0.7} />
+                        </>
+                      )}
                       <path
                         d={`M${x0},${y0} H${x1 - 4} a4,4 0 0 1 4,4 V${y0 + bar - 4} a4,4 0 0 1 -4,4 H${x0} Z`}
                         fill={fill}
                         opacity={i === upto || hover === i ? 1 : 0.55}
                       />
-                      <text x={x1 + 6} y={y0 + bar / 2 + 4} fontSize={11} fill={i === upto ? pal.fg : pal.sub} fontWeight={i === upto ? 700 : 400}>
+                      <text x={Math.max(x1, xl) + 6} y={y0 + bar / 2 + 4} fontSize={11} fill={i === upto ? pal.fg : pal.sub} fontWeight={i === upto ? 700 : 400}>
                         {m.tokS < 1 ? m.tokS.toFixed(2) : m.tokS < 100 ? m.tokS.toFixed(1) : Math.round(m.tokS).toLocaleString()}
                         {m.total ? " total" : ""}
+                        {pct != null && (
+                          <tspan fontWeight={400} fill={pal.muted}>
+                            {` · ${pct < 1 ? pct.toFixed(2) : pct.toFixed(0)}%`}
+                          </tspan>
+                        )}
                       </text>
                     </>
                   ) : (
@@ -131,15 +154,12 @@ export function Climb({ upto, n }: { upto: number; n: string }) {
                 </g>
               );
             })}
-            <line x1={x(LIMIT_F32)} x2={x(LIMIT_F32)} y1={top - 4} y2={H - 26} stroke={pal.fg} strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
-            <text x={x(LIMIT_F32) - 4} y={top + 4} textAnchor="end" fontSize={10} fill={pal.sub}>
-              limit, 32-bit: 243
-            </text>
           </svg>
         )}
       </div>
       <div className="lr-note">
         <b>{MILESTONES[shown].label.replace(/^\+ /, "")}</b>: {MILESTONES[shown].what}
+        {limitOf(MILESTONES[shown]) && ` · limit ${Math.round(limitOf(MILESTONES[shown])!).toLocaleString("en-GB")} tok/s (${MILESTONES[shown].mb} MB per token)`}
         {shown === upto && prev && (
           <>
             {" "}
