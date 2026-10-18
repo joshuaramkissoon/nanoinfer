@@ -56,6 +56,7 @@ of the weights).
 | 0 naive | 26.16 ± 0.31 | 0.368 ± 0.003 | 0.15% | — |
 | 1 kv-cache | 27.06 ± 0.43 | 18.95 ± 0.16 | 7.8% | 51× decode |
 | 2 unrolled (16 accumulators) | 184.8 ± 3.4 | 100.5 ± 2.1 | 41.4% | 5.8× decode, 7.5× prefill |
+| 3 neon (explicit `fmla`) | 182.6 ± 1.8 | 100.3 ± 1.4 | 41.4% | 1.00× (null result) |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -406,3 +407,60 @@ with that: per-cb fixed cost, not the copy.
 Now 97% of the wall time is GPU kernel time, so the next lever is the kernels:
 the attention and layernorm kernels that use a dozen threads, and a matvec
 that coalesces.
+
+---
+
+## Stage 3: neon (explicit SIMD), a null result
+
+**Hypothesis.** Stage 2's vectorised loop uses `fmul` + `fadd` (Rust won't fuse
+them) and loads 2 vectors per multiply-add. Hand-written NEON can use `vfmaq_f32`
+(fused, half the instructions) and compute **4 output rows per pass**, sharing each
+load of `x` across 4 weight rows (1.25 loads per FMA). Expect prefill to gain
+noticeably; decode only up to the ~13% of single-core bandwidth left on the table.
+
+**Attempt 1: 4 rows per pass (failed).** Inner loop exactly as intended
+(`objdump`: 16 × `fmla.4s`, 10 × `ldp q` per 16 columns, no spills). Decode went
+*down*: **74.5 vs 100.9 tok/s** (two interleaved runs each), all matmuls dropping
+from ~54 to ~25–30 GB/s, fc_proj (12 KB between rows) worst at 24.7 GB/s.
+
+Microbenchmark (`/tmp`, not committed): sum a 512 MB buffer as rows of length d,
+k rows at a time, one P-core:
+
+| d | 1 stream | 2 | 4 | 8 |
+|---|---|---|---|---|
+| 768 | 49.2 GB/s | 46.0 | 38.4 | 24.5 |
+| 3072 | 48.3 | 45.3 | 31.7 | 34.5 |
+
+So it's the memory system, not the kernel: a P-core streams ~49 GB/s from one
+sequential stream and ~32–38 GB/s from 4 interleaved ones. Software prefetch
+(`prfm pldl1strm` 64–1024 floats ahead in each stream) made it *worse*
+(29–37 GB/s). At batch 1 the extra loads of `x` (always in L1) were never the
+bottleneck. DRAM is, and 4 streams are worse for the prefetcher than one.
+(Repacking 4 rows into one interleaved stream would fix it. We'll revisit that
+only if a later stage needs the x reuse at batch 1.)
+
+**Attempt 2 (kept): one row at a time, fused.** `kernels/neon.rs`: `dot1` = 4 ×
+`float32x4` accumulators, `vfmaq_f32`, `vaddvq_f32` reduction. Also exposes
+`matvec(out, x, w, bias, .., o0)` over a row range, for the threading stage.
+Non-aarch64 targets (wasm32) fall back to the stage 2 kernel.
+
+**Numbers** (prompt 64, 64 decode, 5 runs, interleaved with unrolled):
+
+| stage | prefill tok/s | decode tok/s | decode GB/s |
+|---|---|---|---|
+| unrolled | 184.2 ± 1.4 / 185.1 ± 16.7 | 100.2 ± 0.5 / 100.0 ± 7.2 | 49.6 |
+| neon | 183.9 ± 1.0 / 185.4 ± 1.2 | 101.0 ± 2.9 / 101.3 ± 0.6 | 50.1 |
+| neon (recorded) | 182.6 ± 1.8 | 100.3 ± 1.4 | 49.6 |
+
+Identical within noise. Correctness: within 1e-3 of HF (FMA rounding only).
+
+**Why nothing moved, and why that's the interesting part.**
+- **Decode** was already at 87% of single-core DRAM bandwidth. Halving the
+  arithmetic instructions changes nothing when the core waits on memory.
+- **Prefill didn't move either**, which says prefill isn't FMA-bound. It's
+  loop-order-bound: "for each prompt row → stream the whole weight matrix"
+  re-reads every matrix 64 times. They're 2.4–9.4 MB, so they sit in the 16 MB L2,
+  and prefill runs at L2 bandwidth (31.6 GFLOP/s ≈ 63 GB/s of weights). The fix
+  is reuse (stage 4), not faster arithmetic.
+- The compiler had already done the SIMD part. Writing intrinsics by hand only
+  pays when you know something the compiler can't (here: nothing yet).

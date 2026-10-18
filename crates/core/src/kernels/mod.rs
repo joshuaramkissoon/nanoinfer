@@ -24,6 +24,8 @@
 //! compile time per stage (no dynamic dispatch in inner loops) while still being
 //! selectable at runtime through [`crate::Stage`].
 
+#[cfg(target_arch = "aarch64")]
+pub mod neon;
 pub mod reference;
 pub mod unrolled;
 
@@ -99,5 +101,20 @@ impl Kernels for Unrolled {
     const NAME: &'static str = "unrolled";
     fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: usize, d_in: usize, d_out: usize) {
         unrolled::matmul(out, x, w, bias, n, d_in, d_out)
+    }
+}
+
+/// Stage 3: explicit NEON matmul (fused FMA, one weight row at a time). Falls back
+/// to [`Unrolled`]'s matmul where NEON isn't available (wasm32).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Neon;
+
+impl Kernels for Neon {
+    const NAME: &'static str = "neon";
+    fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: usize, d_in: usize, d_out: usize) {
+        #[cfg(target_arch = "aarch64")]
+        neon::matmul(out, x, w, bias, n, d_in, d_out);
+        #[cfg(not(target_arch = "aarch64"))]
+        unrolled::matmul(out, x, w, bias, n, d_in, d_out);
     }
 }

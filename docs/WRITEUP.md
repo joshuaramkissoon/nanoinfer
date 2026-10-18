@@ -154,5 +154,24 @@ chart in this post is the real engine, running in your browser.
   fed one long one, it stays busy 97% of the time.
 - **Viz:** timeline strip: 135 short GPU bursts with gaps vs one solid block.
 - **Line:** "Same kernels, one fewer question per op: 2.8× faster."
+### Stage 3: neon (hand-written SIMD), a null result
+
+- **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per
+  pass to share loads of `x`, beats the compiler's version.
+- **Change:** tried 4-rows-per-pass first. Textbook inner loop, and decode got *slower*
+  (101 → 74 tok/s). A microbenchmark showed one core reads 49 GB/s from one sequential
+  stream but only 32–38 GB/s from 4 interleaved ones, and software prefetch made it
+  worse. Kept the simple version: one weight row at a time, `vfmaq_f32`.
+- **Result:** decode 100.3 tok/s, prefill 183 tok/s. **Identical to stage 2.**
+- **Aha:** decode was already waiting on memory, so fewer instructions bought nothing. And
+  prefill didn't move either, which exposes the real prefill problem: the loop streams
+  the whole weight matrix again for every prompt row. That's a *reuse* problem, not an
+  arithmetic one.
+- **Aha 2:** "saving loads" can cost bandwidth. The memory system likes one long
+  sequential read, and four interleaved ones confuse the prefetcher.
+- **Viz:** small multiples: GB/s vs number of interleaved streams (1, 2, 4, 8). Stage 2 vs
+  stage 3 bars side by side, equal heights, captioned "the compiler had already done this".
+- **Line:** "I wrote the assembly-level version by hand, and it was exactly as fast as the
+  version the compiler wrote for me."
 
 ## Open questions / things to verify before publishing

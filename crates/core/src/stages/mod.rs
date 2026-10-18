@@ -21,7 +21,7 @@ pub mod kv_cache;
 pub mod naive;
 
 use crate::error::{Error, Result};
-use crate::kernels::{Kernels, Reference, Unrolled};
+use crate::kernels::{Kernels, Neon, Reference, Unrolled};
 use crate::trace::{ForwardInfo, Phase, Trace};
 use crate::weights::Model;
 use std::fmt;
@@ -36,16 +36,19 @@ pub enum Stage {
     KvCache,
     /// Stage 2: KV cache + matmul with 16 independent accumulators (autovectorised).
     Unrolled,
+    /// Stage 3: explicit NEON matmul (fused multiply-add, one weight row at a time).
+    Neon,
 }
 
 impl Stage {
-    pub const ALL: &'static [Stage] = &[Stage::Naive, Stage::KvCache, Stage::Unrolled];
+    pub const ALL: &'static [Stage] = &[Stage::Naive, Stage::KvCache, Stage::Unrolled, Stage::Neon];
 
     /// Name of the kernel set this stage runs.
     pub fn kernels(self) -> &'static str {
         match self {
             Stage::Naive | Stage::KvCache => Reference::NAME,
             Stage::Unrolled => Unrolled::NAME,
+            Stage::Neon => Neon::NAME,
         }
     }
 
@@ -59,6 +62,7 @@ impl Stage {
             Stage::Naive => "naive",
             Stage::KvCache => "kv-cache",
             Stage::Unrolled => "unrolled",
+            Stage::Neon => "neon",
         }
     }
 }
@@ -270,6 +274,7 @@ impl Session {
             Stage::Naive => naive::forward::<Reference, T>(model, &self.tokens, &mut self.acts, trace),
             Stage::KvCache => kv_cache::forward::<Reference, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
             Stage::Unrolled => kv_cache::forward::<Unrolled, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
+            Stage::Neon => kv_cache::forward::<Neon, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
         }
         if T::ENABLED {
             if trace.wants_logits() {
