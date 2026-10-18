@@ -1320,3 +1320,10 @@ button.lr-bar:hover {
 .lr-passes i.x {
   border: 1px dashed var(--m-muted);
 }
+
+/* fig 4.1: the running dot product, written out */
+.lr-eq {
+  font-variant-numeric: tabular-nums;
+  line-height: 1.7;
+  min-height: 3.4em;
+}

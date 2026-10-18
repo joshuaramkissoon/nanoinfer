@@ -134,8 +134,11 @@ function MatVec() {
   });
   const wmax = Math.max(...W.flat().map(Math.abs)), xmax = Math.max(...x.map(Math.abs));
   const ymax = Math.max(...W.map((r) => Math.abs(r.reduce((a, v, j) => a + v * x[j], 0))));
-  const C = 30, G = 3, ox = 4, oy = 42;
+  const C = 38, G = 3, ox = 4, oy = 46;
   const fin = step >= N * N;
+  const eqRow = fin || !Number.isFinite(row) ? N - 1 : row;
+  const eqUpto = fin || !Number.isFinite(col) ? N : col + 1; // terms of the current row shown so far (the active one included)
+  const posC = diverge(pal, 1), negC = diverge(pal, -1);
   return (
     <Fig
       figRef={onScreen}
@@ -145,9 +148,9 @@ function MatVec() {
       caption={
         <>
           Top row: a vector, the first 8 of the 768 numbers for “<Tk s=" dog" />”. The grid: the top-left 8 × 8 corner of GPT-2's first
-          weight matrix. Ember cells are positive, blue negative, faint ones near zero. The highlighted row is being dot-producted
-          with the vector, one multiply-add at a time, and the result lands in the output column on the right. All real
-          numbers from GPT-2.
+          weight matrix (colour is sign, the one place ember and blue don't mean compute and memory). The highlighted row is
+          being dot-producted with the vector, one multiply-add at a time; the sum under the grid grows term by term and lands
+          in the output column. All real numbers from GPT-2.
         </>
       }
       tryit={
@@ -166,16 +169,27 @@ function MatVec() {
           multiply-adds: <b style={{ color: pal.fg }}>{fin ? 64 : step}</b> / 64
         </span>
       </div>
+      <div className="p0-legend lr-small">
+        <span>
+          <i style={{ background: posC }} />
+          positive
+        </span>
+        <span>
+          <i style={{ background: negC }} />
+          negative
+        </span>
+        <span style={{ color: pal.muted }}>faint = near zero</span>
+      </div>
       <div style={{ overflowX: "auto" }}>
-        <svg width={ox + N * (C + G) + 130} height={oy + N * (C + G) + 6} style={{ maxWidth: "100%" }} viewBox={`0 0 ${ox + N * (C + G) + 130} ${oy + N * (C + G) + 6}`}>
+        <svg width={ox + N * (C + G) + 130} height={oy + N * (C + G) + 6} style={{ maxWidth: "100%", display: "block", margin: "0 auto" }} viewBox={`0 0 ${ox + N * (C + G) + 130} ${oy + N * (C + G) + 6}`}>
           {/* x on top */}
-          <text x={ox} y={10} fontSize={10} fill={pal.muted}>
-            vector x (“␣dog”, first 8 of 768)
+          <text x={ox} y={11} fontSize={11.5} fill={pal.sub}>
+            vector x: “␣dog”, first 8 of its 768 numbers
           </text>
           {x.map((v, j) => (
             <g key={j}>
-              <rect x={ox + j * (C + G)} y={16} width={C} height={20} rx={3} fill={diverge(pal, v / xmax)} stroke={!fin && j === col ? pal.fg : "none"} strokeWidth={1.5} />
-              <text x={ox + j * (C + G) + C / 2} y={30} fontSize={8.5} textAnchor="middle" fill={pal.fg}>
+              <rect x={ox + j * (C + G)} y={18} width={C} height={22} rx={3} fill={diverge(pal, v / xmax)} stroke={!fin && j === col ? pal.fg : "none"} strokeWidth={1.5} />
+              <text x={ox + j * (C + G) + C / 2} y={33} fontSize={10} textAnchor="middle" fill={pal.fg}>
                 {v.toFixed(2)}
               </text>
             </g>
@@ -198,7 +212,7 @@ function MatVec() {
                     strokeWidth={2}
                   />
                   {(active || (i === row && !fin)) && (
-                    <text x={ox + j * (C + G) + C / 2} y={oy + i * (C + G) + C / 2 + 3} fontSize={8} textAnchor="middle" fill={pal.fg} opacity={doneCell || active ? 1 : 0.6}>
+                    <text x={ox + j * (C + G) + C / 2} y={oy + i * (C + G) + C / 2 + 4} fontSize={10} textAnchor="middle" fill={pal.fg} opacity={doneCell || active ? 1 : 0.6}>
                       {v.toFixed(2)}
                     </text>
                   )}
@@ -207,12 +221,12 @@ function MatVec() {
             }),
           )}
           {/* output column */}
-          <text x={ox + N * (C + G) + 18} y={oy - 6} fontSize={10} fill={pal.muted}>
+          <text x={ox + N * (C + G) + 18} y={oy - 6} fontSize={11.5} fill={pal.sub}>
             output
           </text>
           {y.map((o, i) => (
             <g key={i}>
-              <text x={ox + N * (C + G) + 4} y={oy + i * (C + G) + C / 2 + 4} fontSize={11} fill={pal.muted}>
+              <text x={ox + N * (C + G) + 4} y={oy + i * (C + G) + C / 2 + 4} fontSize={11} fill={pal.muted} opacity={o.started ? 1 : 0}>
                 =
               </text>
               <rect
@@ -225,7 +239,7 @@ function MatVec() {
                 opacity={o.done ? 0.9 : 0.45}
               />
               {o.started && (
-                <text x={ox + N * (C + G) + 84} y={oy + i * (C + G) + C / 2 + 4} fontSize={10} fill={pal.fg}>
+                <text x={ox + N * (C + G) + 84} y={oy + i * (C + G) + C / 2 + 4} fontSize={11} fill={pal.fg}>
                   {o.s.toFixed(3)}
                 </text>
               )}
@@ -233,6 +247,16 @@ function MatVec() {
           ))}
         </svg>
       </div>
+      <p className="lr-note lr-eq" aria-live="off">
+        row {eqRow + 1} · x ={" "}
+        {Array.from({ length: eqUpto }, (_, j) => (
+          <span key={j} style={{ color: !fin && j === eqUpto - 1 ? pal.fg : undefined, fontWeight: !fin && j === eqUpto - 1 ? 700 : undefined }}>
+            {j ? " + " : ""}
+            {W[eqRow][j].toFixed(2)}×{x[j].toFixed(2)}
+          </span>
+        ))}
+        {eqUpto < N ? " + …" : ""} = <b style={{ color: pal.fg }}>{W[eqRow].slice(0, eqUpto).reduce((a, v, j) => a + v * x[j], 0).toFixed(3)}</b>
+      </p>
     </Fig>
   );
 }
