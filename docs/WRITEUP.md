@@ -604,4 +604,14 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
 - **Viz:** logit bar chart: approximate (8-bit) bars in gray, rescored top candidates
   snapping to their exact values in color, with the margin as a dashed line below the max.
 
+### Stage 13: q8-attn (attention in registers)
+
+- **Change:** a hand-written attention kernel for 64-wide heads that keeps the query and
+  the output in NEON registers the whole time.
+- **Result:** decode **404 tok/s** at short context (+3%), **+6.5% at 512 tokens**.
+- **Aha:** at 600 tokens of context, attention is still 37% of the time, and it's not the
+  arithmetic, it's the memory layout. Each head's keys are scattered in 256-byte pieces,
+  and at 512 tokens the cache is 38 MB per token, more than a quarter of the (8-bit)
+  weights. The KV cache is now a weight you have to read.
+
 ## Open questions / things to verify before publishing

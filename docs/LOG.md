@@ -66,6 +66,7 @@ of the weights).
 | 10 q4_0 + f16 head | ~1215–1230 | ~240–263 | 28% of 918 | 1.05–1.1× vs q8 |
 | 11 q8-fast / q4-fast (low-latency pool) | ~1415 | **360 (q8, 6t) / 372 (q4, 4t)** per-token, interleaved | 52% of 693 / 41% of 918 | 1.04–1.15× |
 | 12 q8-rescore / q4-rescore | ~1400 | **394 (q8) / 480 (q4)**, 6 threads | 46% of 860 / 39% of 1237 | 1.13–1.17× |
+| 13 q8-attn (NEON attention) | ~1425 | **404** (ctx 64–128), 292 (ctx 512+) | 47% of 860 | 1.03× short / 1.065× long ctx |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -1789,3 +1790,38 @@ to 2e-3. Quality matches the f32-activation hack:
 (The two bench lines first recorded `threads: 1`: `Stage::multithreaded` was an
 explicit list that rustfmt had reflowed, so my edit missed it. Fixed by hand in
 results.jsonl, and the method is now "every stage after 4".)
+
+---
+
+## Stage 13: q8-attn / q4-attn (register-resident NEON attention)
+
+**Hypothesis.** Attention was ~15% of a short-context decode token (34 µs per
+layer) and grows with context. Stage 7's unit calls the generic 16-accumulator
+dot per key (a 16-lane tree reduction for 64 products) and re-loads / re-stores
+the output for every key. A head_dim-64 kernel can keep q in 16 NEON registers
+for the score pass (two keys per iteration, 8 accumulators) and the 64-float
+output in 16 registers for the value pass (16 independent FMA chains, one store).
+
+**What changed.** `kernels/attn_neon.rs` (`attend64` + the stage 11 unit split on
+the fast pool; other head sizes / non-aarch64 → stage 7's unit). Kernel set
+`AttnNeon`. Stages `q8-attn` / `q4-attn` = stage 12 + this. Test vs the reference
+attention for (n_q, pos0) ∈ {(1,0), (1,37), (3,10)}: max diff < 1e-5.
+
+**Numbers** (6 threads; interleaved A/B, per-token decode median):
+
+| context | q8-rescore | q8-attn |
+|---|---|---|
+| 64–112 | 389 | **401** (+3%) |
+| 512–560 | 275 | **293** (+6.5%), prefill 1295 → 1397 |
+
+Recorded (5 runs): prompt 64: **404.4 ± 14.8 tok/s** (per-token 407.3, 47% of the
+860 spec ceiling), prefill 1425. Prompt 512: 291.6 ± 7.7, prefill 1410.
+
+**Smaller than hoped, and the profile says why.** At 541–668 tokens of context,
+attention is still **37% of decode**, 109 µs per layer, moving only ~34 GB/s of
+K/V. The kernel isn't compute-bound anymore (~10 µs of FMAs per layer across 6
+threads). It's the **cache layout**: K/V are stored `[position][768]`, so one
+head's keys are 600 separate 256-byte pieces 3 KB apart. That's the strided
+multi-stream pattern stage 3 measured as bad for the prefetcher. And at this
+length the f32 cache is **38 MB per token** (2 × 12 × 512 × 768 × 4 B), 27% on
+top of the 139 MB of weights. Law 5 in action. Next: a head-major f16 cache.

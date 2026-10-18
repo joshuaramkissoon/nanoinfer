@@ -28,7 +28,7 @@ use crate::kernels::packed::SpinPar;
 use crate::kernels::q4::Q4Matrix;
 use crate::kernels::q8::Q8Matrix;
 use crate::kernels::q8hilo::Q8HiLoMatrix;
-use crate::kernels::{FastOps, Kernels, LowLat, Neon, Reference, Spin, Threaded, Tiled, Unrolled};
+use crate::kernels::{AttnNeon, FastOps, Kernels, LowLat, Neon, Reference, Spin, Threaded, Tiled, Unrolled};
 use crate::trace::{ForwardInfo, Phase, Trace};
 use crate::weights::Model;
 use std::fmt;
@@ -67,6 +67,10 @@ pub enum Stage {
     Q8Rescore,
     /// Stage 12b: stage 11 (Q4_0) with the rescored LM head.
     Q4Rescore,
+    /// Stage 13: stage 12 (Q8_0, rescored head) with register-resident NEON decode attention.
+    Q8Attn,
+    /// Stage 13b: stage 12b (Q4_0, rescored head) with NEON decode attention.
+    Q4Attn,
 }
 
 impl Stage {
@@ -86,6 +90,8 @@ impl Stage {
         Stage::Q4Fast,
         Stage::Q8Rescore,
         Stage::Q4Rescore,
+        Stage::Q8Attn,
+        Stage::Q4Attn,
     ];
 
     /// Name of the kernel set this stage runs.
@@ -105,6 +111,8 @@ impl Stage {
             Stage::Q4Fast => "lowlat + q4_0 (f16 head)",
             Stage::Q8Rescore => "lowlat + q8_0 (rescored head)",
             Stage::Q4Rescore => "lowlat + q4_0 (rescored head)",
+            Stage::Q8Attn => "attn-neon + q8_0 (rescored head)",
+            Stage::Q4Attn => "attn-neon + q4_0 (rescored head)",
         }
     }
 
@@ -125,6 +133,8 @@ impl Stage {
             Stage::Q4Fast => WeightFormat::Q4_0,
             Stage::Q8Rescore => WeightFormat::Q8_0,
             Stage::Q4Rescore => WeightFormat::Q4_0,
+            Stage::Q8Attn => WeightFormat::Q8_0,
+            Stage::Q4Attn => WeightFormat::Q4_0,
             _ => WeightFormat::F32,
         }
     }
@@ -132,7 +142,7 @@ impl Stage {
     /// Format of the tied LM head. Same as the blocks, except the integer
     /// stages, which keep it f16 (it is by far the most quantisation-sensitive matrix).
     pub fn head_format(self) -> WeightFormat {
-        if matches!(self, Stage::Q8Rescore | Stage::Q4Rescore) {
+        if matches!(self, Stage::Q8Rescore | Stage::Q4Rescore | Stage::Q8Attn | Stage::Q4Attn) {
             // Streamed bytes are the Q8 approximate head; rescoring reads ~256 f16 rows.
             return WeightFormat::Q8_0;
         }
@@ -168,6 +178,8 @@ impl Stage {
             Stage::Q4Fast => "q4-fast",
             Stage::Q8Rescore => "q8-rescore",
             Stage::Q4Rescore => "q4-rescore",
+            Stage::Q8Attn => "q8-attn",
+            Stage::Q4Attn => "q4-attn",
         }
     }
 }
@@ -318,8 +330,8 @@ enum PackedWeights {
 impl PackedWeights {
     fn for_stage(model: &Model, stage: Stage) -> Self {
         match stage {
-            Stage::Q8Rescore => return PackedWeights::Q8R(Box::new(packed::PackedModel::new(model))),
-            Stage::Q4Rescore => return PackedWeights::Q4R(Box::new(packed::PackedModel::new(model))),
+            Stage::Q8Rescore | Stage::Q8Attn => return PackedWeights::Q8R(Box::new(packed::PackedModel::new(model))),
+            Stage::Q4Rescore | Stage::Q4Attn => return PackedWeights::Q4R(Box::new(packed::PackedModel::new(model))),
             _ => {}
         }
         match stage.weight_format() {
@@ -502,6 +514,30 @@ impl Session {
             },
             Stage::Q4Rescore => match &self.packed {
                 PackedWeights::Q4R(p) => packed::forward::<LowLat, Q4Matrix, _, FastPar, T>(
+                    model,
+                    p,
+                    new_tokens,
+                    &mut self.kv,
+                    &mut self.acts,
+                    &mut self.scratch,
+                    trace,
+                ),
+                _ => unreachable!(),
+            },
+            Stage::Q8Attn => match &self.packed {
+                PackedWeights::Q8R(p) => packed::forward::<AttnNeon, Q8Matrix, _, FastPar, T>(
+                    model,
+                    p,
+                    new_tokens,
+                    &mut self.kv,
+                    &mut self.acts,
+                    &mut self.scratch,
+                    trace,
+                ),
+                _ => unreachable!(),
+            },
+            Stage::Q4Attn => match &self.packed {
+                PackedWeights::Q4R(p) => packed::forward::<AttnNeon, Q4Matrix, _, FastPar, T>(
                     model,
                     p,
                     new_tokens,
