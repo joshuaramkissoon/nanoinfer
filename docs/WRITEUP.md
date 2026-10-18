@@ -355,7 +355,7 @@ cross-origin isolation, built with nightly). Measured with the page's Ladder ben
 | **wasm-fma** (relaxed-SIMD FMA) | browser | 98–101 | **354–370** | n/a |
 | **wasm-threads** (10 workers) | browser | 87–89 | **809–818** | (threads: 118 / 1021) |
 | wasm-threads (4 workers) | browser | 91 | 661 | |
-| q4 (core, scalar dequant) | core | 106–125* | 150–198* | n/a yet |
+| q4 (core, scalar dequant) | core | 91–125* | 150–198* | n/a yet |
 | q8 (core, scalar dequant) | core | 36–39* | 168–199* | |
 | f16 (core, scalar convert) | core | 12–14* | 125–158* | |
 
@@ -386,7 +386,7 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
 - **Core's threaded stages can't thread in wasm.** Stage 6+ start OS threads (`std::thread::spawn`), which
   `wasm32-unknown-unknown` doesn't have, so the wasm builds never enable core's `threads` feature. Those stages run
   single-threaded and the page labels them "wasm: 1 thread"; the browser gets its own threaded rung instead.
-- **Quantised stages, unexpected order.** In wasm, q4 (106–125 tok/s) beats every f32 rung even with scalar
+- **Quantised stages, unexpected order.** In wasm, q4 (91–125 tok/s) roughly ties the best f32 rungs even with scalar
   dequant, q8 is slow (36) and f16 is slowest (12): f16→f32 is a bit-twiddling scalar conversion per weight (native
   uses NEON `fcvt`), while q4's nibble unpack is cheap integer work on a third of the bytes. Natively all three
   should be ordered by bytes; in a tab the decode cost of the format matters as much as its size. (q4 also changes

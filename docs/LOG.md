@@ -1312,7 +1312,7 @@ F32 and widens each half as it streams in, so core's loader is untouched and the
 
 Chrome, simd128 build, under load: q4 106 / 150, q8 36 / 168, f16 12.4 / 125 (decode / prefill). In wasm the
 format's decode cost dominates: f16→f32 is scalar bit-twiddling per weight (no NEON `fcvt`), q4's nibble unpack is
-cheap integer work on 0.56 bytes per weight. q4 is the fastest decode rung in the browser, and it also changes the
+cheap integer work on 0.56 bytes per weight. q4 ties or beats the f32 rungs in the browser (V8, round-robin: 91 vs 94–100), and it also changes the
 greedy text ("to read the right, the right, ...").
 
 ### Recorded fallback

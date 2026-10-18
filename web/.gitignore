@@ -4,3 +4,4 @@ src/engine/pkg/
 src/engine/pkg-*/
 screenshots/*.png
 !screenshots/README.md
+tsconfig.tsbuildinfo

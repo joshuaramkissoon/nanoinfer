@@ -169,13 +169,17 @@ if (!QUICK) {
   let bIds = Array.from(engine.encode(benchText));
   while (bIds.length < 64) bIds = bIds.concat(bIds);
   bIds = bIds.slice(0, 64);
-  // Same shape as the page's Ladder (64-token prompt, greedy). Median of the
-  // decode steps, best of two passes, so a noisy neighbour on the machine
-  // doesn't decide the number.
-  for (const st of stages) {
-    const gen = st.name === "naive" ? 4 : 16;
-    let best = { m: Infinity, pre: Infinity };
-    for (let pass = 0; pass < (st.name === "naive" ? 1 : 2); pass++) {
+  // Same shape as the page's Ladder (64-token prompt, greedy, median of the
+  // decode steps). Stages are measured round-robin, ROUNDS times, keeping each
+  // stage's best round: on a shared machine a busy neighbour only ever makes a
+  // round slower, and interleaving spreads that over every stage instead of
+  // whichever one happened to run during it.
+  const ROUNDS = Number(process.env.ROUNDS ?? 4);
+  const best = {};
+  for (let round = 0; round < ROUNDS; round++) {
+    for (const st of stages) {
+      if (st.name === "naive" && round > 0) continue;
+      const gen = st.name === "naive" ? 4 : 16;
       const slot = engine.open(st.name, 64 + gen + 1);
       for (let i = 0; i < 3; i++) fwd(slot, [bIds[i]]);
       engine.reset(slot);
@@ -183,32 +187,43 @@ if (!QUICK) {
       const ms = [];
       for (let i = 0; i < gen; i++) ms.push(fwd(slot, [engine.sample(slot, 0, 0)]).ms);
       engine.close(slot);
-      best = { m: Math.min(best.m, median(ms)), pre: Math.min(best.pre, pre.ms) };
+      const b = (best[st.name] ??= { m: Infinity, pre: Infinity, gen });
+      b.m = Math.min(b.m, median(ms));
+      b.pre = Math.min(b.pre, pre.ms);
     }
-    const m = best.m;
-    const pre = { ms: best.pre };
-    bench.ladder[st.name] = { tokS: 1000 / m, msPerTok: m, prefillTokS: (64 / pre.ms) * 1000, promptLen: 64, genTokens: gen };
-    console.log(`  ${st.name.padEnd(10)} ${(1000 / m).toFixed(1)} tok/s decode · ${((64 / pre.ms) * 1000).toFixed(0)} tok/s prefill`);
+  }
+  for (const st of stages) {
+    const { m, pre, gen } = best[st.name];
+    bench.ladder[st.name] = { tokS: 1000 / m, msPerTok: m, prefillTokS: (64 / pre) * 1000, promptLen: 64, genTokens: gen, rounds: ROUNDS };
+    console.log(`  ${st.name.padEnd(10)} ${(1000 / m).toFixed(1)} tok/s decode · ${((64 / pre) * 1000).toFixed(0)} tok/s prefill`);
   }
   // race: every stage on the same prompt, greedy, up to 40 tokens or 6 s of its own engine time
   const RACE_PROMPT = "The fastest way to read a book is";
   const rp = Array.from(engine.encode(RACE_PROMPT));
   const lanes = [];
+  // each lane raced twice; keep the faster run (same tokens, less contention)
   for (const st of stages) {
-    const slot = engine.open(st.name, rp.length + 41);
-    fwd(slot, rp);
-    const lane = { stage: st.name, tokens: [], ms: [] };
-    let used = 0;
-    while (lane.tokens.length < 40 && used < 6000) {
-      const id = engine.sample(slot, 0, 0);
-      const f = fwd(slot, [id]);
-      lane.tokens.push(id);
-      lane.ms.push(+f.ms.toFixed(3));
-      used += f.ms;
+    let keep = null;
+    for (let tryN = 0; tryN < 2; tryN++) {
+      const slot = engine.open(st.name, rp.length + 41);
+      fwd(slot, rp);
+      const lane = { stage: st.name, tokens: [], ms: [] };
+      let used = 0;
+      while (lane.tokens.length < 40 && used < 6000) {
+        const id = engine.sample(slot, 0, 0);
+        const f = fwd(slot, [id]);
+        lane.tokens.push(id);
+        lane.ms.push(+f.ms.toFixed(3));
+        used += f.ms;
+      }
+      engine.close(slot);
+      lane.used = used;
+      if (!keep || lane.tokens.length > keep.tokens.length || (lane.tokens.length === keep.tokens.length && used < keep.used)) keep = lane;
+      if (st.name === "naive") break;
     }
-    engine.close(slot);
-    lanes.push(lane);
-    console.log(`  race ${st.name.padEnd(10)} ${lane.tokens.length} tok in ${used.toFixed(0)} ms`);
+    delete keep.used;
+    lanes.push(keep);
+    console.log(`  race ${st.name.padEnd(10)} ${keep.tokens.length} tok in ${keep.ms.reduce((a, b) => a + b, 0).toFixed(0)} ms`);
   }
   bench.race = { prompt: rp, text: RACE_PROMPT, lanes };
 } else if (fs.existsSync(path.join(OUT, "bench.json"))) {
