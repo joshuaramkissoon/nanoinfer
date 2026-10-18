@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Tk } from "../ui/Tok";
-import { claim, engine, release, showToken, tokenText, useEngine } from "../engine/client";
+import { claim, engine, isGpu, release, showToken, tokenText, useEngine } from "../engine/client";
 import { NeedsEngine, Tip, fitCanvas, useFigureSource, useInView, useWidth } from "../ui/Figure";
 import { css, heatAt, heatLut, rgb, usePalette, type Palette } from "../ui/theme";
 import { fmtMs } from "../lib/fmt";
 
 const MAX_T = 64;
+
+/** Who holds the engine, in words, for the waiting state. */
+const BUSY: Record<string, string> = {
+  hero: "fig 1 is generating",
+  walk: "fig 2 is measuring a step",
+  lens: "fig 3 is running the logit lens",
+  race: "the KV race in fig 7 is running",
+  "gpu-probe": "measuring the GPU's bandwidth",
+};
 
 /** Draw one head's T×T causal attention matrix into a canvas, pixel per cell. */
 function paint(c: HTMLCanvasElement, maps: Float32Array, idx: number, T: number, pal: Palette, q: number | null) {
@@ -40,7 +49,7 @@ function paint(c: HTMLCanvasElement, maps: Float32Array, idx: number, T: number,
   ctx.putImageData(img, 0, 0);
 }
 
-/** 12 layers × 12 heads of real attention on the text from fig. 1. */
+/** 12 layers × 12 heads of real attention on the text from fig 1. */
 export default function Attention() {
   const status = useEngine((s) => s.status);
   const run = useEngine((s) => s.run);
@@ -52,6 +61,7 @@ export default function Attention() {
   const [sel, setSel] = useState<[number, number]>([5, 1]);
   const [q, setQ] = useState<number | null>(null);
   const [computing, setComputing] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const cells = useRef<(HTMLCanvasElement | null)[]>([]);
   const big = useRef<HTMLCanvasElement>(null);
   const [bigRef, bw] = useWidth<HTMLDivElement>();
@@ -65,6 +75,7 @@ export default function Attention() {
   const compute = async () => {
     if (!source || !claim("attention")) return;
     setComputing(true);
+    setErr(null);
     try {
       const t0 = performance.now();
       const maps = await engine.attention(source);
@@ -79,6 +90,8 @@ export default function Attention() {
         if (sc > bestScore) [best, bestScore] = [hIdx, sc];
       }
       setSel([Math.floor(best / Hh), best % Hh]);
+    } catch (e) {
+      setErr((e as Error).message || "unknown error");
     } finally {
       setComputing(false);
       release("attention");
@@ -87,7 +100,7 @@ export default function Attention() {
 
   // Compute automatically once the figure is on screen and a run has finished.
   useEffect(() => {
-    if (ready && inView && source && !busy && !computing && (!data || data.tokens.join() !== source.join())) void compute();
+    if (ready && inView && source && !busy && !computing && !err && (!data || data.tokens.join() !== source.join())) void compute();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inView, source, busy]);
 
@@ -178,36 +191,52 @@ export default function Attention() {
   return (
     <div ref={viewRef}>
       {!shown ? (
-        <div className="nv-empty">{computing ? "running an analysis pass over the text…" : source ? "waiting for the engine…" : "Generate text in fig. 1 first; this figure analyses it."}</div>
+        <div className="nv-empty">
+          {computing ? (
+            "running an analysis pass over the text…"
+          ) : !source ? (
+            "Generate text in fig 1 first; this figure analyses it."
+          ) : err ? (
+            <>
+              The analysis pass failed ({err}).{" "}
+              <button className="nv-btn" onClick={() => { setErr(null); void compute(); }} disabled={!!busy}>Try again</button>
+            </>
+          ) : busy ? (
+            `The engine is busy (${BUSY[busy] ?? (busy.startsWith("bench:") ? "the ladder in fig 8 is benchmarking" : busy)}); the heads are computed as soon as it's free.`
+          ) : (
+            <button className="nv-btn" onClick={() => void compute()}>Analyse the text from fig 1</button>
+          )}
+        </div>
       ) : (
         <div className="nv-attn">
           <div>
             <div className="nv-heads">
               <span />
               {Array.from({ length: Hh }, (_, h) => (
-                <span key={h} className="lab">h{h}</span>
+                <span key={h} className="lab">h{h + 1}</span>
               ))}
               {Array.from({ length: L }, (_, l) => [
-                <span key={`l${l}`} className="lab" style={{ paddingRight: 4 }}>L{l}</span>,
+                <span key={`l${l}`} className="lab" style={{ paddingRight: 4 }}>L{l + 1}</span>,
                 ...Array.from({ length: Hh }, (_, h) => (
                   <canvas
                     key={`${l}-${h}`}
                     ref={(el) => (cells.current[l * Hh + h] = el)}
                     className={sel[0] === l && sel[1] === h ? "on" : ""}
                     onClick={() => setSel([l, h])}
-                    title={`layer ${l}, head ${h}`}
-                    aria-label={`layer ${l} head ${h}`}
+                    title={`layer ${l + 1}, head ${h + 1}`}
+                    aria-label={`layer ${l + 1} head ${h + 1}`}
                   />
                 )),
               ])}
             </div>
             <div className="nv-muted" style={{ fontSize: "0.7rem", marginTop: "0.6rem" }}>
-              {L * Hh} heads × {T}×{T} · one analysis pass in {fmtMs(shown.ms)} · rows = query token, columns = the tokens it reads · colour = attention vs. spreading evenly · click a head
+              {L * Hh} heads × {T}×{T} · one analysis pass in {fmtMs(shown.ms)}
+              {data && run && isGpu(run.stage) ? " on the CPU engine (the WebGPU stages don't capture attention)" : ""} · rows = query token, columns = the tokens it reads · colour = attention vs. spreading evenly · click a head
             </div>
           </div>
           <div>
             <div style={{ fontSize: "0.78rem", marginBottom: "0.5rem" }}>
-              <b>layer {sel[0]}, head {sel[1]}</b>
+              <b>layer {sel[0] + 1}, head {sel[1] + 1}</b>
               <span className="nv-muted"> · query “<Tk id={shown.tokens[qi]} />” at {qi} looks most at </span>
               {topOf(qi).map((t, k) => (
                 <span key={k} className="nv-chip" style={{ marginRight: 4 }}>

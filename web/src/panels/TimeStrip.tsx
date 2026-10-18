@@ -78,7 +78,7 @@ export default function TimeStrip() {
   const { rows, totalMs } = useMemo(() => aggregateByName(all), [all]);
   const kinds = useMemo(() => [...new Set(fwds.flatMap((f) => f.ops.map((o) => o.kind)))], [fwds]);
 
-  if (!all.length) return <NeedsEngine>Generate some text in fig. 1 and every op of every token appears here.</NeedsEngine>;
+  if (!all.length) return <NeedsEngine>Generate some text in fig 1 and every op of every token appears here.</NeedsEngine>;
 
   const lm = rows.find((r) => r.kind === "lm_head");
   return (
@@ -101,7 +101,7 @@ export default function TimeStrip() {
         {hover && (
           <Tip x={Math.min(Math.max(hover.x, 120), w - 120)} y={hover.y}>
             <b>{hover.op.name}</b>
-            {hover.op.layer >= 0 ? ` · layer ${hover.op.layer}` : ""} · {fmtMs(hover.op.dur)} ({pct(hover.op.dur / hover.f.ms, 1)})
+            {hover.op.layer >= 0 ? ` · layer ${hover.op.layer + 1}` : ""} · {fmtMs(hover.op.dur)} ({pct(hover.op.dur / hover.f.ms, 1)})
             <br />[{hover.op.dims.filter((d, i) => d || i < 2).join("×")}] · {sig(hover.op.flops / hover.op.dur / 1e6, 3)} GFLOP/s ·{" "}
             {sig(hover.op.bytes / hover.op.dur / 1e6, 3)} GB/s
           </Tip>

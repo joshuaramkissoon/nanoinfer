@@ -136,7 +136,7 @@ function Walk({ walk, tokens }: { walk: WalkData; tokens: number[] }) {
       body: (
         <>
           <p>
-            Layer 0 normalises the vector, then one matmul turns it into a query, a key and a value ({qkv0 ? `${qkv0.dims[1]}→${qkv0.dims[2]}` : "768→2304"},{" "}
+            Layer 1 normalises the vector, then one matmul turns it into a query, a key and a value ({qkv0 ? `${qkv0.dims[1]}→${qkv0.dims[2]}` : "768→2304"},{" "}
             {qkv0 ? fmtBytes(qkv0.bytes) : ""} of weights). The key and value go into the KV cache for later tokens.
           </p>
           <p>
@@ -172,12 +172,12 @@ function Walk({ walk, tokens }: { walk: WalkData; tokens: number[] }) {
       body: (
         <>
           <p>
-            The same eleven ops repeat in layers 1 to 11, each with its own weights. Watch the barcode: it's the real residual
+            The same 11 operations repeat in layers 2 to 12, each with its own weights. Watch the barcode: it's the real residual
             stream after each layer. It grows, and a handful of dimensions get huge. GPT-2 is known for these "massive
             activations".
           </p>
           <p>
-            The line under it is the <b>logit lens</b> (fig. 3): what the model would say if it stopped at this depth. Early
+            The line under it is the <b>logit lens</b> (fig 3): what the model would say if it stopped at this depth. Early
             layers guess common words; the real answer usually only firms up in the last few layers.
           </p>
         </>
@@ -285,7 +285,7 @@ function Walk({ walk, tokens }: { walk: WalkData; tokens: number[] }) {
           <div className="nv-walk-op">
             {cursor < N - 0.001 ? (
               <>
-                <span style={{ color: kindColor(pal, cur.kind) }}>■</span> {cur.layer >= 0 ? `layer ${cur.layer} · ` : ""}
+                <span style={{ color: kindColor(pal, cur.kind) }}>■</span> {cur.layer >= 0 ? `layer ${cur.layer + 1} · ` : ""}
                 <b>{cur.name}</b> · {fmtT(cur.dur)} · {fmtBytes(cur.bytes)} · {short(cur.flops)} FLOP ·{" "}
                 {cur.dur > 0 ? `${sig(cur.bytes / cur.dur / 1e6, 2)} GB/s` : ""}
               </>
@@ -357,7 +357,7 @@ function Lanes({ ops, cursor, reduced }: { ops: OpRec[]; cursor: number; reduced
     const out: { label: string; ops: { o: OpRec; i: number }[] }[] = [];
     let curLabel = "";
     ops.forEach((o, i) => {
-      const label = o.layer >= 0 ? `L${o.layer}` : out.length === 0 ? "embed" : "head";
+      const label = o.layer >= 0 ? `L${o.layer + 1}` : out.length === 0 ? "embed" : "head";
       if (label !== curLabel) {
         out.push({ label, ops: [] });
         curLabel = label;

@@ -132,7 +132,7 @@ export default function ByteBudget() {
               {r.w > 64 && r.h > 30 && (
                 <text x={r.x + 7} y={r.y + 16} style={{ fill: pal.bg, fontSize: 11, fontWeight: 700 }}>
                   {r.name}
-                  {r.layer >= 0 ? ` · L${r.layer}` : ""}
+                  {r.layer >= 0 ? ` · L${r.layer + 1}` : ""}
                 </text>
               )}
               {r.w > 64 && r.h > 46 && (
@@ -146,7 +146,7 @@ export default function ByteBudget() {
         {hover && (
           <Tip x={Math.min(Math.max(hover.x + hover.w / 2, 110), w - 110)} y={hover.y + 8}>
             <b>{hover.name}</b>
-            {hover.layer >= 0 ? ` · layer ${hover.layer}` : ""} · {fmtBytes(hover.bytes)} ({pct(hover.bytes / total, 1)})
+            {hover.layer >= 0 ? ` · layer ${hover.layer + 1}` : ""} · {fmtBytes(hover.bytes)} ({pct(hover.bytes / total, 1)})
           </Tip>
         )}
       </div>
