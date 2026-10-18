@@ -65,5 +65,6 @@ pub fn init(threads: usize, q: Qos) -> usize {
         .expect("rayon pool already initialised");
     let n = rayon::current_num_threads();
     nanoinfer_core::pool::init(n, set_global_qos);
+    nanoinfer_core::fastpool::init(n, set_global_qos);
     n
 }

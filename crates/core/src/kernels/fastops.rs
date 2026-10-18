@@ -69,7 +69,7 @@ fn gelu1(u: f32) -> f32 {
     0.5 * u * (1.0 + tanh(SQRT_2_OVER_PI * (u + 0.044715 * u * u * u)))
 }
 
-fn gelu_serial(x: &mut [f32]) {
+pub(crate) fn gelu_serial(x: &mut [f32]) {
     for v in x.iter_mut() {
         *v = gelu1(*v);
     }
@@ -127,7 +127,16 @@ fn sum(x: &[f32]) -> f32 {
 /// softmax, weighted sum of values into `out` (`head_dim` floats).
 #[inline]
 #[allow(clippy::too_many_arguments)]
-fn attend_one(out: &mut [f32], q: &[f32], k: Rows, v: Rows, h: usize, hd: usize, n_kv: usize, scores: &mut [f32]) {
+pub(crate) fn attend_one(
+    out: &mut [f32],
+    q: &[f32],
+    k: Rows,
+    v: Rows,
+    h: usize,
+    hd: usize,
+    n_kv: usize,
+    scores: &mut [f32],
+) {
     let scale = 1.0 / (hd as f32).sqrt();
     let s = &mut scores[..n_kv];
     let mut max = f32::NEG_INFINITY;

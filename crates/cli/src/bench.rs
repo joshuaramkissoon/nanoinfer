@@ -130,13 +130,15 @@ pub fn prefer_performance_cores() {
 #[cfg(not(target_os = "macos"))]
 pub fn prefer_performance_cores() {}
 
-/// One timed run: (prefill seconds, decode seconds).
-fn time_run<T: Trace>(
+/// One timed run: (prefill seconds, decode seconds), pushing each decode
+/// step's duration onto `steps`.
+fn time_run_steps<T: Trace>(
     model: &Model,
     stage: Stage,
     prompt: &[u32],
     tokens: usize,
     trace: &mut T,
+    steps: &mut Vec<f64>,
 ) -> nanoinfer_core::Result<(f64, f64)> {
     let mut s = Session::new(model, stage);
     let t = Instant::now();
@@ -144,7 +146,9 @@ fn time_run<T: Trace>(
     let t_prefill = t.elapsed().as_secs_f64();
     let t = Instant::now();
     for _ in 0..tokens {
+        let ts = Instant::now();
         next = sampler::argmax(s.step(model, &[next], trace)?);
+        steps.push(ts.elapsed().as_secs_f64());
     }
     Ok((t_prefill, t.elapsed().as_secs_f64()))
 }
@@ -198,14 +202,19 @@ pub fn run(
 
     let mut prefill = Vec::new();
     let mut decode = Vec::new();
+    let mut steps = Vec::new();
     for run in 0..a.warmup + a.runs {
+        let mut run_steps = Vec::new();
         let (t_prefill, t_decode) = if a.with_trace {
             let start = Instant::now();
             let mut rec = Recorder::new(move || start.elapsed().as_secs_f64());
-            time_run(&model, a.stage, &prompt, a.tokens, &mut rec)?
+            time_run_steps(&model, a.stage, &prompt, a.tokens, &mut rec, &mut run_steps)?
         } else {
-            time_run(&model, a.stage, &prompt, a.tokens, &mut NoTrace)?
+            time_run_steps(&model, a.stage, &prompt, a.tokens, &mut NoTrace, &mut run_steps)?
         };
+        if run >= a.warmup {
+            steps.extend(run_steps);
+        }
         let (p, d) = (a.prompt_len as f64 / t_prefill, a.tokens as f64 / t_decode);
         let label = if run < a.warmup { "warmup" } else { "run" };
         eprintln!("  {label:<6} prefill {p:>9.2} tok/s   decode {d:>8.3} tok/s");
@@ -216,6 +225,9 @@ pub fn run(
     }
 
     let (pm, ps, dm, ds) = (median(&prefill), stddev(&prefill), median(&decode), stddev(&decode));
+    // Median single-step time over every timed token: robust to the preemption
+    // spikes a busy machine adds to whole-run totals.
+    let step_tok_s = 1.0 / median(&steps);
     let decode_gbs = dm * weight_bytes / 1e9;
     let prefill_gflops = pm * prefill_flops / 1e9;
     let decode_gflops = dm * decode_flops / 1e9;
@@ -231,6 +243,11 @@ pub fn run(
         decode_gflops,
         100.0 * dm / ceiling,
         ceiling
+    );
+    println!(
+        "  per-token median: {step_tok_s:.1} tok/s ({:.1} GB/s, {:.1}% of ceiling)",
+        step_tok_s * weight_bytes / 1e9,
+        100.0 * step_tok_s / ceiling
     );
 
     if !a.no_record {
@@ -252,6 +269,7 @@ pub fn run(
             "decode_tok_s_std": ds,
             "decode_ceiling_tok_s": ceiling,
             "decode_gbs": decode_gbs,
+            "decode_step_median_tok_s": step_tok_s,
             "decode_gflops": decode_gflops,
             "prefill_gflops": prefill_gflops,
             "pct_of_ceiling": 100.0 * dm / ceiling,

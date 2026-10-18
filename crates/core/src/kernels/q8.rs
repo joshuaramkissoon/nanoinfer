@@ -15,7 +15,7 @@
 //! Prefill dequantises 4-row panels to f32 and uses the FMA tile (see
 //! [`super::packed`]): x stays f32 there.
 
-use super::packed::{par_cols, prefill_cols, PackedMatrix, Par, Scratch};
+use super::packed::{par_cols, par_cols_n, prefill_cols, PackedMatrix, Par, Scratch};
 use super::tiled::OutPtr;
 use crate::quant::{quantize_q8, quantize_rows_q8, BlockQ8, QK};
 use crate::stages::WeightFormat;
@@ -133,7 +133,7 @@ impl PackedMatrix for Q8Matrix {
             });
         } else {
             // Safety: columns b..e are disjoint per chunk.
-            par_cols::<P>(d_out, &|b, e| unsafe {
+            par_cols_n::<P>(d_out, n, &|b, e| unsafe {
                 prefill_cols(ptr, x, bias, n, d_in, d_out, b, e, &|o, dst| dequant_row(row(o), dst))
             });
         }

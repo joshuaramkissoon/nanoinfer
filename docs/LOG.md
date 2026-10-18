@@ -64,6 +64,7 @@ of the weights).
 | 8 f16 weights (4–10 threads) | ~1240–1320 | ~180 (4t) | 37% of 485 / 74% of 243 | 1.5× decode |
 | 9 q8_0 + f16 head | ~1240–1330 | ~230–240 | 34% of 693 | 1.3× decode vs f16 |
 | 10 q4_0 + f16 head | ~1215–1230 | ~240–263 | 28% of 918 | 1.05–1.1× vs q8 |
+| 11 q8-fast / q4-fast (low-latency pool) | ~1415 | **360 (q8, 6t) / 372 (q4, 4t)** per-token, interleaved | 52% of 693 / 41% of 918 | 1.04–1.15× |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -1579,3 +1580,71 @@ of its 918 tok/s spec ceiling.
 
 So stages 8–10 cut the bytes 3.8× (495 → 131 MB) and decode only rose 2× (~120 →
 ~250). The remaining gap is fixed per-token overhead.
+
+---
+
+## Stage 11: q8-fast / q4-fast (low-latency pool)
+
+**Hypothesis.** After stage 10, ~2.5 ms of a ~4 ms token is fixed cost. Two
+measured pieces: (1) dispatch, where an *empty* 40-chunk job on stage 6's pool
+costs 8.6 µs p50 / 48 µs p99, × 49 matmuls; (2) attention, single-threaded at short
+context (stage 7's parallel threshold), ~0.5 ms per token. Make both cheaper and
+the same weights should decode noticeably faster, bit-identical.
+
+**What changed.**
+- `core/src/fastpool.rs`, a new pool (stage 6's stays as measured). Chunk claim =
+  one `fetch_add` on the packed `epoch|n|next` word (no CAS retry loop; a claim
+  past the end is harmless). Completions are counted per *thread* (one add when
+  it runs dry), not per chunk. The two hot atomics sit on separate 128-byte lines.
+  The claim is still safe against stale workers: a claimed chunk's job can't
+  finish until that chunk is counted, so the job pointer read *after* a
+  successful claim is that job's. Test: 5000 random dispatches, each chunk exactly
+  once, plus 4 concurrent dispatchers.
+- Microbenchmark (empty jobs, p50 / p99): 10 threads × 40 chunks **8.25 / 55 µs →
+  2.62 / 5.9 µs**; × 10 chunks 1.71 / 9.2 → 0.88 / 7.6 µs.
+- `kernels/lowlat.rs`: `FastPar` (the packed matmuls' runtime is now a type
+  parameter `P: Par`, so stages 8–10 keep stage 6's pool) and a `LowLat` kernel
+  set whose attention runs (query, head) units on the fast pool whenever there's
+  more than one thread (decode: 12 heads), and GELU in parallel above 16K elements.
+- Stages `q8-fast` and `q4-fast`: the stage 9 / 10 weights on this runtime.
+- **Bug found on the way:** `cargo test` hung. Unit tests run on parallel threads,
+  and several now dispatch on the global pools at once, which the one-dispatcher
+  protocol doesn't allow. Both pools now take a `try_lock` dispatch mutex, and a
+  concurrent caller runs its job serially (separate commit; it changes nothing on
+  the single-dispatcher path stage 6 was measured on).
+
+**Tuning that didn't pan out.** Fewer, bigger chunks, since claims were cheaper
+now. Decode chunks/thread at 6 threads: 1 → 227, 2 → 269, 3 → 280, 4 → 282, 6 → 290
+tok/s. At 10 threads: 223 / 250 / 244 / 226 / 240. Fewer chunks make E-core
+stragglers worse than the claims save. Kept 4.
+
+**Measurement method change.** The machine's load drifted by ±20% over minutes
+(Spotlight at 100–340% CPU, Backdrop ~200%), so whole-run medians of separate
+benches weren't comparable. Two changes: bench now also reports the **median
+per-token step time** over all timed tokens (robust to preemption spikes,
+`decode_step_median_tok_s` in results.jsonl), and A/B comparisons use an
+interleaving script (alternating 2-run benches of each stage, 5–6 rounds,
+median of the per-token metric).
+
+**Numbers** (interleaved A/B, per-token decode median, tok/s):
+
+| threads | q8 | **q8-fast** | q4 | **q4-fast** |
+|---|---|---|---|---|
+| 4 | 299 | **335** (+12%) | 348 | **372** (+7%) |
+| 6 | 313 | **360** (+15%) | | |
+| 10 | 267 | 278 (+4%) | | |
+
+Prefill unchanged (1415 vs 1416 at 6t). Recorded runs (6 threads, 7 runs):
+q8-fast 292.6 ± 16.6 tok/s (per-token 288.5), q4-fast 338.4 ± 5.2 (per-token
+338.8), prefill 1430 / 1381. Output bit-identical to stage 9 (ppl tool: KL 0,
+max |Δlogit| 0).
+
+**Where a token goes now** (q8-fast, 4 threads, 256 tokens, ~296 tok/s, `generate
+--profile`): lm_head **1.03 ms (30%, f16, 75 GB/s)**, fc_proj 17%, fc 16%,
+**attention 15%** (42 µs per layer at context 64–320: it streams f32 K/V), qkv 13%,
+attn_proj 5%. The LM head is now the single biggest cost.
+
+**Lessons.** E-cores still hurt decode: the best thread count is 4–6, not 10
+(membw: 92 GB/s on 4 threads vs 98 on 10, so the E-cores add almost no bandwidth,
+and every join waits for the slowest). Performance work on a shared machine needs
+an A/B harness, not two benchmarks run five minutes apart.

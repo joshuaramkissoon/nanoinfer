@@ -26,6 +26,7 @@
 
 pub mod f16;
 pub mod fastops;
+pub mod lowlat;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 pub mod packed;
@@ -187,5 +188,36 @@ impl Kernels for FastOps {
         scores: &mut [f32],
     ) {
         fastops::attention(out, q, k, v, n_q, q_pos0, n_head, head_dim, scores)
+    }
+}
+
+/// Stage 11: stage 7's non-matmul ops on the low-latency pool, attention
+/// parallel over heads at any context (matmuls go through packed `FastPar`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LowLat;
+
+impl Kernels for LowLat {
+    const NAME: &'static str = "lowlat";
+    fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: usize, d_in: usize, d_out: usize) {
+        spin::matmul(out, x, w, bias, n, d_in, d_out)
+    }
+    fn layernorm(out: &mut [f32], x: &[f32], weight: &[f32], bias: &[f32], n: usize, d: usize, eps: f32) {
+        fastops::layernorm(out, x, weight, bias, n, d, eps)
+    }
+    fn gelu(x: &mut [f32]) {
+        lowlat::gelu(x)
+    }
+    fn attention(
+        out: &mut [f32],
+        q: Rows,
+        k: Rows,
+        v: Rows,
+        n_q: usize,
+        q_pos0: usize,
+        n_head: usize,
+        head_dim: usize,
+        scores: &mut [f32],
+    ) {
+        lowlat::attention(out, q, k, v, n_q, q_pos0, n_head, head_dim, scores)
     }
 }

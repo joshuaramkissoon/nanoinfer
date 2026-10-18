@@ -545,4 +545,21 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
   ~4 ms token) doesn't shrink with the weights. We cut the bytes 3.8× since f32 and decode
   only doubled. The next win isn't smaller numbers, it's less waiting.
 
+### Stage 11: q8-fast (stop paying for coordination)
+
+- **Hypothesis:** a decode token is now mostly *overhead*: ~49 thread dispatches at up to
+  8 µs each, plus attention running on one core.
+- **Change:** a second thread pool, where claiming work is one atomic add (not a
+  compare-and-swap loop) and threads report completion once each, not per chunk.
+  Attention split across cores even for short contexts. Same weights, same answers,
+  bit for bit.
+- **Result:** empty dispatch 8.3 → 2.6 µs. Decode **+4–15%**: Q8 **360 tok/s** at 6 threads,
+  Q4 **372** at 4.
+- **Aha:** the best thread count for decode is 4–6, not 10. The efficiency cores add almost
+  no memory bandwidth, and every step waits for the slowest thread.
+- **Aha 2 (method):** the machine's background load drifted ±20% within minutes, so this
+  stage was measured A/B interleaved. Benchmarks taken five minutes apart were lying to us.
+- **Viz:** per-op flame strip of one token at stage 10 vs 11, with the LM head now the
+  widest bar.
+
 ## Open questions / things to verify before publishing

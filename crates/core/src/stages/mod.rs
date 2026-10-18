@@ -23,10 +23,11 @@ pub mod packed;
 
 use crate::error::{Error, Result};
 use crate::kernels::f16::F16Matrix;
+use crate::kernels::lowlat::FastPar;
 use crate::kernels::packed::SpinPar;
 use crate::kernels::q4::Q4Matrix;
 use crate::kernels::q8::Q8Matrix;
-use crate::kernels::{FastOps, Kernels, Neon, Reference, Spin, Threaded, Tiled, Unrolled};
+use crate::kernels::{FastOps, Kernels, LowLat, Neon, Reference, Spin, Threaded, Tiled, Unrolled};
 use crate::trace::{ForwardInfo, Phase, Trace};
 use crate::weights::Model;
 use std::fmt;
@@ -57,6 +58,10 @@ pub enum Stage {
     Q8,
     /// Stage 10: stage 7 with Q4_0 weights (4-bit blocks of 32), unpacked to int8 for sdot.
     Q4,
+    /// Stage 11: stage 9 (Q8_0, f16 head) on the low-latency pool, attention parallel at any context.
+    Q8Fast,
+    /// Stage 11b: stage 10 (Q4_0, f16 head) on the low-latency pool.
+    Q4Fast,
 }
 
 impl Stage {
@@ -72,6 +77,8 @@ impl Stage {
         Stage::F16,
         Stage::Q8,
         Stage::Q4,
+        Stage::Q8Fast,
+        Stage::Q4Fast,
     ];
 
     /// Name of the kernel set this stage runs.
@@ -87,13 +94,25 @@ impl Stage {
             Stage::F16 => "fast-ops + f16",
             Stage::Q8 => "fast-ops + q8_0 (f16 head)",
             Stage::Q4 => "fast-ops + q4_0 (f16 head)",
+            Stage::Q8Fast => "lowlat + q8_0 (f16 head)",
+            Stage::Q4Fast => "lowlat + q4_0 (f16 head)",
         }
     }
 
     /// Whether this stage's kernels use more than one thread (with the
     /// `threads` feature; the thread count is the global rayon pool's).
     pub fn multithreaded(self) -> bool {
-        matches!(self, Stage::Threads | Stage::SpinPool | Stage::FastOps | Stage::F16 | Stage::Q8 | Stage::Q4)
+        matches!(
+            self,
+            Stage::Threads
+                | Stage::SpinPool
+                | Stage::FastOps
+                | Stage::F16
+                | Stage::Q8
+                | Stage::Q4
+                | Stage::Q8Fast
+                | Stage::Q4Fast
+        )
     }
 
     /// How this stage stores weight matrices (sets its decode ceiling).
@@ -102,6 +121,8 @@ impl Stage {
             Stage::F16 => WeightFormat::F16,
             Stage::Q8 => WeightFormat::Q8_0,
             Stage::Q4 => WeightFormat::Q4_0,
+            Stage::Q8Fast => WeightFormat::Q8_0,
+            Stage::Q4Fast => WeightFormat::Q4_0,
             _ => WeightFormat::F32,
         }
     }
@@ -137,6 +158,8 @@ impl Stage {
             Stage::F16 => "f16",
             Stage::Q8 => "q8",
             Stage::Q4 => "q4",
+            Stage::Q8Fast => "q8-fast",
+            Stage::Q4Fast => "q4-fast",
         }
     }
 }
@@ -414,6 +437,30 @@ impl Session {
             },
             Stage::Q4 => match &self.packed {
                 PackedWeights::Q4(p) => packed::forward::<FastOps, Q4Matrix, _, SpinPar, T>(
+                    model,
+                    p,
+                    new_tokens,
+                    &mut self.kv,
+                    &mut self.acts,
+                    &mut self.scratch,
+                    trace,
+                ),
+                _ => unreachable!(),
+            },
+            Stage::Q8Fast => match &self.packed {
+                PackedWeights::Q8(p) => packed::forward::<LowLat, Q8Matrix, _, FastPar, T>(
+                    model,
+                    p,
+                    new_tokens,
+                    &mut self.kv,
+                    &mut self.acts,
+                    &mut self.scratch,
+                    trace,
+                ),
+                _ => unreachable!(),
+            },
+            Stage::Q4Fast => match &self.packed {
+                PackedWeights::Q4(p) => packed::forward::<LowLat, Q4Matrix, _, FastPar, T>(
                     model,
                     p,
                     new_tokens,

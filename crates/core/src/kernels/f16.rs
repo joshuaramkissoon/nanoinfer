@@ -10,7 +10,7 @@
 //! unstable, so the conversion is two lines of inline assembly, which is stable
 //! on aarch64. Elsewhere (wasm) a scalar bit-twiddling conversion is used.
 
-use super::packed::{par_cols, prefill_cols, PackedMatrix, Par, Scratch};
+use super::packed::{par_cols, par_cols_n, prefill_cols, PackedMatrix, Par, Scratch};
 use super::tiled::OutPtr;
 use crate::quant::{f16_to_f32, f32_to_f16};
 use crate::stages::WeightFormat;
@@ -138,7 +138,7 @@ impl PackedMatrix for F16Matrix {
             });
         } else {
             // Safety: columns b..e are disjoint per chunk.
-            par_cols::<P>(d_out, &|b, e| unsafe {
+            par_cols_n::<P>(d_out, n, &|b, e| unsafe {
                 prefill_cols(ptr, x, bias, n, d_in, d_out, b, e, &|o, dst| widen_row(row(o), dst))
             });
         }

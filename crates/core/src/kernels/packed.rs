@@ -48,6 +48,10 @@ pub trait PackedMatrix: Send + Sync + Sized {
 pub trait Par {
     /// Column chunks per thread (more = better P/E balance, more overhead).
     const CHUNKS_PER_THREAD: usize;
+    /// Chunks per thread for a matmul over `n` rows (default: the constant).
+    fn chunks_per_thread(_n: usize) -> usize {
+        Self::CHUNKS_PER_THREAD
+    }
     fn threads() -> usize;
     fn par_for(n: usize, f: &(dyn Fn(usize) + Sync));
 }
@@ -68,7 +72,13 @@ impl Par for SpinPar {
 /// Split output columns into chunks on `P` and call `f(b, e)` for each.
 /// Chunks are multiples of 16 columns.
 pub fn par_cols<P: Par>(d_out: usize, f: &(dyn Fn(usize, usize) + Sync)) {
-    let width = d_out.div_ceil(P::threads() * P::CHUNKS_PER_THREAD).next_multiple_of(16);
+    par_cols_n::<P>(d_out, 1, f)
+}
+
+/// As [`par_cols`], for a matmul over `n` rows (lets `P` chunk decode and
+/// prefill differently).
+pub fn par_cols_n<P: Par>(d_out: usize, n: usize, f: &(dyn Fn(usize, usize) + Sync)) {
+    let width = d_out.div_ceil(P::threads() * P::chunks_per_thread(n)).next_multiple_of(16);
     let n_chunks = d_out.div_ceil(width);
     P::par_for(n_chunks, &|c| f(c * width, ((c + 1) * width).min(d_out)));
 }
