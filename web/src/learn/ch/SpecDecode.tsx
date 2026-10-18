@@ -89,16 +89,16 @@ function Playback({ pairs }: { pairs: SpecPair[] }) {
       caption={
         <>
           A recorded run on the M4's GPU. GPT-2 small (4-bit) guesses 4 tokens at a time for {MODEL[pair.target]} ({PARAMS[pair.target]} weights,
-          16-bit), which checks all 4 in one pass. <span style={keptStyle}>Blue</span>: a guess the big model agreed with, kept
+          16-bit), which checks all 4 in one pass. Each group of squares is one pass; the text below is what those passes wrote. <span style={keptStyle}>Blue</span>: a guess the big model agreed with, kept
           for free. <span style={ownStyle}>Ember</span>: the big model's own token, which every check adds: either the fix for the
-          first wrong guess, or a bonus when all 4 were right. <span style={{ color: pal.muted }}>✕</span> marks each guess thrown away
+          first wrong guess, or a bonus when all 4 were right. <span style={{ color: pal.muted }}>✕</span> (an empty square above) marks each guess thrown away
           (the recording keeps how many, not what they were). The text is exactly what {MODEL[pair.target]} writes on its own.
         </>
       }
       tryit={<>Play the licence text, then an essay. Watch how many tokens each check adds.</>}
     >
       <div className="lr-controls">
-        <Seg options={ORDER.filter((o) => pair.prompts.some((p) => p.prompt === o)).map((v) => ({ v, label: KIND[v] }))} value={kind} onChange={setKind} label="text" />
+        <Seg options={ORDER.filter((o) => pair.prompts.some((p) => p.prompt === o)).map((v) => ({ v, label: SHORT[v] }))} value={kind} onChange={setKind} label="kind of text" />
       </div>
       <div className="lr-controls">
         <Seg options={pairs.map((p) => ({ v: p.target, label: `checker: ${MODEL[p.target]}` }))} value={target} onChange={setTarget} label="big model" />
@@ -109,7 +109,21 @@ function Playback({ pairs }: { pairs: SpecPair[] }) {
           one check →
         </button>
       </div>
-      <div style={{ fontSize: "0.86rem", minHeight: "9.5rem", fontFamily: "var(--nv-mono, inherit)" }} aria-live="off">
+      <div className="lr-passes" aria-label={`${n} passes of the big model so far`}>
+        {done.map((r, i) => (
+          <span key={i} className={`pass${i === n - 1 ? " now" : ""}`} title={`check ${i + 1}: ${r.kept.length} kept, ${r.wrong} thrown away, + 1 of its own`}>
+            {r.kept.map((_, j) => (
+              <i key={`k${j}`} style={{ background: cc.c2 }} />
+            ))}
+            {Array.from({ length: r.wrong }, (_, j) => (
+              <i key={`w${j}`} className="x" />
+            ))}
+            <i style={{ background: cc.c1 }} />
+          </span>
+        ))}
+        {n === 0 && <span className="lr-small">each group will be one pass of the big model</span>}
+      </div>
+      <div style={{ fontSize: "0.86rem", minHeight: "6.5rem", fontFamily: "var(--nv-mono, inherit)" }} aria-live="off">
         <span style={{ color: pal.muted, whiteSpace: "pre-wrap" }}>…{pr.text.slice(-70)}</span>
         {done.map((r, i) => (
           <span key={i}>

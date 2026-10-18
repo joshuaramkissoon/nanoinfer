@@ -1292,3 +1292,31 @@ button.lr-bar:hover {
     grid-column: 1 / -1;
   }
 }
+
+/* ---- fig 18.1: one group of squares per pass of the big model ------------------------------------- */
+.lr-passes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.6rem;
+  align-items: center;
+  min-height: 1.2rem;
+  margin: 0.2rem 0 0.9rem;
+}
+.lr-passes .pass {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 4px;
+  outline: 1px solid transparent;
+}
+.lr-passes .pass.now {
+  outline-color: var(--m-sub);
+}
+.lr-passes i {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 2px;
+}
+.lr-passes i.x {
+  border: 1px dashed var(--m-muted);
+}
