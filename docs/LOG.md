@@ -67,6 +67,7 @@ of the weights).
 | 11 q8-fast / q4-fast (low-latency pool) | ~1415 | **360 (q8, 6t) / 372 (q4, 4t)** per-token, interleaved | 52% of 693 / 41% of 918 | 1.04–1.15× |
 | 12 q8-rescore / q4-rescore | ~1400 | **394 (q8) / 480 (q4)**, 6 threads | 46% of 860 / 39% of 1237 | 1.13–1.17× |
 | 13 q8-attn (NEON attention) | ~1425 | **404** (ctx 64–128), 292 (ctx 512+) | 47% of 860 | 1.03× short / 1.065× long ctx |
+| 14 q8-kv16 (head-major f16 KV) | ~1415 | +7% short ctx / **+60% at 900 ctx** (A/B; bandwidth-starved period) | | |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -1825,3 +1826,46 @@ head's keys are 600 separate 256-byte pieces 3 KB apart. That's the strided
 multi-stream pattern stage 3 measured as bad for the prefetcher. And at this
 length the f32 cache is **38 MB per token** (2 × 12 × 512 × 768 × 4 B), 27% on
 top of the 139 MB of weights. Law 5 in action. Next: a head-major f16 cache.
+
+---
+
+## Stage 14: q8-kv16 / q4-kv16 (head-major f16 KV cache)
+
+**Hypothesis.** Stage 13's long-context profile blamed the cache, not the
+kernel: `[layer][pos][C]` f32 means each head's keys are 256-byte pieces 3 KB
+apart, and at 512 positions the cache is 38 MB per token. A head-major
+`[layer][head][pos][64]` cache makes each head's K and V one contiguous stream,
+and f16 halves the bytes. Expect little change at short context, a big one at
+long context.
+
+**What changed.** `stages/kv16.rs`: `KvCache16` (u16 bits, head-major), a new
+forward (stage 12/13's with this cache), K/V narrowed with NEON `fcvtn` on write
+and widened with `fcvtl` inside a head_dim-64 attention kernel (q and the output
+in registers, as in stage 13), with a portable scalar fallback. The `Session`
+keeps a length-only `KvCache` for these stages, so `kv_cache().len` and traces
+still work.
+
+**Quality.** Against q8-attn directly the KL looks alarming (4e-4 at 32-token
+windows, 8e-4 at 1024, top-1 95–98%). Against the **f32 truth** the two are
+identical: KL **1.84e-3 vs 1.84e-3**, Δppl −0.20% vs −0.27%, top-1 97.8% vs 97.4%.
+So the f16 cache costs nothing measurable. The variant-to-variant difference is
+int8 activation rounding: a tiny perturbation flips rounding boundaries in
+every Q8 activation quantisation downstream, and comparing two lossy stages to
+each other mostly measures that chaos. Lesson: compare lossy stages to the f32
+reference, not to each other.
+
+**Numbers** (6 threads, interleaved A/B, per-token decode median):
+
+| context | q8-attn | q8-kv16 | |
+|---|---|---|---|
+| 64–112 | 271 | 290 | +7% |
+| 512–560 | 216 | 253 | **+17%** |
+| 900–948 | 178 | 284 | **+60%**, prefill 977 → 1074 |
+
+**Measurement caveat.** During this stage the machine's memory bandwidth
+collapsed: `membw` read **26 / 42 / 44 / 59 GB/s** at 1 / 4 / 6 / 10 threads
+(median), against 57 / 91 / 96 / 98 earlier, with normal CPU load. Something on
+the GPU side (other agents' Metal/WebGPU benches and a Chrome renderer at 98%)
+was saturating memory. The A/B ratios above are valid; absolute numbers from
+this period (recorded: q8-kv16 271 / 240 / 206 tok/s at prompts 64 / 512 / 900,
+q4-kv16 278) are depressed ~2× and don't compare with earlier stages.

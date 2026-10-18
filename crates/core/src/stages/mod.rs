@@ -17,6 +17,7 @@
 //! 4. The reference tests iterate `Stage::ALL`, so they cover it automatically.
 
 pub mod blocks;
+pub mod kv16;
 pub mod kv_cache;
 pub mod naive;
 pub mod packed;
@@ -71,6 +72,10 @@ pub enum Stage {
     Q8Attn,
     /// Stage 13b: stage 12b (Q4_0, rescored head) with NEON decode attention.
     Q4Attn,
+    /// Stage 14: stage 13 (Q8_0, rescored head) with a head-major f16 KV cache.
+    Q8Kv16,
+    /// Stage 14b: stage 13b (Q4_0, rescored head) with the head-major f16 KV cache.
+    Q4Kv16,
 }
 
 impl Stage {
@@ -92,6 +97,8 @@ impl Stage {
         Stage::Q4Rescore,
         Stage::Q8Attn,
         Stage::Q4Attn,
+        Stage::Q8Kv16,
+        Stage::Q4Kv16,
     ];
 
     /// Name of the kernel set this stage runs.
@@ -113,6 +120,8 @@ impl Stage {
             Stage::Q4Rescore => "lowlat + q4_0 (rescored head)",
             Stage::Q8Attn => "attn-neon + q8_0 (rescored head)",
             Stage::Q4Attn => "attn-neon + q4_0 (rescored head)",
+            Stage::Q8Kv16 => "attn-neon + q8_0 (rescored head) + f16 kv",
+            Stage::Q4Kv16 => "attn-neon + q4_0 (rescored head) + f16 kv",
         }
     }
 
@@ -135,6 +144,8 @@ impl Stage {
             Stage::Q4Rescore => WeightFormat::Q4_0,
             Stage::Q8Attn => WeightFormat::Q8_0,
             Stage::Q4Attn => WeightFormat::Q4_0,
+            Stage::Q8Kv16 => WeightFormat::Q8_0,
+            Stage::Q4Kv16 => WeightFormat::Q4_0,
             _ => WeightFormat::F32,
         }
     }
@@ -142,7 +153,10 @@ impl Stage {
     /// Format of the tied LM head. Same as the blocks, except the integer
     /// stages, which keep it f16 (it is by far the most quantisation-sensitive matrix).
     pub fn head_format(self) -> WeightFormat {
-        if matches!(self, Stage::Q8Rescore | Stage::Q4Rescore | Stage::Q8Attn | Stage::Q4Attn) {
+        if matches!(
+            self,
+            Stage::Q8Rescore | Stage::Q4Rescore | Stage::Q8Attn | Stage::Q4Attn | Stage::Q8Kv16 | Stage::Q4Kv16
+        ) {
             // Streamed bytes are the Q8 approximate head; rescoring reads ~256 f16 rows.
             return WeightFormat::Q8_0;
         }
@@ -180,6 +194,8 @@ impl Stage {
             Stage::Q4Rescore => "q4-rescore",
             Stage::Q8Attn => "q8-attn",
             Stage::Q4Attn => "q4-attn",
+            Stage::Q8Kv16 => "q8-kv16",
+            Stage::Q4Kv16 => "q4-kv16",
         }
     }
 }
@@ -330,8 +346,12 @@ enum PackedWeights {
 impl PackedWeights {
     fn for_stage(model: &Model, stage: Stage) -> Self {
         match stage {
-            Stage::Q8Rescore | Stage::Q8Attn => return PackedWeights::Q8R(Box::new(packed::PackedModel::new(model))),
-            Stage::Q4Rescore | Stage::Q4Attn => return PackedWeights::Q4R(Box::new(packed::PackedModel::new(model))),
+            Stage::Q8Rescore | Stage::Q8Attn | Stage::Q8Kv16 => {
+                return PackedWeights::Q8R(Box::new(packed::PackedModel::new(model)))
+            }
+            Stage::Q4Rescore | Stage::Q4Attn | Stage::Q4Kv16 => {
+                return PackedWeights::Q4R(Box::new(packed::PackedModel::new(model)))
+            }
             _ => {}
         }
         match stage.weight_format() {
@@ -348,6 +368,8 @@ pub struct Session {
     tokens: Vec<u32>,
     max_seq: usize,
     kv: KvCache,
+    /// Stage 14+: head-major f16 cache (empty for other stages).
+    kv16: kv16::KvCache16,
     acts: Activations,
     packed: PackedWeights,
     /// Scratch space for packed-weight kernels (e.g. quantised activations).
@@ -362,16 +384,21 @@ impl Session {
 
     pub fn with_max_seq(model: &Model, stage: Stage, max_seq: usize) -> Self {
         let max_seq = max_seq.min(model.config.n_ctx);
+        let uses_kv16 = matches!(stage, Stage::Q8Kv16 | Stage::Q4Kv16);
         let kv = match stage {
             Stage::Naive => KvCache::default(),
+            // f16 stages keep their cache in `kv16`; `kv` only tracks the length.
+            _ if uses_kv16 => KvCache { k: Vec::new(), v: Vec::new(), len: 0, capacity: max_seq },
             _ => KvCache::new(model, max_seq),
         };
+        let kv16 = if uses_kv16 { kv16::KvCache16::new(model, max_seq) } else { kv16::KvCache16::default() };
         let packed = PackedWeights::for_stage(model, stage);
         Session {
             stage,
             tokens: Vec::new(),
             max_seq,
             kv,
+            kv16,
             acts: Activations::default(),
             packed,
             scratch: Default::default(),
@@ -542,6 +569,32 @@ impl Session {
                     p,
                     new_tokens,
                     &mut self.kv,
+                    &mut self.acts,
+                    &mut self.scratch,
+                    trace,
+                ),
+                _ => unreachable!(),
+            },
+            Stage::Q8Kv16 => match &self.packed {
+                PackedWeights::Q8R(p) => kv16::forward::<AttnNeon, Q8Matrix, _, FastPar, T>(
+                    model,
+                    p,
+                    new_tokens,
+                    &mut self.kv16,
+                    &mut self.kv.len,
+                    &mut self.acts,
+                    &mut self.scratch,
+                    trace,
+                ),
+                _ => unreachable!(),
+            },
+            Stage::Q4Kv16 => match &self.packed {
+                PackedWeights::Q4R(p) => kv16::forward::<AttnNeon, Q4Matrix, _, FastPar, T>(
+                    model,
+                    p,
+                    new_tokens,
+                    &mut self.kv16,
+                    &mut self.kv.len,
                     &mut self.acts,
                     &mut self.scratch,
                     trace,

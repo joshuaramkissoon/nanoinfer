@@ -614,4 +614,16 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
   and at 512 tokens the cache is 38 MB per token, more than a quarter of the (8-bit)
   weights. The KV cache is now a weight you have to read.
 
+### Stage 14: q8-kv16 (the KV cache, compressed and reordered)
+
+- **Change:** store keys/values per head contiguously, in half precision.
+- **Result:** decode **+7% at short context, +17% at 512 tokens, +60% at 900**. Quality vs
+  f32 identical (KL 1.84e-3 either way).
+- **Aha:** compared against the 8-bit stage it replaced, the KL looked bad. Compared
+  against the f32 truth, nothing changed. Two lossy versions disagree with each other
+  more than either disagrees with the truth, because every tiny change flips int8
+  rounding somewhere. Always measure against the reference.
+- **Aha 2:** halfway through, memory bandwidth on this machine halved (another
+  workload on the GPU). Only interleaved A/B measurements survived it.
+
 ## Open questions / things to verify before publishing
