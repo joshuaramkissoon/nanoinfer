@@ -9,6 +9,7 @@
 //! The CLI owns everything the core crate refuses to touch: files (weights are
 //! memory-mapped), the clock, and the process environment.
 
+mod accel;
 mod bench;
 mod membw;
 #[cfg(target_os = "macos")]
@@ -70,6 +71,8 @@ enum Cmd {
     },
     /// Measure prefill and decode throughput.
     Bench(bench::BenchArgs),
+    /// Reference point: the same forward with Apple Accelerate's sgemv/sgemm (macOS only).
+    Accel(accel::AccelArgs),
     /// Measure how fast the CPU can stream memory (sets a realistic decode ceiling).
     Membw(membw::MembwArgs),
     /// Perplexity on WikiText-2, plus KL / top-1 agreement against an f32 stage.
@@ -120,6 +123,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Cmd::Bench(args) => bench::run(&cli.weights, args, pool_threads, cli.qos)?,
         Cmd::Membw(args) => membw::run(args)?,
+        Cmd::Accel(args) => accel::run(&cli.weights, args)?,
         Cmd::Ppl(args) => ppl::run(&cli.weights, args)?,
         Cmd::Generate { stage, prompt, tokens, temperature, top_k, seed, profile, trace_out, attention } => {
             let tok = load_tokenizer(&cli.weights)?;

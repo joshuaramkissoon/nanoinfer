@@ -121,3 +121,9 @@ sums its own slice of a 512 MB buffer), which gives the realistic ceiling.
 (`scripts/fetch_wikitext.sh`) through the decode path in windows and reports
 perplexity, plus KL / top-1 agreement / max |Δlogit| against an f32 reference stage
 in lockstep. This is the quality gate for lossy (f16, quantised) stages.
+
+`nanoinfer accel` runs the KV-cache forward with Apple Accelerate's
+`cblas_sgemv`/`cblas_sgemm` as the matmul (a CLI-only `Kernels` impl, since core
+can't link a macOS framework): a reference point for what Apple's own BLAS (AMX/SME) gets.
+`--threads N --qos interactive|utility|background` (global flags) size the rayon
+pool and the core spin pool and set every thread's macOS QoS class (background ⇒ E-cores).

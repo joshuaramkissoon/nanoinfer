@@ -892,3 +892,30 @@ rayon 60 / 101 and 81 / 110. membw under the same load: 4t 69, 6t 74, 10t 86 GB/
 - The measurement environment is the hardest part of this stage. Multithreaded
   numbers on a shared machine have ±10–15% run-to-run noise. Every comparison
   here is interleaved in one session, and repeated.
+
+---
+
+## Reference point: Apple Accelerate (CLI only, not a stage)
+
+`nanoinfer accel` (`crates/cli/src/accel.rs`): a CLI-side `Kernels` set whose
+matmul is `cblas_sgemv` (decode) / `cblas_sgemm` (prefill) from Accelerate,
+which runs them on the M4's matrix coprocessor (AMX/SME). It's plugged into
+core's ordinary `kv_cache::forward`, so layernorm, GELU and attention are still
+the scalar reference kernels. It isn't a `Stage`: Accelerate is macOS-only, and
+core must build for wasm.
+
+| | prefill P=64 | decode | decode GB/s | prefill P=512 | decode @ ~520 ctx |
+|---|---|---|---|---|---|
+| Accelerate (default threads) | 1459 ± 400 | 108.8 ± 16.8 | 54 | 891 | 85.9 |
+| Accelerate, `VECLIB_MAXIMUM_THREADS=1` | 1481 ± 26 | 111.2 ± 1.3 | 55 | | |
+| ours, stage 5 (rayon, 10t), same session | | | | 675 | 86.9 |
+
+- **Prefill: Apple wins, 1480 vs our best 1021.** That's a matrix unit, not NEON,
+  and it does it with scalar GELU/attention around it. Its single-thread setting
+  makes no difference: the AMX/SME unit is shared per cluster, and one core
+  drives it.
+- **Decode: we beat Accelerate** (spin-pool 115–124 vs 111). sgemv on AMX reads ~55
+  GB/s, about what one P-core's NEON loads get. The matrix unit adds FLOPs, and
+  decode needs bytes.
+- At P=512 both fall off (891 vs 675) for the same reason: the scalar O(n²)
+  attention, the same code in both.

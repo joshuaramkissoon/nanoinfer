@@ -343,4 +343,12 @@ so treat the spread as contention.
 - **Line:** "The fastest way to hand out work is to have the workers already standing at
   the counter, as long as they step aside when someone else needs the room."
 
+### Reference point: Apple Accelerate
+
+- Same forward, matmuls swapped for Apple's `cblas_sgemm`/`sgemv` (runs on the M4's matrix
+  coprocessor). Prefill **1480 tok/s**, beating our best NEON (1021). Decode **111 tok/s**,
+  *below* our spin-pool (115–124).
+- **Aha:** a matrix engine sells FLOPs. Decode needs bytes. Apple's own library can't read
+  memory any faster than a NEON loop, so on decode a hand-written loop keeps up with it.
+
 ## Open questions / things to verify before publishing
