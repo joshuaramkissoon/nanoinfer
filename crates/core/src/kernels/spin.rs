@@ -41,3 +41,17 @@ pub fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: us
     #[cfg(not(all(feature = "threads", not(target_family = "wasm"))))]
     super::threaded::matmul(out, x, w, bias, n, d_in, d_out)
 }
+
+/// Run `f(0..n)` in parallel: on the spin pool natively, on rayon in a wasm
+/// threads build, serially otherwise. For ops other than matmul (stage 7+).
+pub fn par_for(n: usize, f: &(dyn Fn(usize) + Sync)) {
+    #[cfg(all(feature = "threads", not(target_family = "wasm")))]
+    crate::pool::global().run(n, f);
+    #[cfg(all(feature = "threads", target_family = "wasm"))]
+    {
+        use rayon::prelude::*;
+        (0..n).into_par_iter().for_each(f);
+    }
+    #[cfg(not(feature = "threads"))]
+    (0..n).for_each(f);
+}

@@ -374,4 +374,24 @@ so treat the spread as contention.
 - **Aha:** a matrix engine sells FLOPs. Decode needs bytes. Apple's own library can't read
   memory any faster than a NEON loop, so on decode a hand-written loop keeps up with it.
 
+### Stage 7: fast-ops (the "small" ops)
+
+- **Hypothesis:** with 10 cores on the matmuls, single-threaded scalar GELU and attention
+  are half of prefill. Make them vectorise and run in parallel too.
+- **Change:** `tanh` and `exp` as branch-free polynomials (accurate to ~1e-6, so the
+  compiler can vectorise them, unlike libm calls). Attention split over (query, head)
+  pairs across cores. GELU split into chunks.
+- **Result:** prefill **~1400–1500 tok/s** at P=64 (+75%), **1200–1370 at P=512** (2.2×).
+  Decode +5% at short context, **+36% at 550 tokens of context** (attention grows with
+  context). Perplexity unchanged to 4 decimals. Prefill now ties Apple's Accelerate,
+  and beats it at long prompts.
+- **Aha:** GELU went 0.1% → 12% → 1.9% of the time across the stages, without changing
+  once until now. Whatever you haven't optimised becomes the bottleneck.
+- **Aha 2:** the first fast `exp` was wrong by 4e-6 at x = 20 because computing x·log₂e
+  in f32 throws bits away. The fix is a 1960s trick (Cody–Waite): split ln 2 into a part
+  that multiplies exactly and a small correction.
+- **Viz:** prefill flame strip, stage 6 vs 7: the gray GELU/attention bands collapsing.
+- **Line:** "The matmuls were fixed four stages ago. This stage fixed the arithmetic around
+  them, which had become half the work."
+
 ## Open questions / things to verify before publishing

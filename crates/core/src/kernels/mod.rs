@@ -24,6 +24,7 @@
 //! compile time per stage (no dynamic dispatch in inner loops) while still being
 //! selectable at runtime through [`crate::Stage`].
 
+pub mod fastops;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 pub mod reference;
@@ -152,5 +153,35 @@ impl Kernels for Spin {
     const NAME: &'static str = "spin";
     fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: usize, d_in: usize, d_out: usize) {
         spin::matmul(out, x, w, bias, n, d_in, d_out)
+    }
+}
+
+/// Stage 7: stage 6 matmuls + vectorised, parallel GELU / softmax / attention / layernorm.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FastOps;
+
+impl Kernels for FastOps {
+    const NAME: &'static str = "fast-ops";
+    fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: usize, d_in: usize, d_out: usize) {
+        spin::matmul(out, x, w, bias, n, d_in, d_out)
+    }
+    fn layernorm(out: &mut [f32], x: &[f32], weight: &[f32], bias: &[f32], n: usize, d: usize, eps: f32) {
+        fastops::layernorm(out, x, weight, bias, n, d, eps)
+    }
+    fn gelu(x: &mut [f32]) {
+        fastops::gelu(x)
+    }
+    fn attention(
+        out: &mut [f32],
+        q: Rows,
+        k: Rows,
+        v: Rows,
+        n_q: usize,
+        q_pos0: usize,
+        n_head: usize,
+        head_dim: usize,
+        scores: &mut [f32],
+    ) {
+        fastops::attention(out, q, k, v, n_q, q_pos0, n_head, head_dim, scores)
     }
 }

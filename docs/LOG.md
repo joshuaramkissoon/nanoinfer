@@ -60,6 +60,7 @@ of the weights).
 | 4 tiled (4×4 register blocking) | 469 ± 119 (noisy; ~450 in quiet runs) | 101.1 ± 16 | 41.7% | 2.5× prefill |
 | 5 threads (rayon, 8 threads) | 1021 ± 13 | 118.3 ± 1.7 | 48.8% | 2.1× prefill, 1.2× decode |
 | 6 spin-pool (8 threads) | 833 (rayon's 984 better) | 115.0 ± 3.5 (best seen 124) | 47–51% | 1.1–1.2× decode vs rayon |
+| 7 fast-ops (10 threads) | ~1400–1500 (interleaved; 1327 ± 301 recorded) | ~119 (interleaved) | ~49% | 1.75× prefill, 2.2× at P=512 |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -991,3 +992,61 @@ core must build for wasm.
   decode needs bytes.
 - At P=512 both fall off (891 vs 675) for the same reason: the scalar O(n²)
   attention, the same code in both.
+
+---
+
+## Stage 7: fast-ops (vectorised + parallel GELU, softmax, attention, layernorm)
+
+**Hypothesis.** After stage 6, prefill at 10 threads spends about half its time in
+ops that run on one thread and don't vectorise: GELU calls libm `tanhf` per
+element, softmax calls `expf`, attention's dot products are `iter().sum()`
+chains. Make them branch-free polynomials that LLVM vectorises, and spread
+GELU (by chunk) and attention (by (query, head) unit) over the same spin pool.
+Expect prefill up to ~2× (Amdahl), decode a few % (its serial share is ~7%),
+and decode at long context more (attention grows with context).
+
+**What changed.** `kernels/fastops.rs`:
+- `tanh`: Eigen's rational approximation (odd degree-13 / even degree-6, clamp
+  ±7.9). Max abs error vs `f32::tanh` < 2e-6 on [-20, 20] (test).
+- `exp`: n = round(x·log2 e), r = x − n·ln2_hi − n·ln2_lo (Cody–Waite), degree-6
+  Taylor for e^r, 2^n built in the exponent bits. First version reduced via
+  `t = x·log2e; f = t − round(t)`, which loses bits as |x| grows (rel. error
+  3.7e-6 at |x| = 20, test failed). Cody–Waite gets < 2e-6 on [-86, 20].
+- GELU parallel in chunks above 32K elements (prefill only; decode's 3072 run
+  serially, vectorised). `objdump`: the GELU loop is `fmul.4s`/`fadd.4s` with one
+  `fdiv.4s`, no calls.
+- Attention: per (query, head) unit, stage 2's dot for scores, fast exp softmax,
+  axpy for the value sum (vectorises: elementwise, no reassociation). Units are
+  chunked over the pool when units × keys × head_dim > 128K. Each chunk keeps its
+  own scores on the stack (≤ 1024 keys, a Vec beyond). Tested against the
+  reference attention (max diff < 1e-5).
+- LayerNorm: multi-accumulator mean/variance.
+- `spin::par_for`: spin pool natively, rayon in a wasm threads build, serial otherwise.
+
+**Correctness.** All HF tests pass. WikiText-2, 2 × 512 tokens: ppl 35.2302 vs
+35.2302 (unrolled), mean KL 1.6e-11, top-1 agreement 100%, max |Δlogit| 0.001.
+
+**Numbers** (10 threads unless noted; interleaved A/B pairs, 5 runs each):
+
+| | prefill P=64 | decode (ctx 64–128) | prefill P=512 | decode (ctx 512–576) |
+|---|---|---|---|---|
+| spin-pool (stage 6) | 811 / 808 | 113.7 / 106.6 | 549 / 556 | 75.4 / 68.9 |
+| **fast-ops** | **1392 / 1500** | **119.2 / 119.9** | **1203 / 1369** | **102.6 / 119.0** |
+
+Recorded single runs were very noisy (P=64 prefill 1126 ± 323 and 1327 ± 301,
+decode 105 ± 8 and 95 ± 18) while other agents were benchmarking. The
+interleaved pairs above are the trustworthy comparison. 4 threads: prefill
+1010, decode 111.9.
+
+Prefill profile (10 threads, 109-token prompt, 68 ms total): fc_proj 30% / fc
+28% / qkv 20% / attn_proj 7% at **300–330 GFLOP/s**, attention 4.9%, lm_head 3.4%,
+GELU 1.9% (was 12%).
+
+**Takeaways.**
+- **Prefill +75% at P=64, +2.2× at P=512, decode at ~550 context +36%** (75 → 103),
+  from ops that were "<1%" at stage 1. Prefill now matches Apple's Accelerate
+  (1480 at P=64), which uses a matrix coprocessor for its matmuls, and beats it
+  at P=512 (1203–1369 vs 891), where Accelerate is stuck with scalar attention.
+- The lesson stays the same at every level: whatever you didn't optimise
+  becomes the bottleneck. At stage 1 GELU was 0.1% of decode, at stage 4 it was
+  12% of prefill, now it's 1.9%.
