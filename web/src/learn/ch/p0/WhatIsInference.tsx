@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { usePalette } from "../../../ui/theme";
+import { useWidth } from "../../../ui/Figure";
 import { chartColors, Deeper, Fig, G, Idea, Seg, Swatch, useFrame, useOnScreen } from "../../kit";
 import { linkTo } from "../../router";
 
@@ -243,6 +244,114 @@ function ServingStack() {
   const o = (id: string) => (J.on.includes(id) ? 1 : 0.22);
   const panel = pal.dark ? "#262421" : "#ffffff";
   const users = ["A", "B", "C"];
+  const [wref, w] = useWidth<HTMLDivElement>();
+  const narrow = w > 0 && w < 520;
+  const marker = (
+    <defs>
+      <marker id="p0b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" fill={pal.muted} />
+      </marker>
+    </defs>
+  );
+  // phones: the same picture stacked top to bottom (users → scheduler → device), at a readable type size
+  const narrowSvg = (
+    <svg viewBox="0 0 340 420" style={{ width: "100%", marginTop: "0.4rem" }} role="img" aria-label="clients, scheduler, and a GPU holding weights and KV caches">
+      {marker}
+      <g opacity={o("clients")}>
+        {users.map((u, i) => (
+          <g key={u}>
+            <rect x={10 + i * 108} y={8} width={92} height={34} rx={8} fill={panel} stroke={pal.sub} />
+            <text x={56 + i * 108} y={30} textAnchor="middle" fontSize={13} fill={pal.fg}>
+              user {u}
+            </text>
+          </g>
+        ))}
+      </g>
+      <g opacity={o("c2s")}>
+        {users.map((u, i) => (
+          <path key={u} d={`M${56 + i * 108},44 C${56 + i * 108},62 255,58 255,80`} fill="none" stroke={pal.muted} markerEnd="url(#p0b)" />
+        ))}
+      </g>
+      <g opacity={o("disk")}>
+        <rect x={10} y={84} width={150} height={52} rx={6} fill={panel} stroke={pal.rule} />
+        <text x={85} y={106} textAnchor="middle" fontSize={12.5} fill={pal.sub}>
+          model file
+        </text>
+        <text x={85} y={124} textAnchor="middle" fontSize={11.5} fill={pal.muted}>
+          on disk
+        </text>
+        <path d="M85,138 V184" stroke={cc.c2} markerEnd="url(#p0b)" />
+      </g>
+      <g opacity={o("sched")}>
+        <rect x={180} y={84} width={150} height={60} rx={8} fill={panel} stroke={pal.sub} />
+        <text x={255} y={104} textAnchor="middle" fontSize={13} fontWeight={700} fill={pal.fg}>
+          scheduler
+        </text>
+        {users.map((u, i) => (
+          <g key={u}>
+            <rect x={218 + i * 26} y={114} width={22} height={20} rx={4} fill={pal.code} stroke={pal.rule} />
+            <text x={229 + i * 26} y={128} textAnchor="middle" fontSize={11} fill={pal.sub}>
+              {u}
+            </text>
+          </g>
+        ))}
+      </g>
+      <path d="M255,146 V159" stroke={pal.muted} markerEnd="url(#p0b)" opacity={o("s2c")} />
+      <rect x={4} y={160} width={318} height={232} rx={12} fill="none" stroke={pal.sub} />
+      <text x={186} y={180} fontSize={11.5} fill={pal.muted}>
+        GPU · one device
+      </text>
+      <g opacity={o("weights")}>
+        <rect x={14} y={188} width={152} height={84} rx={6} fill={panel} stroke={cc.c2} />
+        {Array.from({ length: 4 }, (_, r) =>
+          Array.from({ length: 12 }, (_, c) => (
+            <rect key={`${r}-${c}`} x={21 + c * 11.8} y={195 + r * 11.8} width={9.5} height={9.5} rx={1.5} fill={cc.c2} fillOpacity={0.15 + (((r * 12 + c) * 29) % 10) / 24} />
+          )),
+        )}
+        <text x={90} y={262} textAnchor="middle" fontSize={11.5} fill={pal.fg}>
+          weights · shared
+        </text>
+      </g>
+      <g opacity={o("compute")}>
+        <rect x={186} y={196} width={128} height={70} rx={8} fill={cc.c1} fillOpacity={0.14} stroke={cc.c1} />
+        <text x={250} y={222} textAnchor="middle" fontSize={13} fontWeight={700} fill={pal.fg}>
+          forward pass
+        </text>
+        <text x={250} y={240} textAnchor="middle" fontSize={11} fill={pal.sub}>
+          the fixed program
+        </text>
+        <text x={250} y={256} textAnchor="middle" fontSize={11} fill={pal.sub}>
+          all users at once
+        </text>
+      </g>
+      <path d="M168,230 H182" stroke={cc.c2} strokeWidth={2} markerEnd="url(#p0b)" opacity={o("w2c")} />
+      <g opacity={o("kv")}>
+        {users.map((u, i) => {
+          const n = [5, 2, 4][i];
+          return (
+            <g key={u}>
+              <text x={14} y={302 + i * 22} fontSize={11.5} fill={pal.sub}>
+                KV {u}
+              </text>
+              {Array.from({ length: n }, (_, j) => (
+                <rect key={j} x={56 + j * 18} y={290 + i * 22} width={15} height={15} rx={2} fill={cc.c2} fillOpacity={0.55} />
+              ))}
+            </g>
+          );
+        })}
+        <text x={14} y={377} fontSize={11.5} fill={pal.muted}>
+          per-request state · grows each token
+        </text>
+      </g>
+      <path d="M150,312 C200,312 230,292 246,270" fill="none" stroke={cc.c2} strokeWidth={1.5} markerEnd="url(#p0b)" opacity={o("kv2c")} />
+      <g opacity={o("out")}>
+        <path d="M314,231 H333 V25 H322" fill="none" stroke={cc.c1} strokeDasharray="3 4" strokeWidth={1.4} markerEnd="url(#p0b)" />
+        <text x={170} y={412} textAnchor="middle" fontSize={11.5} fill={pal.sub}>
+          tokens stream back up to each user, one per step
+        </text>
+      </g>
+    </svg>
+  );
   return (
     <Fig
       n="0.1.3"
@@ -250,7 +359,7 @@ function ServingStack() {
       prov="diagram"
       caption={
         <>
-          Requests come in on the left and tokens stream back. Inside the device: the weights (
+          Requests come in {narrow ? "at the top" : "on the left"} and tokens stream back. Inside the device: the weights (
           <Swatch c={cc.c2}>blue grid</Swatch>, one shared copy), each request's KV cache (<Swatch c={cc.c2}>blue pages</Swatch>
           , one stack per user), and the <Swatch c={cc.c1}>forward pass</Swatch> that reads both.
         </>
@@ -260,12 +369,10 @@ function ServingStack() {
       <div className="lr-controls">
         <Seg options={JOBS.map((j) => ({ v: j.k, label: j.label }))} value={job} onChange={setJob} label="engine job" />
       </div>
+      <div ref={wref}>
+      {narrow ? narrowSvg : (
       <svg viewBox="0 0 640 264" style={{ width: "100%", marginTop: "0.4rem" }} role="img" aria-label="clients, scheduler, and a GPU holding weights and KV caches">
-        <defs>
-          <marker id="p0b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
-            <path d="M0,0 L8,4 L0,8 z" fill={pal.muted} />
-          </marker>
-        </defs>
+        {marker}
         {/* clients */}
         <g opacity={o("clients")}>
           {users.map((u, i) => (
@@ -284,7 +391,7 @@ function ServingStack() {
         </g>
         <g opacity={o("out")}>
           <path d="M560,150 V244 H38 V194" fill="none" stroke={cc.c1} strokeDasharray="3 4" strokeWidth={1.4} markerEnd="url(#p0b)" />
-          <text x={300} y={258} textAnchor="middle" fontSize={10} fill={pal.sub}>
+          <text x={300} y={258} textAnchor="middle" fontSize={11} fill={pal.sub}>
             tokens stream back to each user, one per step
           </text>
         </g>
@@ -297,7 +404,7 @@ function ServingStack() {
           {users.map((u, i) => (
             <g key={u}>
               <rect x={140 + i * 26} y={116} width={22} height={18} rx={4} fill={pal.code} stroke={pal.rule} />
-              <text x={151 + i * 26} y={129} textAnchor="middle" fontSize={9.5} fill={pal.sub}>
+              <text x={151 + i * 26} y={129} textAnchor="middle" fontSize={10.5} fill={pal.sub}>
                 {u}
               </text>
             </g>
@@ -306,16 +413,16 @@ function ServingStack() {
         <path d="M232,119 H268" stroke={pal.muted} markerEnd="url(#p0b)" opacity={o("s2c")} />
         {/* device */}
         <rect x={272} y={14} width={360} height={210} rx={12} fill="none" stroke={pal.sub} />
-        <text x={286} y={32} fontSize={10.5} fill={pal.muted}>
+        <text x={286} y={32} fontSize={11} fill={pal.muted}>
           GPU · one device
         </text>
         {/* disk */}
         <g opacity={o("disk")}>
           <rect x={130} y={20} width={96} height={40} rx={6} fill={panel} stroke={pal.rule} />
-          <text x={178} y={38} textAnchor="middle" fontSize={10} fill={pal.sub}>
+          <text x={178} y={38} textAnchor="middle" fontSize={11} fill={pal.sub}>
             model file
           </text>
-          <text x={178} y={51} textAnchor="middle" fontSize={9.5} fill={pal.muted}>
+          <text x={178} y={51} textAnchor="middle" fontSize={10.5} fill={pal.muted}>
             on disk
           </text>
           <path d="M228,40 H296" stroke={cc.c2} markerEnd="url(#p0b)" />
@@ -328,7 +435,7 @@ function ServingStack() {
               <rect key={`${r}-${c}`} x={308 + c * 11.5} y={52 + r * 11.5} width={9} height={9} rx={1.5} fill={cc.c2} fillOpacity={0.15 + (((r * 12 + c) * 29) % 10) / 24} />
             )),
           )}
-          <text x={375} y={122} textAnchor="middle" fontSize={10} fill={pal.fg}>
+          <text x={375} y={122} textAnchor="middle" fontSize={11} fill={pal.fg}>
             weights · shared · read-only
           </text>
         </g>
@@ -338,10 +445,10 @@ function ServingStack() {
           <text x={546} y={108} textAnchor="middle" fontSize={11} fontWeight={700} fill={pal.fg}>
             forward pass
           </text>
-          <text x={546} y={124} textAnchor="middle" fontSize={9.5} fill={pal.sub}>
+          <text x={546} y={124} textAnchor="middle" fontSize={10.5} fill={pal.sub}>
             the fixed program
           </text>
-          <text x={546} y={138} textAnchor="middle" fontSize={9.5} fill={pal.sub}>
+          <text x={546} y={138} textAnchor="middle" fontSize={10.5} fill={pal.sub}>
             one step for the batch
           </text>
         </g>
@@ -352,7 +459,7 @@ function ServingStack() {
             const n = [5, 2, 4][i];
             return (
               <g key={u}>
-                <text x={300} y={170 + i * 18} fontSize={9.5} fill={pal.sub}>
+                <text x={300} y={170 + i * 18} fontSize={10.5} fill={pal.sub}>
                   KV {u}
                 </text>
                 {Array.from({ length: n }, (_, j) => (
@@ -361,12 +468,14 @@ function ServingStack() {
               </g>
             );
           })}
-          <text x={334} y={218} fontSize={9.5} fill={pal.muted}>
+          <text x={334} y={218} fontSize={10.5} fill={pal.muted}>
             per-request state · grows each token
           </text>
         </g>
         <path d="M430,178 C470,178 480,160 500,152" fill="none" stroke={cc.c2} strokeWidth={1.5} markerEnd="url(#p0b)" opacity={o("kv2c")} />
       </svg>
+      )}
+      </div>
       <div className="p0-job">
         <b>{J.title}.</b> {J.text}
         <div className="p0-analog">

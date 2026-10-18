@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from "react";
 import { usePalette } from "../../../ui/theme";
 import { log } from "../../../lib/fmt";
+import { useWidth } from "../../../ui/Figure";
 import { chartColors, Deeper, Fig, G, Idea, Seg, Stat, Swatch, nf, useFrame, useOnScreen } from "../../kit";
 import { linkTo } from "../../router";
 import { MACHINES, SOURCES } from "./specs";
@@ -21,6 +22,8 @@ function ChipPicture() {
   const mach = MACHINES.find((m) => m.key === k)!;
   const info = CHIP[k];
   const [onScreen, seen] = useOnScreen<HTMLElement>();
+  const [wref, w] = useWidth<HTMLDivElement>();
+  const narrow = w > 0 && w < 520; // phones get a vertical layout with larger type, not a shrunken desktop one
   const reduce = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const [t, setT] = useState(0);
   useFrame(seen && !reduce, (dt) => setT((v) => (v + dt) % 1000));
@@ -29,30 +32,32 @@ function ChipPicture() {
   const lb = Math.log10(mach.bw); // ~2 .. 3.5
   const busW = 3 + (lb - 1.9) * 9;
   const rate = 0.6 + (lb - 1.9) * 2.2;
-  const DIE = { x: 250, y: 22, w: 370, h: 196 };
+  const pkts = Math.round(rate * 4);
+  const fs = narrow ? 1.45 : 1; // label scale inside the die on phones
+  // compute units, drawn in a 370 × 196 box at the origin and placed by a transform
   const units: ReactElement[] = [];
   if (k === "m4cpu") {
     for (let i = 0; i < 4; i++) {
-      const x = DIE.x + 16 + i * 88, y = DIE.y + 28;
+      const x = 16 + i * 88, y = 28;
       units.push(
         <g key={`p${i}`}>
           <rect x={x} y={y} width={78} height={66} rx={6} fill={cc.c1} fillOpacity={0.16} stroke={cc.c1} />
           <rect x={x + 6} y={y + 42} width={66} height={16} rx={3} fill={cc.c2} fillOpacity={0.25} />
-          <text x={x + 39} y={y + 22} textAnchor="middle" fontSize={9.5} fill={pal.fg}>
+          <text x={x + 39} y={y + 24} textAnchor="middle" fontSize={9.5 * fs} fill={pal.fg}>
             P-core
           </text>
-          <text x={x + 39} y={y + 54} textAnchor="middle" fontSize={8.5} fill={pal.sub}>
+          <text x={x + 39} y={y + 54} textAnchor="middle" fontSize={8.5 * Math.min(fs, 1.3)} fill={pal.sub}>
             cache
           </text>
         </g>,
       );
     }
     for (let i = 0; i < 6; i++) {
-      const x = DIE.x + 16 + i * 58, y = DIE.y + 108;
+      const x = 16 + i * 58, y = 108;
       units.push(
         <g key={`e${i}`}>
           <rect x={x} y={y} width={50} height={40} rx={5} fill={cc.c1} fillOpacity={0.1} stroke={cc.c1} strokeOpacity={0.7} />
-          <text x={x + 25} y={y + 24} textAnchor="middle" fontSize={8.5} fill={pal.sub}>
+          <text x={x + 25} y={y + 25} textAnchor="middle" fontSize={8.5 * Math.min(fs, 1.35)} fill={pal.sub}>
             E-core
           </text>
         </g>,
@@ -60,15 +65,15 @@ function ChipPicture() {
     }
     units.push(
       <g key="l2">
-        <rect x={DIE.x + 16} y={DIE.y + 158} width={338} height={26} rx={4} fill={cc.c2} fillOpacity={0.2} />
-        <text x={DIE.x + 185} y={DIE.y + 175} textAnchor="middle" fontSize={9} fill={pal.sub}>
+        <rect x={16} y={158} width={338} height={26} rx={4} fill={cc.c2} fillOpacity={0.2} />
+        <text x={185} y={175 + (fs - 1) * 3} textAnchor="middle" fontSize={9 * fs} fill={pal.sub}>
           large shared caches (16 MB+)
         </text>
       </g>,
     );
   } else if (k === "m4gpu") {
     for (let c = 0; c < 10; c++) {
-      const cx = DIE.x + 14 + (c % 5) * 70, cy = DIE.y + 26 + Math.floor(c / 5) * 84;
+      const cx = 14 + (c % 5) * 70, cy = 26 + Math.floor(c / 5) * 84;
       units.push(<rect key={`c${c}`} x={cx} y={cy} width={64} height={76} rx={5} fill="none" stroke={pal.rule} />);
       for (let i = 0; i < 128; i++) {
         units.push(<rect key={`${c}-${i}`} x={cx + 4 + (i % 8) * 7.1} y={cy + 4 + Math.floor(i / 8) * 4.4} width={5.4} height={3.2} rx={0.6} fill={cc.c1} fillOpacity={0.75} />);
@@ -76,12 +81,67 @@ function ChipPicture() {
     }
   } else {
     for (let s = 0; s < 132; s++) {
-      const cx = DIE.x + 12 + (s % 12) * 29.5, cy = DIE.y + 24 + Math.floor(s / 12) * 15.2;
+      const cx = 12 + (s % 12) * 29.5, cy = 24 + Math.floor(s / 12) * 15.2;
       units.push(<rect key={s} x={cx} y={cy} width={26} height={12} rx={1.5} fill={cc.c1} fillOpacity={0.6} />);
     }
   }
+  const bwLabel = mach.bw >= 1000 ? `${nf(mach.bw / 1000, 2)} TB/s` : `${mach.bw} GB/s`;
+  const srcLabel = mach.src === "measured" ? "measured" : "spec";
   const memH = k === "h100" ? 150 : 110;
-  const pkts = Math.round(rate * 4);
+  const desktop = (
+    <svg viewBox="0 0 640 240" style={{ width: "100%" }} role="img" aria-label={`${mach.name}: ${info.units}, ${mach.bw} GB/s`}>
+      <rect x={14} y={120 - memH / 2} width={130} height={memH} rx={8} fill={cc.c2} fillOpacity={0.12} stroke={cc.c2} />
+      {Array.from({ length: k === "h100" ? 5 : 2 }, (_, i) => (
+        <rect key={i} x={26} y={120 - memH / 2 + 12 + i * (k === "h100" ? 26 : 34)} width={106} height={k === "h100" ? 18 : 26} rx={3} fill={cc.c2} fillOpacity={0.3} />
+      ))}
+      <text x={79} y={120 + memH / 2 + 17} textAnchor="middle" fontSize={11} fill={pal.sub}>
+        {mach.cap} GB memory
+      </text>
+      <rect x={146} y={120 - busW / 2} width={102} height={busW} fill={cc.c2} fillOpacity={0.35} />
+      {Array.from({ length: pkts }, (_, i) => {
+        const p = ((t * rate + i / pkts) % 1 + 1) % 1;
+        return <rect key={i} x={146 + p * 90} y={120 - Math.max(2, busW / 2 - 1)} width={8} height={Math.max(4, busW - 2)} rx={1.5} fill={cc.c2} />;
+      })}
+      <text x={198} y={120 - busW / 2 - 9} textAnchor="middle" fontSize={11.5} fontWeight={700} fill={pal.fg}>
+        {bwLabel}
+      </text>
+      <text x={198} y={120 + busW / 2 + 17} textAnchor="middle" fontSize={10} fill={pal.muted}>
+        {srcLabel}
+      </text>
+      <rect x={250} y={22} width={370} height={196} rx={12} fill={panel} stroke={pal.sub} />
+      <text x={262} y={39} fontSize={10.5} fill={pal.muted}>
+        {info.units}
+      </text>
+      <g transform="translate(250,22)">{units}</g>
+    </svg>
+  );
+  // phones: memory on top, the bus running down into the chip, the chip full width underneath
+  const S = 328 / 370;
+  const busTop = 92, busBot = 156;
+  const narrowSvg = (
+    <svg viewBox="0 0 340 340" style={{ width: "100%" }} role="img" aria-label={`${mach.name}: ${info.units}, ${mach.bw} GB/s`}>
+      <rect x={70} y={8} width={200} height={70} rx={8} fill={cc.c2} fillOpacity={0.12} stroke={cc.c2} />
+      {Array.from({ length: k === "h100" ? 5 : 2 }, (_, i) => (
+        <rect key={i} x={82 + i * (k === "h100" ? 36 : 90)} y={18} width={k === "h100" ? 30 : 84} height={34} rx={3} fill={cc.c2} fillOpacity={0.3} />
+      ))}
+      <text x={170} y={69} textAnchor="middle" fontSize={12} fill={pal.sub}>
+        {mach.cap} GB memory
+      </text>
+      <rect x={170 - busW / 2} y={busTop - 14} width={busW} height={busBot - busTop + 14} fill={cc.c2} fillOpacity={0.35} />
+      {Array.from({ length: pkts }, (_, i) => {
+        const p = ((t * rate + i / pkts) % 1 + 1) % 1;
+        return <rect key={i} x={170 - Math.max(2, busW / 2 - 1)} y={busTop - 12 + p * (busBot - busTop)} width={Math.max(4, busW - 2)} height={7} rx={1.5} fill={cc.c2} />;
+      })}
+      <text x={170 + busW / 2 + 10} y={120} fontSize={14} fontWeight={700} fill={pal.fg}>
+        {bwLabel}
+      </text>
+      <text x={170 + busW / 2 + 10} y={137} fontSize={11.5} fill={pal.muted}>
+        {srcLabel}
+      </text>
+      <rect x={6} y={busBot} width={328} height={196 * S + 4} rx={12} fill={panel} stroke={pal.sub} />
+      <g transform={`translate(6,${busBot + 2}) scale(${S})`}>{units}</g>
+    </svg>
+  );
   return (
     <Fig
       figRef={onScreen}
@@ -90,9 +150,9 @@ function ChipPicture() {
       prov="diagram"
       caption={
         <>
-          Left, <Swatch c={cc.c2}>blue</Swatch>: memory, and the bus to the chip (thicker and busier = more bandwidth).
-          Right, <Swatch c={cc.c1}>ember</Swatch>: compute units, drawn to count, not to scale. The FLOPs-per-byte number is
-          how much arithmetic the chip can do per byte it reads: the gap decode can't fill.
+          {narrow ? "Top" : "Left"}, <Swatch c={cc.c2}>blue</Swatch>: memory, and the bus to the chip (thicker and busier = more
+          bandwidth). {narrow ? "Below" : "Right"}, <Swatch c={cc.c1}>ember</Swatch>: compute units, drawn to count, not to
+          scale. The FLOPs-per-byte number is how much arithmetic the chip can do per byte it reads: the gap decode can't fill.
         </>
       }
       tryit={<>Flip between the three. The M4's CPU and GPU share one memory, so their buses barely differ; the H100's is 30× wider.</>}
@@ -110,34 +170,9 @@ function ChipPicture() {
           label="chip"
         />
       </div>
-      <div>
-        <svg viewBox="0 0 640 240" style={{ width: "100%" }} role="img" aria-label={`${mach.name}: ${info.units}, ${mach.bw} GB/s`}>
-          <rect x={14} y={120 - memH / 2} width={130} height={memH} rx={8} fill={cc.c2} fillOpacity={0.12} stroke={cc.c2} />
-          {Array.from({ length: k === "h100" ? 5 : 2 }, (_, i) => (
-            <rect key={i} x={26} y={120 - memH / 2 + 12 + i * (k === "h100" ? 26 : 34)} width={106} height={k === "h100" ? 18 : 26} rx={3} fill={cc.c2} fillOpacity={0.3} />
-          ))}
-          <text x={79} y={120 + memH / 2 + 16} textAnchor="middle" fontSize={10} fill={pal.sub}>
-            {mach.cap} GB memory
-          </text>
-          {/* bus */}
-          <rect x={146} y={120 - busW / 2} width={DIE.x - 148} height={busW} fill={cc.c2} fillOpacity={0.35} />
-          {Array.from({ length: pkts }, (_, i) => {
-            const p = ((t * rate + i / pkts) % 1 + 1) % 1;
-            return <rect key={i} x={146 + p * (DIE.x - 160)} y={120 - Math.max(2, busW / 2 - 1)} width={8} height={Math.max(4, busW - 2)} rx={1.5} fill={cc.c2} />;
-          })}
-          <text x={(146 + DIE.x) / 2} y={120 - busW / 2 - 8} textAnchor="middle" fontSize={10.5} fontWeight={700} fill={pal.fg}>
-            {mach.bw >= 1000 ? `${nf(mach.bw / 1000, 2)} TB/s` : `${mach.bw} GB/s`}
-          </text>
-          <text x={(146 + DIE.x) / 2} y={120 + busW / 2 + 16} textAnchor="middle" fontSize={9.5} fill={pal.muted}>
-            {mach.src === "measured" ? "measured" : "spec"}
-          </text>
-          {/* die */}
-          <rect x={DIE.x} y={DIE.y} width={DIE.w} height={DIE.h} rx={12} fill={panel} stroke={pal.sub} />
-          <text x={DIE.x + 12} y={DIE.y + 16} fontSize={9.5} fill={pal.muted}>
-            {info.units}
-          </text>
-          {units}
-        </svg>
+      <div ref={wref}>
+        {w > 0 && (narrow ? narrowSvg : desktop)}
+        {narrow && <div className="p0-diagram-k lr-small">the chip: {info.units}</div>}
       </div>
       <div className="lr-stats">
         <Stat k="parallel lanes" v={nf(info.lanes)} unit={k === "m4cpu" ? "(4-wide SIMD per core)" : undefined} />
@@ -331,6 +366,19 @@ export default function Hardware() {
         time and then stay put.
       </p>
       <BandwidthLadder />
+      <h2>So when does a CPU win?</h2>
+      <p>
+        Look at the two M4 rows: CPU and GPU read the same memory at 98 and 105 GB/s, so for one user's decode their speed
+        limits are nearly equal. Our engine reached 497 tokens a second on the CPU and 817 on the GPU, and most of that gap
+        came from the GPU waiting less (chapter 16), not from its lanes. Prefill is another story: 2,415 vs 6,800, because
+        reading a prompt is arithmetic-heavy and that's what lanes are for.
+      </p>
+      <p>
+        So the rule of thumb: <b>decode speed follows bandwidth; prefill and batch speed follow FLOPs</b>. A CPU is a fine
+        choice for a small model, one user, and shared memory: laptops, phones, edge boxes, or a big-RAM server running a
+        model no single GPU can hold. A GPU wins as soon as there's arithmetic to share out (long prompts, many users) or
+        when it brings much faster memory, like an H100's HBM.
+      </p>
       <p>
         Capacity is the other wall: 80 GB per H100, 24 GB on our Mac. A 70B model in bf16 needs 140 GB before a single
         user's KV cache. When it doesn't fit, you either shrink it (quantise) or split it.

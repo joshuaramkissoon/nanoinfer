@@ -894,3 +894,9 @@
   align-items: center;
   gap: 0.55rem;
 }
+
+/* a diagram's own caption line, used above phone layouts where it doesn't fit inside the drawing */
+.p0-diagram-k {
+  margin: 0.2rem 0 0.4rem;
+  color: var(--m-muted);
+}
