@@ -1,0 +1,1789 @@
+{
+ "what": "GPT-2 124M head-to-head on one machine: nanoinfer vs llama.cpp vs MLX vs PyTorch MPS",
+ "machine": "Apple M4 (base, 4P+6E CPU, 10-core GPU), 24 GB, macOS 26",
+ "method": {
+  "prompt_len": 64,
+  "decode_tokens": 64,
+  "decode_context": "64..128",
+  "batch": 1,
+  "greedy": true,
+  "reps": "1 warmup + 7 timed per config, median; 3 rounds (whole suite, strictly sequential), best round reported",
+  "llama_bench": "pp: -p 64 -n 0; tg: -p 0 -n 64 -d 64 (decode after 64 tokens of context); KV f16; -fa auto; -ngl 99 GPU, -ngl 0 -nopo 1 CPU",
+  "llama_metal_warm": "llama.cpp Metal tg also re-measured after heating the GPU (warm_check.sh, 15 reps); its decode is the max over rounds and the warm check",
+  "bandwidth_ceiling": "120 GB/s spec / bytes per token (weights read per decode step, position table excluded, tied head counted once)"
+ },
+ "rows": [
+  {
+   "engine": "nanoinfer",
+   "device": "metal",
+   "config": "metal-pipelined-f16",
+   "family": "f16",
+   "threads": null,
+   "prefill_tok_s": 5208,
+   "decode_tok_s": 363.9,
+   "prefill_rounds": [
+    5157,
+    5115,
+    5208
+   ],
+   "decode_rounds": [
+    361.6,
+    350.7,
+    363.9
+   ],
+   "bytes_per_token_mb": 247.5,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 75.1,
+   "decode_gbs": 90.1,
+   "version": "b8e79b6-dirty",
+   "max_load1": 5.71
+  },
+  {
+   "engine": "mlx",
+   "device": "metal (MLX)",
+   "config": "mlx-f16",
+   "family": "f16",
+   "threads": null,
+   "prefill_tok_s": 5612,
+   "decode_tok_s": 341.5,
+   "prefill_rounds": [
+    5362,
+    5283,
+    5612
+   ],
+   "decode_rounds": [
+    341.5,
+    339.7,
+    297.8
+   ],
+   "bytes_per_token_mb": 247.3,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 70.4,
+   "decode_gbs": 84.4,
+   "version": "0.32.4",
+   "max_load1": 5.06
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "metal",
+   "config": "gpt2-f16",
+   "family": "f16",
+   "threads": null,
+   "prefill_tok_s": 10283,
+   "decode_tok_s": 332.8,
+   "prefill_rounds": [
+    9894,
+    9920,
+    10283
+   ],
+   "decode_rounds": [
+    316.3,
+    332.8,
+    325.2,
+    329.6
+   ],
+   "bytes_per_token_mb": 247.5,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 68.7,
+   "decode_gbs": 82.4,
+   "version": "d81235049",
+   "head_type": "F16",
+   "max_load1": 6.52
+  },
+  {
+   "engine": "torch-mps",
+   "device": "mps",
+   "config": "torch-float16",
+   "family": "f16",
+   "threads": null,
+   "prefill_tok_s": 6286,
+   "decode_tok_s": 252.3,
+   "prefill_rounds": [
+    6252,
+    6286,
+    6168
+   ],
+   "decode_rounds": [
+    252.3,
+    248.5,
+    239.0
+   ],
+   "bytes_per_token_mb": 247.3,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 52.0,
+   "decode_gbs": 62.4,
+   "version": "2.14.1",
+   "max_load1": 4.01
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "metal",
+   "config": "gpt2-f32",
+   "family": "f32",
+   "threads": null,
+   "prefill_tok_s": 8271,
+   "decode_tok_s": 191.6,
+   "prefill_rounds": [
+    8271,
+    8214,
+    8266
+   ],
+   "decode_rounds": [
+    189.2,
+    191.6,
+    182.9,
+    186.9
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 79.0,
+   "decode_gbs": 94.8,
+   "version": "d81235049",
+   "head_type": "F32",
+   "max_load1": 6.52
+  },
+  {
+   "engine": "mlx",
+   "device": "metal (MLX)",
+   "config": "mlx-f32",
+   "family": "f32",
+   "threads": null,
+   "prefill_tok_s": 3700,
+   "decode_tok_s": 177.9,
+   "prefill_rounds": [
+    3700,
+    3477,
+    3544
+   ],
+   "decode_rounds": [
+    177.7,
+    176.6,
+    177.9
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 73.3,
+   "decode_gbs": 88.0,
+   "version": "0.32.4",
+   "max_load1": 5.06
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "metal",
+   "config": "metal-mma",
+   "family": "f32",
+   "threads": null,
+   "prefill_tok_s": 4509,
+   "decode_tok_s": 175.9,
+   "prefill_rounds": [
+    4509,
+    4490,
+    4416
+   ],
+   "decode_rounds": [
+    175.9,
+    175.1,
+    175.4
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 72.5,
+   "decode_gbs": 87.0,
+   "version": "b8e79b6-dirty",
+   "max_load1": 6.04
+  },
+  {
+   "engine": "torch-mps",
+   "device": "mps",
+   "config": "torch-float32",
+   "family": "f32",
+   "threads": null,
+   "prefill_tok_s": 5026,
+   "decode_tok_s": 155.5,
+   "prefill_rounds": [
+    5026,
+    5019,
+    4622
+   ],
+   "decode_rounds": [
+    155.5,
+    155.3,
+    145.5
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 64.1,
+   "decode_gbs": 76.9,
+   "version": "2.14.1",
+   "max_load1": 4.36
+  },
+  {
+   "engine": "mlx",
+   "device": "metal (MLX)",
+   "config": "mlx-q4g32",
+   "family": "q4 (q4 head)",
+   "threads": null,
+   "prefill_tok_s": 7844,
+   "decode_tok_s": 749.9,
+   "prefill_rounds": [
+    7844,
+    7826,
+    7842
+   ],
+   "decode_rounds": [
+    749.9,
+    749.1,
+    706.9
+   ],
+   "bytes_per_token_mb": 77.5,
+   "spec_ceiling_tok_s": 1549,
+   "pct_spec_ceiling": 48.4,
+   "decode_gbs": 58.1,
+   "version": "0.32.4",
+   "max_load1": 4.97
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "metal",
+   "config": "gpt2-q4_0-default",
+   "family": "q4+q6Khead",
+   "threads": null,
+   "prefill_tok_s": 11064,
+   "decode_tok_s": 654.4,
+   "prefill_rounds": [
+    10112,
+    6803,
+    11064
+   ],
+   "decode_rounds": [
+    644.6,
+    489.4,
+    461.5,
+    654.4
+   ],
+   "bytes_per_token_mb": 79.9,
+   "spec_ceiling_tok_s": 1501,
+   "pct_spec_ceiling": 43.6,
+   "decode_gbs": 52.3,
+   "version": "d81235049",
+   "head_type": "Q6_K",
+   "max_load1": 6.48
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "metal",
+   "config": "metal-lanes",
+   "family": "q4+q8head",
+   "threads": null,
+   "prefill_tok_s": 6725,
+   "decode_tok_s": 787.0,
+   "prefill_rounds": [
+    6725,
+    6658,
+    6703
+   ],
+   "decode_rounds": [
+    787.0,
+    786.4,
+    783.5
+   ],
+   "bytes_per_token_mb": 89.3,
+   "spec_ceiling_tok_s": 1344,
+   "pct_spec_ceiling": 58.5,
+   "decode_gbs": 70.3,
+   "version": "b8e79b6-dirty",
+   "max_load1": 5.71
+  },
+  {
+   "engine": "mlx",
+   "device": "metal (MLX)",
+   "config": "mlx-q4g32-q8head",
+   "family": "q4+q8head",
+   "threads": null,
+   "prefill_tok_s": 7624,
+   "decode_tok_s": 694.1,
+   "prefill_rounds": [
+    7401,
+    7417,
+    7624
+   ],
+   "decode_rounds": [
+    689.1,
+    694.1,
+    649.7
+   ],
+   "bytes_per_token_mb": 96.7,
+   "spec_ceiling_tok_s": 1240,
+   "pct_spec_ceiling": 56.0,
+   "decode_gbs": 67.2,
+   "version": "0.32.4",
+   "max_load1": 4.97
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "metal",
+   "config": "gpt2-q4_0-q8head",
+   "family": "q4+q8head",
+   "threads": null,
+   "prefill_tok_s": 10935,
+   "decode_tok_s": 621.9,
+   "prefill_rounds": [
+    10935,
+    9057,
+    8706
+   ],
+   "decode_rounds": [
+    611.4,
+    467.8,
+    432.5,
+    621.9
+   ],
+   "bytes_per_token_mb": 89.3,
+   "spec_ceiling_tok_s": 1344,
+   "pct_spec_ceiling": 46.3,
+   "decode_gbs": 55.5,
+   "version": "d81235049",
+   "head_type": "Q8_0",
+   "max_load1": 6.48
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "metal",
+   "config": "metal-pipelined-q8",
+   "family": "q8",
+   "threads": null,
+   "prefill_tok_s": 5856,
+   "decode_tok_s": 612.1,
+   "prefill_rounds": [
+    5856,
+    5809,
+    5825
+   ],
+   "decode_rounds": [
+    612.1,
+    605.9,
+    610.5
+   ],
+   "bytes_per_token_mb": 131.7,
+   "spec_ceiling_tok_s": 911,
+   "pct_spec_ceiling": 67.2,
+   "decode_gbs": 80.6,
+   "version": "b8e79b6-dirty",
+   "max_load1": 5.71
+  },
+  {
+   "engine": "mlx",
+   "device": "metal (MLX)",
+   "config": "mlx-q8g32",
+   "family": "q8",
+   "threads": null,
+   "prefill_tok_s": 6608,
+   "decode_tok_s": 533.9,
+   "prefill_rounds": [
+    6277,
+    6506,
+    6608
+   ],
+   "decode_rounds": [
+    533.9,
+    518.9,
+    504.2
+   ],
+   "bytes_per_token_mb": 139.2,
+   "spec_ceiling_tok_s": 862,
+   "pct_spec_ceiling": 61.9,
+   "decode_gbs": 74.3,
+   "version": "0.32.4",
+   "max_load1": 4.97
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "metal",
+   "config": "gpt2-q8_0",
+   "family": "q8",
+   "threads": null,
+   "prefill_tok_s": 10706,
+   "decode_tok_s": 502.4,
+   "prefill_rounds": [
+    10311,
+    10211,
+    10706
+   ],
+   "decode_rounds": [
+    464.1,
+    418.2,
+    421.0,
+    502.4
+   ],
+   "bytes_per_token_mb": 131.7,
+   "spec_ceiling_tok_s": 911,
+   "pct_spec_ceiling": 55.2,
+   "decode_gbs": 66.2,
+   "version": "d81235049",
+   "head_type": "Q8_0",
+   "max_load1": 6.48
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-f16",
+   "family": "f16",
+   "threads": 4,
+   "prefill_tok_s": 1634,
+   "decode_tok_s": 273.0,
+   "prefill_rounds": [
+    1631,
+    1628,
+    1634
+   ],
+   "decode_rounds": [
+    272.5,
+    272.2,
+    273.0
+   ],
+   "bytes_per_token_mb": 247.5,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 56.3,
+   "decode_gbs": 67.6,
+   "version": "ff5a233",
+   "head_type": "F16",
+   "max_load1": 4.16
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-f16",
+   "family": "f16",
+   "threads": 4,
+   "prefill_tok_s": 1362,
+   "decode_tok_s": 262.0,
+   "prefill_rounds": [
+    1340,
+    1362,
+    1335
+   ],
+   "decode_rounds": [
+    262.0,
+    260.4,
+    259.1
+   ],
+   "bytes_per_token_mb": 247.5,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 54.0,
+   "decode_gbs": 64.8,
+   "version": "d81235049",
+   "head_type": "F16",
+   "max_load1": 4.16
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "f16",
+   "family": "f16",
+   "threads": 4,
+   "prefill_tok_s": 1503,
+   "decode_tok_s": 255.2,
+   "prefill_rounds": [
+    1503,
+    1498,
+    1496
+   ],
+   "decode_rounds": [
+    255.2,
+    253.1,
+    252.4
+   ],
+   "bytes_per_token_mb": 247.5,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 52.6,
+   "decode_gbs": 63.2,
+   "version": "b8e79b6-dirty",
+   "max_load1": 4.44
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-f16",
+   "family": "f16",
+   "threads": 6,
+   "prefill_tok_s": 1914,
+   "decode_tok_s": 357.7,
+   "prefill_rounds": [
+    1914,
+    1889,
+    1886
+   ],
+   "decode_rounds": [
+    357.7,
+    344.3,
+    338.6
+   ],
+   "bytes_per_token_mb": 247.5,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 73.8,
+   "decode_gbs": 88.5,
+   "version": "ff5a233",
+   "head_type": "F16",
+   "max_load1": 4.97
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "f16",
+   "family": "f16",
+   "threads": 6,
+   "prefill_tok_s": 1969,
+   "decode_tok_s": 327.5,
+   "prefill_rounds": [
+    1968,
+    1950,
+    1969
+   ],
+   "decode_rounds": [
+    327.5,
+    311.8,
+    323.1
+   ],
+   "bytes_per_token_mb": 247.5,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 67.6,
+   "decode_gbs": 81.1,
+   "version": "b8e79b6-dirty",
+   "max_load1": 4.86
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-f16",
+   "family": "f16",
+   "threads": 6,
+   "prefill_tok_s": 924,
+   "decode_tok_s": 235.5,
+   "prefill_rounds": [
+    772,
+    719,
+    924
+   ],
+   "decode_rounds": [
+    235.5,
+    231.7,
+    226.7
+   ],
+   "bytes_per_token_mb": 247.5,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 48.6,
+   "decode_gbs": 58.3,
+   "version": "d81235049",
+   "head_type": "F16",
+   "max_load1": 4.97
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "f16",
+   "family": "f16",
+   "threads": 10,
+   "prefill_tok_s": 2237,
+   "decode_tok_s": 308.4,
+   "prefill_rounds": [
+    2237,
+    2184,
+    2180
+   ],
+   "decode_rounds": [
+    307.4,
+    308.4,
+    302.0
+   ],
+   "bytes_per_token_mb": 247.5,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 63.6,
+   "decode_gbs": 76.3,
+   "version": "b8e79b6-dirty",
+   "max_load1": 7.05
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-f16",
+   "family": "f16",
+   "threads": 10,
+   "prefill_tok_s": 2357,
+   "decode_tok_s": 281.4,
+   "prefill_rounds": [
+    2357,
+    2166,
+    2112
+   ],
+   "decode_rounds": [
+    281.4,
+    223.6,
+    225.3
+   ],
+   "bytes_per_token_mb": 247.5,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 58.1,
+   "decode_gbs": 69.7,
+   "version": "ff5a233",
+   "head_type": "F16",
+   "max_load1": 7.51
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-f16",
+   "family": "f16",
+   "threads": 10,
+   "prefill_tok_s": 734,
+   "decode_tok_s": 251.8,
+   "prefill_rounds": [
+    540,
+    415,
+    734
+   ],
+   "decode_rounds": [
+    240.7,
+    191.9,
+    251.8
+   ],
+   "bytes_per_token_mb": 247.5,
+   "spec_ceiling_tok_s": 485,
+   "pct_spec_ceiling": 51.9,
+   "decode_gbs": 62.3,
+   "version": "d81235049",
+   "head_type": "F16",
+   "max_load1": 6.68
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-f32",
+   "family": "f32",
+   "threads": 4,
+   "prefill_tok_s": 842,
+   "decode_tok_s": 141.9,
+   "prefill_rounds": [
+    842,
+    841,
+    700
+   ],
+   "decode_rounds": [
+    141.7,
+    141.7,
+    141.9
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 58.5,
+   "decode_gbs": 70.2,
+   "version": "ff5a233",
+   "head_type": "F32",
+   "max_load1": 4.09
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-f32",
+   "family": "f32",
+   "threads": 4,
+   "prefill_tok_s": 2724,
+   "decode_tok_s": 138.1,
+   "prefill_rounds": [
+    2669,
+    2724,
+    2669
+   ],
+   "decode_rounds": [
+    138.1,
+    138.1,
+    135.3
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 56.9,
+   "decode_gbs": 68.3,
+   "version": "d81235049",
+   "head_type": "F32",
+   "max_load1": 4.01
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "fast-ops",
+   "family": "f32",
+   "threads": 4,
+   "prefill_tok_s": 1487,
+   "decode_tok_s": 136.6,
+   "prefill_rounds": [
+    1487,
+    1479,
+    1480
+   ],
+   "decode_rounds": [
+    136.1,
+    135.9,
+    136.6
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 56.3,
+   "decode_gbs": 67.6,
+   "version": "b8e79b6-dirty",
+   "max_load1": 4.57
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-f32",
+   "family": "f32",
+   "threads": 6,
+   "prefill_tok_s": 1023,
+   "decode_tok_s": 197.3,
+   "prefill_rounds": [
+    1023,
+    1007,
+    1015
+   ],
+   "decode_rounds": [
+    197.3,
+    190.5,
+    178.8
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 81.3,
+   "decode_gbs": 97.6,
+   "version": "ff5a233",
+   "head_type": "F32",
+   "max_load1": 4.97
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "fast-ops",
+   "family": "f32",
+   "threads": 6,
+   "prefill_tok_s": 1950,
+   "decode_tok_s": 164.8,
+   "prefill_rounds": [
+    1912,
+    1909,
+    1950
+   ],
+   "decode_rounds": [
+    164.8,
+    153.4,
+    163.1
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 67.9,
+   "decode_gbs": 81.5,
+   "version": "b8e79b6-dirty",
+   "max_load1": 4.86
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-f32",
+   "family": "f32",
+   "threads": 6,
+   "prefill_tok_s": 2231,
+   "decode_tok_s": 126.6,
+   "prefill_rounds": [
+    2231,
+    2167,
+    2187
+   ],
+   "decode_rounds": [
+    126.6,
+    125.8,
+    126.4
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 52.2,
+   "decode_gbs": 62.6,
+   "version": "d81235049",
+   "head_type": "F32",
+   "max_load1": 4.7
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-f32",
+   "family": "f32",
+   "threads": 10,
+   "prefill_tok_s": 1249,
+   "decode_tok_s": 164.9,
+   "prefill_rounds": [
+    1249,
+    1098,
+    1147
+   ],
+   "decode_rounds": [
+    152.3,
+    123.2,
+    164.9
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 68.0,
+   "decode_gbs": 81.6,
+   "version": "ff5a233",
+   "head_type": "F32",
+   "max_load1": 8.2
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "fast-ops",
+   "family": "f32",
+   "threads": 10,
+   "prefill_tok_s": 2242,
+   "decode_tok_s": 163.8,
+   "prefill_rounds": [
+    2242,
+    2145,
+    2239
+   ],
+   "decode_rounds": [
+    160.6,
+    160.6,
+    163.8
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 67.5,
+   "decode_gbs": 81.0,
+   "version": "b8e79b6-dirty",
+   "max_load1": 7.05
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-f32",
+   "family": "f32",
+   "threads": 10,
+   "prefill_tok_s": 1656,
+   "decode_tok_s": 139.2,
+   "prefill_rounds": [
+    1614,
+    1647,
+    1656
+   ],
+   "decode_rounds": [
+    139.2,
+    130.7,
+    131.7
+   ],
+   "bytes_per_token_mb": 494.6,
+   "spec_ceiling_tok_s": 243,
+   "pct_spec_ceiling": 57.4,
+   "decode_gbs": 68.9,
+   "version": "d81235049",
+   "head_type": "F32",
+   "max_load1": 8.11
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "q4-kv16",
+   "family": "q4+f16head(rescored)",
+   "threads": 4,
+   "prefill_tok_s": 1530,
+   "decode_tok_s": 637.6,
+   "prefill_rounds": [
+    1530,
+    1514,
+    1519
+   ],
+   "decode_rounds": [
+    634.6,
+    632.5,
+    637.6
+   ],
+   "bytes_per_token_mb": 97.0,
+   "spec_ceiling_tok_s": 1237,
+   "pct_spec_ceiling": 51.5,
+   "decode_gbs": 61.8,
+   "version": "b8e79b6-dirty",
+   "max_load1": 4.33
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "q4-kv16",
+   "family": "q4+f16head(rescored)",
+   "threads": 6,
+   "prefill_tok_s": 2028,
+   "decode_tok_s": 703.4,
+   "prefill_rounds": [
+    2015,
+    2028,
+    1990
+   ],
+   "decode_rounds": [
+    703.4,
+    687.3,
+    687.7
+   ],
+   "bytes_per_token_mb": 97.0,
+   "spec_ceiling_tok_s": 1237,
+   "pct_spec_ceiling": 56.9,
+   "decode_gbs": 68.2,
+   "version": "b8e79b6-dirty",
+   "max_load1": 5.11
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "q4-kv16",
+   "family": "q4+f16head(rescored)",
+   "threads": 10,
+   "prefill_tok_s": 2274,
+   "decode_tok_s": 741.9,
+   "prefill_rounds": [
+    2255,
+    2207,
+    2274
+   ],
+   "decode_rounds": [
+    724.0,
+    741.9,
+    718.8
+   ],
+   "bytes_per_token_mb": 97.0,
+   "spec_ceiling_tok_s": 1237,
+   "pct_spec_ceiling": 60.0,
+   "decode_gbs": 72.0,
+   "version": "b8e79b6-dirty",
+   "max_load1": 7.3
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-q4_0-default",
+   "family": "q4+q6Khead",
+   "threads": 4,
+   "prefill_tok_s": 5240,
+   "decode_tok_s": 779.6,
+   "prefill_rounds": [
+    5223,
+    5240,
+    5100
+   ],
+   "decode_rounds": [
+    779.6,
+    779.6,
+    735.1
+   ],
+   "bytes_per_token_mb": 79.9,
+   "spec_ceiling_tok_s": 1501,
+   "pct_spec_ceiling": 51.9,
+   "decode_gbs": 62.3,
+   "version": "ff5a233",
+   "head_type": "Q6_K",
+   "max_load1": 4.36
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-q4_0-default",
+   "family": "q4+q6Khead",
+   "threads": 4,
+   "prefill_tok_s": 3546,
+   "decode_tok_s": 742.2,
+   "prefill_rounds": [
+    3546,
+    3518,
+    2782
+   ],
+   "decode_rounds": [
+    729.6,
+    742.2,
+    573.1
+   ],
+   "bytes_per_token_mb": 79.9,
+   "spec_ceiling_tok_s": 1501,
+   "pct_spec_ceiling": 49.4,
+   "decode_gbs": 59.3,
+   "version": "d81235049",
+   "head_type": "Q6_K",
+   "max_load1": 4.39
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-q4_0-default",
+   "family": "q4+q6Khead",
+   "threads": 6,
+   "prefill_tok_s": 5651,
+   "decode_tok_s": 799.9,
+   "prefill_rounds": [
+    5545,
+    5563,
+    5651
+   ],
+   "decode_rounds": [
+    792.3,
+    769.8,
+    799.9
+   ],
+   "bytes_per_token_mb": 79.9,
+   "spec_ceiling_tok_s": 1501,
+   "pct_spec_ceiling": 53.3,
+   "decode_gbs": 63.9,
+   "version": "ff5a233",
+   "head_type": "Q6_K",
+   "max_load1": 4.67
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-q4_0-default",
+   "family": "q4+q6Khead",
+   "threads": 6,
+   "prefill_tok_s": 3944,
+   "decode_tok_s": 722.6,
+   "prefill_rounds": [
+    3944,
+    3901,
+    3927
+   ],
+   "decode_rounds": [
+    722.6,
+    693.2,
+    721.8
+   ],
+   "bytes_per_token_mb": 79.9,
+   "spec_ceiling_tok_s": 1501,
+   "pct_spec_ceiling": 48.1,
+   "decode_gbs": 57.8,
+   "version": "d81235049",
+   "head_type": "Q6_K",
+   "max_load1": 4.73
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-q4_0-default",
+   "family": "q4+q6Khead",
+   "threads": 10,
+   "prefill_tok_s": 5697,
+   "decode_tok_s": 660.2,
+   "prefill_rounds": [
+    5697,
+    5237,
+    5417
+   ],
+   "decode_rounds": [
+    660.2,
+    481.4,
+    656.5
+   ],
+   "bytes_per_token_mb": 79.9,
+   "spec_ceiling_tok_s": 1501,
+   "pct_spec_ceiling": 44.0,
+   "decode_gbs": 52.8,
+   "version": "ff5a233",
+   "head_type": "Q6_K",
+   "max_load1": 6.63
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-q4_0-default",
+   "family": "q4+q6Khead",
+   "threads": 10,
+   "prefill_tok_s": 3698,
+   "decode_tok_s": 623.5,
+   "prefill_rounds": [
+    3698,
+    3440,
+    2413
+   ],
+   "decode_rounds": [
+    623.5,
+    558.3,
+    433.8
+   ],
+   "bytes_per_token_mb": 79.9,
+   "spec_ceiling_tok_s": 1501,
+   "pct_spec_ceiling": 41.5,
+   "decode_gbs": 49.8,
+   "version": "d81235049",
+   "head_type": "Q6_K",
+   "max_load1": 6.76
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-q4_0-q8head",
+   "family": "q4+q8head",
+   "threads": 4,
+   "prefill_tok_s": 5299,
+   "decode_tok_s": 709.8,
+   "prefill_rounds": [
+    5299,
+    5278,
+    5282
+   ],
+   "decode_rounds": [
+    706.1,
+    709.8,
+    674.7
+   ],
+   "bytes_per_token_mb": 89.3,
+   "spec_ceiling_tok_s": 1344,
+   "pct_spec_ceiling": 52.8,
+   "decode_gbs": 63.4,
+   "version": "ff5a233",
+   "head_type": "Q8_0",
+   "max_load1": 4.39
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-q4_0-q8head",
+   "family": "q4+q8head",
+   "threads": 4,
+   "prefill_tok_s": 3511,
+   "decode_tok_s": 682.5,
+   "prefill_rounds": [
+    3511,
+    3503,
+    3505
+   ],
+   "decode_rounds": [
+    682.5,
+    671.3,
+    682.0
+   ],
+   "bytes_per_token_mb": 89.3,
+   "spec_ceiling_tok_s": 1344,
+   "pct_spec_ceiling": 50.8,
+   "decode_gbs": 60.9,
+   "version": "d81235049",
+   "head_type": "Q8_0",
+   "max_load1": 4.39
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-q4_0-q8head",
+   "family": "q4+q8head",
+   "threads": 6,
+   "prefill_tok_s": 5620,
+   "decode_tok_s": 753.2,
+   "prefill_rounds": [
+    5620,
+    5199,
+    5583
+   ],
+   "decode_rounds": [
+    753.2,
+    738.7,
+    716.6
+   ],
+   "bytes_per_token_mb": 89.3,
+   "spec_ceiling_tok_s": 1344,
+   "pct_spec_ceiling": 56.0,
+   "decode_gbs": 67.2,
+   "version": "ff5a233",
+   "head_type": "Q8_0",
+   "max_load1": 4.73
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-q4_0-q8head",
+   "family": "q4+q8head",
+   "threads": 6,
+   "prefill_tok_s": 3949,
+   "decode_tok_s": 703.0,
+   "prefill_rounds": [
+    3949,
+    3748,
+    3914
+   ],
+   "decode_rounds": [
+    703.0,
+    662.5,
+    675.6
+   ],
+   "bytes_per_token_mb": 89.3,
+   "spec_ceiling_tok_s": 1344,
+   "pct_spec_ceiling": 52.3,
+   "decode_gbs": 62.8,
+   "version": "d81235049",
+   "head_type": "Q8_0",
+   "max_load1": 4.73
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-q4_0-q8head",
+   "family": "q4+q8head",
+   "threads": 10,
+   "prefill_tok_s": 5683,
+   "decode_tok_s": 638.1,
+   "prefill_rounds": [
+    5256,
+    5260,
+    5683
+   ],
+   "decode_rounds": [
+    623.6,
+    580.8,
+    638.1
+   ],
+   "bytes_per_token_mb": 89.3,
+   "spec_ceiling_tok_s": 1344,
+   "pct_spec_ceiling": 47.5,
+   "decode_gbs": 57.0,
+   "version": "ff5a233",
+   "head_type": "Q8_0",
+   "max_load1": 6.76
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-q4_0-q8head",
+   "family": "q4+q8head",
+   "threads": 10,
+   "prefill_tok_s": 3692,
+   "decode_tok_s": 603.3,
+   "prefill_rounds": [
+    3692,
+    2988,
+    3175
+   ],
+   "decode_rounds": [
+    603.3,
+    399.9,
+    480.1
+   ],
+   "bytes_per_token_mb": 89.3,
+   "spec_ceiling_tok_s": 1344,
+   "pct_spec_ceiling": 44.9,
+   "decode_gbs": 53.9,
+   "version": "d81235049",
+   "head_type": "Q8_0",
+   "max_load1": 6.76
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "webgpu (wgpu native, Metal backend)",
+   "config": "webgpu-vec",
+   "family": "q8",
+   "threads": null,
+   "prefill_tok_s": 4360,
+   "decode_tok_s": 569.2,
+   "prefill_rounds": [
+    4360,
+    4346,
+    4358
+   ],
+   "decode_rounds": [
+    569.2,
+    567.4,
+    562.1
+   ],
+   "bytes_per_token_mb": 131.3,
+   "spec_ceiling_tok_s": 914,
+   "pct_spec_ceiling": 62.3,
+   "decode_gbs": 74.7,
+   "version": "b8e79b6-dirty",
+   "max_load1": 5.5
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "webgpu (wgpu native, Metal backend)",
+   "config": "webgpu-kv16",
+   "family": "q8",
+   "threads": null,
+   "prefill_tok_s": 2829,
+   "decode_tok_s": 541.8,
+   "prefill_rounds": [
+    2826,
+    2816,
+    2829
+   ],
+   "decode_rounds": [
+    541.2,
+    541.8,
+    539.9
+   ],
+   "bytes_per_token_mb": 131.3,
+   "spec_ceiling_tok_s": 914,
+   "pct_spec_ceiling": 59.3,
+   "decode_gbs": 71.1,
+   "version": "b8e79b6-dirty",
+   "max_load1": 5.5
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-q8_0",
+   "family": "q8",
+   "threads": 4,
+   "prefill_tok_s": 4918,
+   "decode_tok_s": 487.7,
+   "prefill_rounds": [
+    4918,
+    4816,
+    4864
+   ],
+   "decode_rounds": [
+    487.7,
+    486.8,
+    487.5
+   ],
+   "bytes_per_token_mb": 131.7,
+   "spec_ceiling_tok_s": 911,
+   "pct_spec_ceiling": 53.5,
+   "decode_gbs": 64.3,
+   "version": "ff5a233",
+   "head_type": "Q8_0",
+   "max_load1": 4.39
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-q8_0",
+   "family": "q8",
+   "threads": 4,
+   "prefill_tok_s": 3378,
+   "decode_tok_s": 472.6,
+   "prefill_rounds": [
+    3378,
+    3374,
+    3188
+   ],
+   "decode_rounds": [
+    472.2,
+    472.6,
+    468.0
+   ],
+   "bytes_per_token_mb": 131.7,
+   "spec_ceiling_tok_s": 911,
+   "pct_spec_ceiling": 51.9,
+   "decode_gbs": 62.3,
+   "version": "d81235049",
+   "head_type": "Q8_0",
+   "max_load1": 4.39
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "q8-prefill",
+   "family": "q8",
+   "threads": 4,
+   "prefill_tok_s": 3016,
+   "decode_tok_s": 472.2,
+   "prefill_rounds": [
+    3016,
+    3003,
+    2920
+   ],
+   "decode_rounds": [
+    471.1,
+    471.4,
+    472.2
+   ],
+   "bytes_per_token_mb": 139.5,
+   "spec_ceiling_tok_s": 860,
+   "pct_spec_ceiling": 54.9,
+   "decode_gbs": 65.9,
+   "version": "b8e79b6-dirty",
+   "max_load1": 4.33
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "q8-kv16",
+   "family": "q8",
+   "threads": 4,
+   "prefill_tok_s": 1550,
+   "decode_tok_s": 469.9,
+   "prefill_rounds": [
+    1547,
+    1550,
+    1544
+   ],
+   "decode_rounds": [
+    468.6,
+    468.3,
+    469.9
+   ],
+   "bytes_per_token_mb": 139.5,
+   "spec_ceiling_tok_s": 860,
+   "pct_spec_ceiling": 54.6,
+   "decode_gbs": 65.5,
+   "version": "b8e79b6-dirty",
+   "max_load1": 4.44
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-q8_0",
+   "family": "q8",
+   "threads": 6,
+   "prefill_tok_s": 5411,
+   "decode_tok_s": 593.3,
+   "prefill_rounds": [
+    5411,
+    5324,
+    5324
+   ],
+   "decode_rounds": [
+    592.2,
+    566.6,
+    593.3
+   ],
+   "bytes_per_token_mb": 131.7,
+   "spec_ceiling_tok_s": 911,
+   "pct_spec_ceiling": 65.1,
+   "decode_gbs": 78.2,
+   "version": "ff5a233",
+   "head_type": "Q8_0",
+   "max_load1": 4.73
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "q8-prefill",
+   "family": "q8",
+   "threads": 6,
+   "prefill_tok_s": 3182,
+   "decode_tok_s": 579.6,
+   "prefill_rounds": [
+    3182,
+    3110,
+    3110
+   ],
+   "decode_rounds": [
+    579.6,
+    554.5,
+    565.5
+   ],
+   "bytes_per_token_mb": 139.5,
+   "spec_ceiling_tok_s": 860,
+   "pct_spec_ceiling": 67.4,
+   "decode_gbs": 80.9,
+   "version": "b8e79b6-dirty",
+   "max_load1": 5.42
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "q8-kv16",
+   "family": "q8",
+   "threads": 6,
+   "prefill_tok_s": 2086,
+   "decode_tok_s": 577.3,
+   "prefill_rounds": [
+    2086,
+    2038,
+    2075
+   ],
+   "decode_rounds": [
+    577.3,
+    542.3,
+    561.5
+   ],
+   "bytes_per_token_mb": 139.5,
+   "spec_ceiling_tok_s": 860,
+   "pct_spec_ceiling": 67.1,
+   "decode_gbs": 80.5,
+   "version": "b8e79b6-dirty",
+   "max_load1": 5.11
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-q8_0",
+   "family": "q8",
+   "threads": 6,
+   "prefill_tok_s": 3814,
+   "decode_tok_s": 551.9,
+   "prefill_rounds": [
+    3802,
+    3814,
+    3792
+   ],
+   "decode_rounds": [
+    551.9,
+    529.2,
+    550.1
+   ],
+   "bytes_per_token_mb": 131.7,
+   "spec_ceiling_tok_s": 911,
+   "pct_spec_ceiling": 60.6,
+   "decode_gbs": 72.7,
+   "version": "d81235049",
+   "head_type": "Q8_0",
+   "max_load1": 4.73
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "q8-prefill",
+   "family": "q8",
+   "threads": 10,
+   "prefill_tok_s": 3548,
+   "decode_tok_s": 585.3,
+   "prefill_rounds": [
+    3548,
+    3507,
+    3401
+   ],
+   "decode_rounds": [
+    585.3,
+    571.2,
+    543.9
+   ],
+   "bytes_per_token_mb": 139.5,
+   "spec_ceiling_tok_s": 860,
+   "pct_spec_ceiling": 68.0,
+   "decode_gbs": 81.7,
+   "version": "b8e79b6-dirty",
+   "max_load1": 6.79
+  },
+  {
+   "engine": "nanoinfer",
+   "device": "cpu",
+   "config": "q8-kv16",
+   "family": "q8",
+   "threads": 10,
+   "prefill_tok_s": 2257,
+   "decode_tok_s": 565.9,
+   "prefill_rounds": [
+    2257,
+    2224,
+    2203
+   ],
+   "decode_rounds": [
+    563.2,
+    565.9,
+    546.8
+   ],
+   "bytes_per_token_mb": 139.5,
+   "spec_ceiling_tok_s": 860,
+   "pct_spec_ceiling": 65.8,
+   "decode_gbs": 78.9,
+   "version": "b8e79b6-dirty",
+   "max_load1": 7.3
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (NEON only)",
+   "config": "gpt2-q8_0",
+   "family": "q8",
+   "threads": 10,
+   "prefill_tok_s": 5423,
+   "decode_tok_s": 482.5,
+   "prefill_rounds": [
+    5423,
+    3777,
+    5402
+   ],
+   "decode_rounds": [
+    482.5,
+    329.1,
+    360.9
+   ],
+   "bytes_per_token_mb": 131.7,
+   "spec_ceiling_tok_s": 911,
+   "pct_spec_ceiling": 53.0,
+   "decode_gbs": 63.6,
+   "version": "ff5a233",
+   "head_type": "Q8_0",
+   "max_load1": 8.67
+  },
+  {
+   "engine": "llama.cpp",
+   "device": "cpu (brew build, Accelerate BLAS for prefill)",
+   "config": "gpt2-q8_0",
+   "family": "q8",
+   "threads": 10,
+   "prefill_tok_s": 3365,
+   "decode_tok_s": 461.2,
+   "prefill_rounds": [
+    3365,
+    3213,
+    2266
+   ],
+   "decode_rounds": [
+    461.2,
+    342.5,
+    396.0
+   ],
+   "bytes_per_token_mb": 131.7,
+   "spec_ceiling_tok_s": 911,
+   "pct_spec_ceiling": 50.6,
+   "decode_gbs": 60.8,
+   "version": "d81235049",
+   "head_type": "Q8_0",
+   "max_load1": 7.51
+  }
+ ],
+ "notes": [
+  "nanoinfer CPU Q8_0/Q4_0 blocks carry an f32 scale (9/5 bpw); ggml and nanoinfer Metal/WebGPU use f16 (8.5/4.5 bpw)",
+  "nanoinfer CPU q8-kv16/q4-kv16/q8-prefill: Q8 approximate LM head + f16 rescoring; q8-prefill bytes corrected to 139.5 MB",
+  "llama.cpp default Q4_0 stores the tied head as Q6_K; gpt2-q4_0-q8head forces Q8_0 to match nanoinfer metal-lanes",
+  "MLX default 4-bit quantises the tied head to 4 bits: ppl 37 -> 311 (see quality); mlx-q4g32-q8head is the fair Q4 row",
+  "llama.cpp CPU: 'NEON only' = source build ff5a233 with GGML_BLAS=OFF GGML_METAL=OFF; brew build routes prefill to Accelerate (AMX)",
+  "candle: not run, candle-transformers has no GPT-2 model (bigcode = GPT-BigCode/MQA)"
+ ],
+ "quality": {
+  "nanoinfer_cpu": {
+   "method": "nanoinfer ppl, 4x512 windows, all positions, vs our f32 (unrolled)",
+   "f16": {
+    "ppl": 37.3878,
+    "f32_ppl": 37.3776,
+    "dppl_pct": 0.03,
+    "mean_kl": 1.33e-05,
+    "top1_pct": 99.8,
+    "tokens": 2044
+   },
+   "q8-kv16": {
+    "ppl": 37.3941,
+    "f32_ppl": 37.3776,
+    "dppl_pct": 0.04,
+    "mean_kl": 0.00204,
+    "top1_pct": 98.14,
+    "tokens": 2044
+   },
+   "q4-kv16": {
+    "ppl": 40.3352,
+    "f32_ppl": 37.3776,
+    "dppl_pct": 7.91,
+    "mean_kl": 0.0806,
+    "top1_pct": 83.07,
+    "tokens": 2044
+   }
+  },
+  "nanoinfer_metal": {
+   "method": "examples/quant_quality.rs, 2x512 windows token-by-token on the Metal kernels, vs metal-mma f32",
+   "f32 blocks + f32 head": {
+    "ppl": 35.23,
+    "mean_kl": 0.0,
+    "top1_pct": 100.0,
+    "dppl_pct": 0.0
+   },
+   "f16 blocks + f16 head": {
+    "ppl": 35.233,
+    "mean_kl": 1.05e-05,
+    "top1_pct": 99.7,
+    "dppl_pct": 0.01
+   },
+   "q8_0 blocks + f16 head": {
+    "ppl": 35.198,
+    "mean_kl": 0.000279,
+    "top1_pct": 98.3,
+    "dppl_pct": -0.09
+   },
+   "q8_0 blocks + q8_0 head": {
+    "ppl": 35.196,
+    "mean_kl": 0.00936,
+    "top1_pct": 90.1,
+    "dppl_pct": -0.1
+   },
+   "q4_0 blocks + f16 head": {
+    "ppl": 37.699,
+    "mean_kl": 0.0682,
+    "top1_pct": 82.5,
+    "dppl_pct": 7.01
+   },
+   "q4_0 blocks + q8_0 head": {
+    "ppl": 37.6,
+    "mean_kl": 0.0743,
+    "top1_pct": 80.5,
+    "dppl_pct": 6.73
+   },
+   "q4_0 blocks + q4_0 head": {
+    "ppl": 282.029,
+    "mean_kl": 2.17,
+    "top1_pct": 31.7,
+    "dppl_pct": 700.54
+   },
+   "f16 blocks + q4_0 head": {
+    "ppl": 266.451,
+    "mean_kl": 2.12,
+    "top1_pct": 32.8,
+    "dppl_pct": 656.32
+   }
+  },
+  "llama.cpp": {
+   "method": "llama-perplexity -c 512 --chunks 8 --kl-divergence vs its own F32 GGUF (Metal)",
+   "f16": {
+    "ppl": 27.205509,
+    "f32_ppl": 27.199961,
+    "dppl_pct": 0.02,
+    "mean_kl": 3e-06,
+    "top1_pct": 99.755
+   },
+   "q8_0": {
+    "ppl": 27.315448,
+    "f32_ppl": 27.199961,
+    "dppl_pct": 0.42,
+    "mean_kl": 0.013128,
+    "top1_pct": 90.294
+   },
+   "q4_0-q8head": {
+    "ppl": 29.457258,
+    "f32_ppl": 27.199961,
+    "dppl_pct": 8.3,
+    "mean_kl": 0.087663,
+    "top1_pct": 79.657
+   },
+   "q4_0-default": {
+    "ppl": 31.054991,
+    "f32_ppl": 27.199961,
+    "dppl_pct": 14.17,
+    "mean_kl": 0.133379,
+    "top1_pct": 75.245
+   }
+  },
+  "mlx": {
+   "method": "4x512 windows, all positions, vs MLX f32",
+   "f32": {
+    "ppl": 37.3775,
+    "dppl_pct": 0.0,
+    "mean_kl": 0.0,
+    "top1_pct": 100.0,
+    "tokens": 2044
+   },
+   "f16": {
+    "ppl": 37.3987,
+    "dppl_pct": 0.06,
+    "mean_kl": 0.00015621306465796528,
+    "top1_pct": 98.83,
+    "tokens": 2044
+   },
+   "q8g32": {
+    "ppl": 37.8195,
+    "dppl_pct": 1.18,
+    "mean_kl": 0.011849527956221668,
+    "top1_pct": 89.82,
+    "tokens": 2044
+   },
+   "q4g32": {
+    "ppl": 311.4729,
+    "dppl_pct": 733.32,
+    "mean_kl": 2.194854945352633,
+    "top1_pct": 37.43,
+    "tokens": 2044
+   },
+   "q4g32-q8head": {
+    "ppl": 39.4325,
+    "dppl_pct": 5.5,
+    "mean_kl": 0.07573890126148082,
+    "top1_pct": 81.36,
+    "tokens": 2044
+   }
+  }
+ }
+}

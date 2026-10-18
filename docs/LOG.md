@@ -2408,3 +2408,183 @@ Achieved bandwidth tops out around 50–60 GB/s for the quantised stages, agains
 cost (~49 parallel sections + attention + LM-head bookkeeping at ~2.4 ms/token),
 E-core stragglers (best decode thread count is 4–6, not 10), and a measured
 decline in single-core bandwidth when four streams interleave.
+
+## Head-to-head: nanoinfer vs llama.cpp, MLX, PyTorch MPS (18 Oct, evening)
+
+**Question.** Every number above is nanoinfer against its own ceiling. How does
+it compare with engines people actually use, on the same model, machine, and
+workload?
+
+**Method** (`scripts/headtohead/`, results in `bench/headtohead.json`).
+
+- Model: GPT-2 124M from our own `weights/gpt2`. llama.cpp gets it through
+  `convert_hf_to_gguf.py` (F32/F16), then `llama-quantize` (Q8_0, Q4_0). MLX
+  gets it through `mlx_lm.convert` (f32, f16, 8- and 4-bit, group 32).
+  (The converter refuses the `h.*.attn.bias` mask buffers in our safetensors;
+  `strip_hf.py` drops them.)
+- Workload, same everywhere: prompt 64 tokens (one forward), then 64 greedy
+  decode tokens at context 64 → 128, batch 1. llama-bench: `-p 64 -n 0` for
+  prefill and `-p 0 -n 64 -d 64` for decode (depth 64 means the same context).
+  MLX: `mlx_lm.stream_generate` on our exact prompt tokens (its usual
+  async-eval loop). PyTorch: HF `GPT2LMHeadModel` on MPS with the KV cache.
+- Repetitions: 1 warmup + 7 timed, median, per config. Three rounds of the
+  whole suite, strictly one engine at a time, waiting for 1-min load ≤ 8 before
+  every bench (recorded per row; max 8.7); the best round is reported, for
+  every engine. llama.cpp's Metal decode turned out **bimodal** (Q4_0: ~450
+  or ~625 tok/s across rounds, same settings); after heating the GPU with any
+  other Metal job it lands in the high mode, so `warm_check.sh` re-measures it
+  that way (15 reps) and llama.cpp gets the higher of the two. nanoinfer's
+  Metal decode moved < 2% across rounds.
+- Threads: CPU runs at 4, 6 and 10 for both engines (all rows in the JSON).
+  llama.cpp CPU: two builds. Homebrew's (build 11429) routes prefill matmuls to
+  Accelerate, i.e. the AMX unit, and we pass `-nopo 1` so `-ngl 0` really
+  keeps everything off the GPU; plus a source build at ff5a233 with
+  `GGML_BLAS=OFF`, `GGML_METAL=OFF`: pure NEON, the like-for-like CPU number.
+- Formats, matched where they can be: **Q8** = llama.cpp Q8_0 (head Q8_0 too),
+  our metal-pipelined-q8 / webgpu-vec (all Q8_0, f16 scales, identical 131.7 MB
+  per token) and MLX 8-bit g32 (affine: f16 scale + bias per 32, 9 bpw).
+  **Q4** = Q4_0 blocks + Q8_0 head, ours (metal-lanes) and llama.cpp with
+  `--output-tensor-type q8_0 --token-embedding-type q8_0` (89.3 MB both).
+  llama.cpp's default Q4_0 puts the tied head in **Q6_K** (79.9 MB), measured
+  too; MLX 4-bit quantises the head to 4 bits unless told otherwise, so we also
+  quantise it in memory as 4-bit blocks + 8-bit head. Our CPU stages differ:
+  their blocks carry an f32 scale (9 / 5 bpw, ~6–9% more bytes than ggml's
+  8.5 / 4.5), and q8-kv16 / q4-kv16 / q8-prefill decode with a Q8 approximate
+  head rescored in f16 (stage 12).
+- Ceiling: 120 GB/s spec ÷ each format's own bytes per decoded token (weights,
+  tied head counted once, position table excluded). llama.cpp bytes are read
+  out of the GGUF (`gguf_bytes.py`). (`Stage::head_format` misses q8-prefill,
+  whose bench line reports 173 MB; it decodes exactly like q8-kv16, 139.5 MB,
+  which is what the JSON uses.)
+
+**GPU (Metal), decode and prefill in tok/s:**
+
+| format | engine | decode | % spec ceiling | prefill P=64 |
+|---|---|---|---|---|
+| f32 (495 MB) | llama.cpp | **192** | 79% | **8,271** |
+| | MLX | 178 | 73% | 3,700 |
+| | nanoinfer metal-mma | 176 | 72% | 4,509 |
+| | PyTorch MPS | 156 | 64% | 5,026 |
+| f16 (247 MB) | **nanoinfer metal-pipelined-f16** | **364** | 75% | 5,208 |
+| | MLX | 342 | 70% | 5,612 |
+| | llama.cpp | 333 | 69% | **10,283** |
+| | PyTorch MPS | 252 | 52% | 6,286 |
+| Q8 (132 MB) | **nanoinfer metal-pipelined-q8** | **612** | 67% | 5,856 |
+| | nanoinfer webgpu-vec (wgpu) | 569 | 62% | 4,360 |
+| | MLX 8-bit g32 (139 MB) | 534 | 62% | 6,608 |
+| | llama.cpp Q8_0 | 502 | 55% | **10,706** |
+| Q4 + Q8 head (89 MB) | **nanoinfer metal-lanes** | **787** | 59% | 6,725 |
+| | MLX 4-bit + 8-bit head (97 MB) | 694 | 56% | 7,624 |
+| | llama.cpp Q4_0 + Q8_0 head | 622 | 46% | **10,935** |
+| other 4-bit | llama.cpp Q4_0 default (Q6_K head, 80 MB) | 654 | 44% | 11,064 |
+| | MLX 4-bit, 4-bit head (78 MB) | 750 | 48% | 7,844 |
+
+**CPU, best thread count per engine** (decode at 4 / 6 / 10 threads in brackets):
+
+| format | engine | decode | prefill P=64 (best) |
+|---|---|---|---|
+| f32 | llama.cpp NEON | **197** @6t (142 / 197 / 165) | 1,249 (Accelerate build: **2,724** @4t) |
+| | nanoinfer fast-ops | 165 @6t (137 / 165 / 164) | 2,242 |
+| f16 | llama.cpp NEON | **358** @6t (273 / 358 / 281) | **2,357** |
+| | nanoinfer f16 | 328 @6t (255 / 328 / 308) | 2,237 |
+| Q8 | llama.cpp Q8_0 NEON | **593** @6t (488 / 593 / 483) | **5,423** |
+| | nanoinfer q8-prefill | 585 @10t (472 / 580 / 585) | 3,548 |
+| Q4 + Q8 head | llama.cpp Q4_0 NEON | **753** @6t (710 / 753 / 638) | **5,683** |
+| | nanoinfer q4-kv16 | 742 @10t (638 / 703 / 742) | 2,274 |
+| Q4 (Q6_K head) | llama.cpp Q4_0 default | 800 @6t | 5,697 |
+
+The Accelerate build is slower than pure NEON everywhere except f32 prefill
+(f16 prefill drops to 540–1,360: it converts to f32 for sgemm) and its decode
+is 2–10% lower; it is in the JSON, not in this table.
+
+**Quality** (WikiText-2 test). Each engine against its *own* f32 model, because
+the tools score different windows (absolute ppl isn't comparable across them):
+nanoinfer `ppl` and `ppl_mlx.py` use 4 × 512 windows, every position (MLX f32
+ppl 37.3775 vs ours 37.3776, a good sign the two agree); llama-perplexity
+scores the second half of 8 × 512 chunks; the Metal formats come from
+`examples/quant_quality.rs` (2 × 512, on the GPU kernels).
+
+| format | engine | Δppl vs own f32 | mean KL | top-1 agreement |
+|---|---|---|---|---|
+| f16 | nanoinfer CPU / Metal | +0.03% / +0.01% | 1.3e-5 / 1.1e-5 | 99.8% / 99.7% |
+| | llama.cpp | +0.02% | 3e-6 | 99.8% |
+| | MLX | +0.06% | 1.6e-4 | 98.8% |
+| Q8 (Q8 head) | nanoinfer Metal | −0.1% | 9.4e-3 | 90.1% |
+| | llama.cpp Q8_0 | +0.4% | 1.3e-2 | 90.3% |
+| | MLX 8-bit | +1.2% | 1.2e-2 | 89.8% |
+| Q8 (rescored head) | nanoinfer CPU q8-kv16 | +0.04% | 2.0e-3 | 98.1% |
+| Q4 + Q8 head | nanoinfer Metal | +6.7% | 7.4e-2 | 80.5% |
+| | llama.cpp | +8.3% | 8.8e-2 | 79.7% |
+| | MLX 4-bit + 8-bit head | +5.5% | 7.6e-2 | 81.4% |
+| Q4 (rescored head) | nanoinfer CPU q4-kv16 | +7.9% | 8.1e-2 | 83.1% |
+| Q4, Q6_K head | llama.cpp default Q4_0 | +14.2% | 0.13 | 75.2% |
+| Q4, 4-bit head | MLX default 4-bit | **+733% (ppl 311)** | 2.2 | 37.4% |
+
+**Findings.**
+
+- **GPU decode: nanoinfer is fastest at every format below f32.** Q4 + Q8 head
+  787 vs MLX 694 (+13%) vs llama.cpp 622 (+27%); Q8 612 vs 534 / 502 (+15% /
+  +22%); f16 364 vs 342 / 333. Our WebGPU path (portable WGSL through wgpu)
+  beats both native engines at Q8 too (569). The reason is the one the GPU
+  climb kept finding: per-token fixed cost. One command buffer per token, GPU
+  argmax, no CPU wait between tokens (metal-pipelined) and 8 lanes per row on
+  the narrow matrices (metal-lanes) leave nothing between kernels; llama.cpp
+  waits for every token on the CPU (llama-bench syncs per decode), and on a
+  model this small that gap is a large part of a 1.3–1.6 ms token. It also
+  makes llama.cpp's decode depend on GPU clock state (the bimodality above).
+- **MLX's headline 4-bit number is a broken model.** Its default 4-bit
+  conversion quantises GPT-2's tied embedding / LM head to 4 bits: 750 tok/s,
+  ppl 37 → 311, top-1 37%. The same lesson as our stage 5 (the head is the
+  fragile matrix). With an 8-bit head it is 694 tok/s, below metal-lanes.
+  llama.cpp's default Q4_0 sidesteps this with a Q6_K head (+14% ppl) and
+  is 5% faster than with Q8_0, still 17% behind metal-lanes.
+- **Where we lose on the GPU: prefill, by 1.6–1.9×.** llama.cpp runs a
+  64-token prompt at 10.3–11.1k tok/s in every format; we do 4.5–6.7k (MLX
+  3.7–7.8k). Its `mul_mm` kernels stage both operands as half
+  (`simdgroup_half8x8`, f32 accumulators), even for F32 weights, so its "f32"
+  prefill is really f16 math; ours run f32 `simdgroup_float8x8` at ~1.2
+  TFLOP/s on this shape
+  (the "try simdgroup_half8x8, double-buffer K" item from the GPU summary is
+  still open). At P = 64, prefill is ~6 ms for everyone, so it hardly matters
+  for chat, but it is a clear, known gap.
+- **Where we lose on the GPU: f32 decode, by 8%** (176 vs 192). metal-mma is
+  the only f32 Metal stage, and it predates pipelining and lanes (every
+  later trick went into the quantised path).
+- **CPU decode: llama.cpp wins at its best thread count; we are 1–16% slower.** Q8 593
+  vs 585 (a tie), Q4 + Q8 head 753 vs 742 (−1.5%), f16 358 vs 328 (−8%), f32
+  197 vs 165 (−16%). The quantised gap is about the bytes: our CPU blocks keep
+  an f32 scale (9 / 5 bpw), ggml's an f16 one, so we stream 6–9% more per
+  token. f32 and f16 are older stages that never moved onto the low-latency
+  pool (stage 11) that the quantised stages use. At 10 threads the order
+  flips: llama.cpp drops with the E-cores (Q4 638, Q8 483) while our pool holds
+  (742, 585).
+- **CPU prefill: llama.cpp wins by 1.5–2.5× on quantised formats** (Q8 5.4k vs
+  our 3.5k, Q4 5.7k vs 2.3k). It repacks Q8_0/Q4_0 weights into interleaved
+  `q8_0_4x8` tiles at load time and runs them through the M4's int8 matrix
+  instructions (i8mm `smmla`, 2× the MACs of `sdot`); our q8-prefill uses
+  `sdot`, and q4-kv16 dequantises to f32 for prefill. Ours wins f32 prefill
+  against pure-NEON llama.cpp (2.2k vs 1.2k, at 10 threads), not against the
+  Accelerate build (2.7k on 4 threads, through AMX).
+- **Quality is a wash when the formats match.** Q8 with a Q8 head flips ~10%
+  of greedy picks in all three engines; Q4 + Q8 head costs +5.5–8.3% ppl and
+  ~80% top-1 in all three. Our CPU rescored head is the best Q8 on the board
+  (+0.04%, 98% top-1) at ~6% more bytes than all-Q8.
+- **PyTorch MPS** (eager HF transformers) is the slowest decode at f16 / f32
+  (252 / 156): it's the reference for "no inference engine at all".
+- **candle: not run.** candle-transformers has no GPT-2 (the closest,
+  `bigcode`, is GPT-BigCode with multi-query attention, a different model), so
+  there is no like-for-like candle number without writing the model ourselves.
+
+**Verdict.** For one user decoding on this M4's GPU, the from-scratch engine
+is the fastest of the four at f16, Q8 and Q4, at the same bytes and the same
+quality, and uses the most of the memory bandwidth (59–75% of spec vs
+llama.cpp's 46–69%). It is slower to read a prompt on both GPU and CPU, slower
+at f32 on the GPU, and slightly slower than llama.cpp's NEON kernels at CPU
+decode. All of this is GPT-2 small, where fixed per-token costs dominate, which
+favours our design; on a 7B model the matvecs would be bandwidth-bound for
+everyone and the gaps would shrink.
+
+To reproduce: `scripts/headtohead/setup.sh` (downloads, converts, builds
+llama.cpp CPU-only into `~/.cache/nanoinfer-h2h`), then `run.sh`
+(`ROUNDS=3`), `warm_check.sh`, `ppl.sh`, and
+`aggregate.py ~/.cache/nanoinfer-h2h bench/headtohead.json`.

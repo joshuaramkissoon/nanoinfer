@@ -745,6 +745,26 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
 - **Aha:** decode wanted fewer *bytes*; prefill wants fewer *instructions*. The same
   int8 trick pays both bills, for different reasons.
 
+### Head-to-head: against llama.cpp, MLX and PyTorch (18 Oct)
+
+- **The fair version.** Same GPT-2 small, same M4, same job (read 64 tokens, write 64, one user, greedy), same bytes
+  per token: llama.cpp gets Q4_0 with the same 8-bit head we use, MLX gets 4-bit blocks with an 8-bit head, CPU runs
+  compare the same thread counts, and each engine's quality is checked against its own full-precision model.
+  Everything ran one at a time, three rounds, best round for everyone (`docs/LOG.md`, "Head-to-head").
+- **Writing tokens on the GPU, we're first at every compressed size**: 4-bit **787 tok/s** vs MLX 694 and llama.cpp
+  622; 8-bit 612 vs 534 / 502; 16-bit 364 vs 342 / 333. Even the portable WebGPU build (569 at 8-bit) beats both.
+  Why: on a model this small most of a token is waiting between kernels, and the GPU climb spent eight steps
+  removing exactly that.
+- **Where we lose, plainly.** Reading the prompt: llama.cpp is 1.6–1.9× faster on the GPU (half-precision matrix
+  tiles; ours are f32) and 1.5–2.5× faster on the CPU (it repacks weights for the M4's int8 matrix instructions; we
+  use the older dot-product ones). On the CPU llama.cpp also writes tokens 1–16% faster at its best thread count
+  (our 4- and 8-bit blocks carry a 32-bit scale, so they're ~7% bigger). At full f32 on the GPU it wins by 8%.
+- **A trap worth a figure.** MLX's default 4-bit GPT-2 looks fastest of all (750 tok/s) but its perplexity goes
+  37 → **311**: it squeezed the output layer to 4 bits, the one matrix our GPU stage 5 showed you can't. Same lesson,
+  someone else's engine.
+- **Line:** "On the GPU the from-scratch engine writes faster than llama.cpp and MLX; it still reads slower, and now
+  we know exactly why."
+
 ## Open questions / things to verify before publishing
 
 ## The learner path (web: /, /learn, /lab)
