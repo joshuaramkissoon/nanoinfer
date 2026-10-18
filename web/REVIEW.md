@@ -175,4 +175,77 @@ DESIGN.md · **why** = is the motivating constraint clear · **jank** = broken o
 
 ## Fixes (phase 2)
 
-_Filled in below as each fix lands._
+Highest impact first. Each is its own commit.
+
+1. **The KV cache, explained where it's first used.** 0.2 gains a short section ("The one piece of state: the KV
+   cache"): attention needs every earlier token's key and value, they never change, so engines memoise them in an
+   append-only per-request log; 0.5 MB per token for a 7B, 2 GB at 4k tokens, unshareable, read every step. Chapter 05
+   ends with the bridge sentence. **Fig 12.1 now draws the cache**: computed cells ember, cells read back from the
+   cache blue, the cache itself as a strip of pages growing one per pass with its size (73.7 KB per GPT-2 token), and
+   a "total so far (no cache: …)" stat that shows n vs n². Defaults to the cache view; chapter 11 keeps the no-cache
+   version.
+2. **Part 0 stops front-loading vocabulary.** 0.2 defines prefill and decode before using them. The constraint map
+   (fig 0.2.4) opens one constraint at a time with a technique count on the closed rows (1,068 px → 575 px), with a
+   caption that says not to learn the names yet. The field guide keeps the full map.
+3. **Phone layouts for the two unreadable diagrams.** Fig 0.1.3 (server) stacks users → scheduler → device at 11–13 px
+   type; fig 0.3.1 (chip) puts memory on top, the bus running down, the chip full width below, with larger in-die
+   labels. Fig 0.1.1 also stacks. Before/after: `review-before-0.3.1-mobile.png`, `review-after-0.1.3-mobile.png`,
+   `review-after-0.3.1-mobile.png`. A 390 px sweep of every chapter and the field guide finds no horizontal overflow
+   and no figure text under ~8 px.
+4. **Animations pause off screen.** New `useOnScreen` hook (true while within 100 px of the viewport, false again when
+   it leaves) and a `figRef` prop on `<Fig>`. Every looping figure (0.1.1, 0.3.1, 4.1, 6.1, 6.2, 8.1, 9.1, 11.1/12.1,
+   13.1, 18.1, 19.1, the BPE stepper) passes it to `useFrame` / its interval. Verified with a rAF counter on chapter 9:
+   ~60 frames/s on screen, 0 when scrolled away. Fig 18.1 no longer plays through before you reach it.
+5. **Check-yourself rebalanced.** Every option rewritten so the right answer is short and the distractors are
+   plausible misconceptions of similar length: the right answer is the longest option in 12 of 46 questions (was 45).
+6. **When a CPU wins.** 0.3 gains "So when does a CPU win?": on the M4 the CPU and GPU read memory at 98 vs 105 GB/s, so
+   single-user decode is close (497 vs 817, mostly from the GPU waiting less); prefill isn't (2,415 vs 6,800). Rule of
+   thumb: decode follows bandwidth, prefill and batches follow FLOPs.
+7. **MoE and expert parallelism on the path.** Chapter 19 lists three splits (pipeline, tensor, expert) and explains
+   MoE in one paragraph ("knowledge without FLOPs, not without bytes"), linking the field guide's MoE lab.
+8. **Colour contract.** Fig 1.1 and every `.lr-bar` chart: bars grey, only the highlighted bar ember. Fig 9.1: bytes
+   blue, processor ember, labels 11–12.5 px, no phantom truck in the caption, plus a line on what the processor is
+   doing. Fig 6.1: redrawn at full width with 11.5–14.5 px labels, attention and feed-forward both ember (compute),
+   the stream grey; "MLP" is now "feed-forward (MLP)" to match 0.1. Fig 17.4: in-use KV pages blue. Fig 19.1: links
+   olive, GPUs larger.
+9. **Smaller gaps.** Ch 8 says why prefill is cheaper per token (one weight read serves the whole prompt) and fixes
+   "tall" → "wide". Ch 9 reconciles 0.5 FLOP/byte (f32) with 0.2's ~1 (bf16). Ch 10 acknowledges it repeats 0.2's
+   division. Ch 15 names the cost of 4-bit: top choice differs from 32-bit about 1 time in 5, perplexity +8% (new
+   glossary entry), with a legend and three stats. Paged attention is explained as virtual memory (pages + page
+   table), with a visible pointer to the fold.
+10. **Figure clean-ups.** Fig 0.2.1 defaults to 7B so every machine row has a bar; "doesn't fit" rows drop their
+    gridlines and set the label on the panel colour. Fig 0.2.3's controls keep each label with its toggle. Fig 4.1 is
+    centred with larger cells, a sign legend, and the running dot product written out under the grid. Fig 18.1 draws
+    one group of squares per pass of the big model (blue kept, dashed thrown, ember its own token) above the text, and
+    the text-kind picker fits one row. Ch 8 and 15 stat rows cut to three.
+
+## After (1–5)
+
+| concept | before | after | what moved it |
+|---|---|---|---|
+| what inference is | 4 | 4 | Unchanged; already clear. |
+| why decode is memory-bound | 4 | 5 | Prefill/decode defined in 0.2, ch 8 says why, 0.5 vs 1 reconciled, fig 9.1 colour-correct. |
+| the KV cache and why it grows | 2 | 4 | Defined in 0.2 with size arithmetic, bridged in ch 5, drawn growing in fig 12.1. |
+| quantisation: speed and cost | 3 | 4 | Cost named concretely (1 in 5 top choices, perplexity +8%); speed-limit × stat. |
+| CPU vs GPU, when each wins | 2 | 4 | New 0.3 section with the engine's own numbers and a rule of thumb. |
+| batching / continuous / paged | 3 | 4 | Paged attention as virtual memory, pointed to from the main text. |
+| speculative decoding | 4 | 5 | Fig 18.1 now shows each pass as a group you can count. |
+| MoE | 2 | 3 | One paragraph + link in ch 19; the lab itself is still only in the field guide. |
+| tensor / pipeline / expert parallelism | 2 | 3 | Expert parallelism named with its systems analogue; still a teaser chapter. |
+
+## What remains
+
+- **Fig 3.1 (embeddings) is still the densest figure**: scatter + 53-word picker + barcode + 8 neighbours. The 2-D
+  projection leaves most of its area empty. Candidates: rank-normalise the axes, drop the picker in favour of
+  clicking points, show 5 neighbours.
+- **Fig 11.1/12.1 reserve height for all 20 rows** from the start, so the first seconds show empty space under a short
+  grid. Fine for layout stability; could start smaller.
+- **MoE has no figure on the path.** The field guide's MoE lab is good (its dispatch lines are busy at 64 tokens and it
+  has four stats); a trimmed version could sit in chapter 19.
+- **Rosetta stone placement.** 0.4 still comes before part 1; it reads better as a reference after part 1. Left, as
+  every row links on.
+- **Stat rows over three** remain in ch 2 (four tiles) and the MoE lab (four).
+- **Token chip tints** (ch 2) borrow ember/blue/olive as neighbour separators; faint, but against the colour contract.
+- **Ch 13** says 5.8× in prose while the climb says 5.3× (different baselines); worth one clause.
+- **Not re-walked in full after the fixes**: chapters 2, 3, 7, 10, 13, 14, 16 got no changes beyond shared CSS (grey
+  default bars) and were spot-checked only.

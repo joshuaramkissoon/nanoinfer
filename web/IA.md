@@ -48,7 +48,7 @@ For a reader who knows distributed systems but no ML. Leans on systems analogies
 | # | chapter | the one idea | primary figures |
 |---|---|---|---|
 | 0.1 | What inference is | Training writes the weights once; inference runs a frozen function over them per token, forever. A model is a file of numbers + a fixed program; an engine is a stateful server (load, run, schedule, manage state) | Write-once/run-forever diagram; GPT-2's 124M weights as a clickable strip (real shapes); the serving stack stepped through its four jobs, each with its systems analogue |
-| 0.2 | Every word reads every weight | Bytes per token = params × bytes/weight; bandwidth ÷ that = the speed limit; decode does ~1 FLOP/byte vs ~295 an H100 can do; batching shares reads until the KV cache fills memory | Bytes-per-token calculator (GPT-2/7B/70B/405B × fp32–int4 × M4 CPU/GPU/H100/8×H100, with our measured ticks); idle-maths lanes vs users per step; $/M tokens vs batch for a 7B on an H100 (context, GQA); the constraint → technique map |
+| 0.2 | Every word reads every weight | Bytes per token = params × bytes/weight; bandwidth ÷ that = the speed limit; decode does ~1 FLOP/byte vs ~295 an H100 can do; the KV cache (memoised keys/values, per-request, 0.5 MB/token for a 7B) is introduced here; batching shares reads until the KV cache fills memory | Bytes-per-token calculator (GPT-2/7B/70B/405B × fp32–int4 × M4 CPU/GPU/H100/8×H100, with our measured ticks); idle-maths lanes vs users per step; $/M tokens vs batch for a 7B on an H100 (context, GQA); the constraint → technique map (one constraint open at a time) |
 | 0.3 | The hardware in one picture | GPUs win decode mainly through HBM bandwidth; lanes win prefill/batching; capacity decides what fits; links are 7–70× slower than local memory, so splitting is a trade | CPU vs GPU vs H100 schematic (lanes, bus ∝ bandwidth); bandwidth ladder (memory blue, links olive); tensor-parallel 70B split: read time vs all-reduce time for 1/2/4/8 GPUs, NVLink vs network |
 | 0.4 | A Rosetta stone | Inference terms ↔ distributed-systems analogues, where each holds and breaks | 19-row translation table, filterable, each row linking to its chapter or field-guide entry |
 
@@ -95,14 +95,14 @@ scale, with the speed limit) gains one bar. Details of individual stages are fol
 
 | # | milestone | the bottleneck → idea | result (measured, M4) | primary figure |
 |---|---|---|---|---|
-| 12 | The KV cache | recomputing old tokens → keep their keys and values | 0.37 → 19 tok/s (51×) | Naive vs cached work per token, animated; climb |
+| 12 | The KV cache | recomputing old tokens → keep their keys and values | 0.37 → 19 tok/s (51×) | Work per token with the cache drawn (computed = ember, read from cache = blue, the cache as a growing strip of pages with its size); climb |
 | 13 | Faster arithmetic | one long chain of adds → 16 independent accumulators, SIMD | 19 → 100 tok/s; now memory-bound | Checkout lanes: 1 lane vs 16; climb |
 | 14 | Many cores | one core can't drain memory → threads (and stop them sleeping) | 100 → 146 tok/s decode, prefill 2,415 tok/s | Threads slider over measured bandwidth per thread count |
 | 15 | Smaller numbers | bytes are the limit → f16, 8-bit and 4-bit weights | 146 → 497 tok/s (q4) / 425 (q8, near-lossless) | Quantize a real block of 32 weights at 8/4/2 bits; climb |
 | 16 | The GPU | CPU-shaped code and waiting → GPU-shaped kernels, stop waiting | 20 → 817 tok/s decode, 6,800 tok/s prefill (quiet machine) | "Wait after every op" vs "wait once" timeline; climb |
-| 17 | Batching | one user leaves the GPU idle → serve many per weight read | 788 → 6,453 tok/s total (B=256, 25 each); median first token 3.5 s → 40 ms with continuous batching | Total vs per-user speed as the batch grows (the trade-off); static vs continuous timeline (requests as bars); paged-KV block table folded |
+| 17 | Batching | one user leaves the GPU idle → serve many per weight read | 788 → 6,453 tok/s total (B=256, 25 each); median first token 3.5 s → 40 ms with continuous batching | Total vs per-user speed as the batch grows (the trade-off); static vs continuous timeline (requests as bars); paged attention (virtual-memory pages + block table) folded |
 | 18 | Guess ahead (speculative decoding) | one user, big model, memory-bound → a small drafter guesses k tokens, the big model checks them in one pass | GPT-2 large 63 → 268 tok/s (4.25×) on licence text; prose 0.8–0.93 acceptance, code 0.65–0.88 | Playback of a real run (kept guesses, thrown-away guesses, the big model's own token); speed-up and acceptance by kind of text |
-| 19 | Many GPUs (teaser) | the model doesn't fit → split it, and pay for talking | (later post) | Ring all-reduce toy |
+| 19 | Many GPUs (teaser) | the model doesn't fit → split it (pipeline, tensor, expert; MoE in one paragraph, linking the field guide's MoE lab), and pay for talking | (later post) | Ring all-reduce toy |
 
 Numbers in part 3 are not typed into the pages: the GPU, batching, serving and speculative-decoding figures and prose
 read `public/learn/data.json`, which `scripts/learn-data.py` builds from `bench/results.jsonl`, `batching.json`,
