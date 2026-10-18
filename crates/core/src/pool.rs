@@ -41,6 +41,10 @@ struct Shared {
     sleeping: AtomicUsize,
     lock: Mutex<()>,
     wake: Condvar,
+    /// Held by the thread currently dispatching. The protocol supports one
+    /// dispatcher at a time; a concurrent caller (e.g. two sessions on two
+    /// threads, or parallel unit tests) runs its job serially instead.
+    dispatch: Mutex<()>,
 }
 
 pub struct Pool {
@@ -114,8 +118,8 @@ impl Pool {
     }
 
     /// Run `f(0..n_chunks)` across the pool and the calling thread; returns when
-    /// every call has finished. Not re-entrant (don't call `run` from inside `f`),
-    /// and one dispatcher at a time.
+    /// every call has finished. Not re-entrant (don't call `run` from inside `f`).
+    /// Concurrent dispatchers are safe: all but one run their job serially.
     pub fn run(&self, n_chunks: usize, f: &(dyn Fn(usize) + Sync)) {
         if self.threads == 1 || n_chunks <= 1 {
             (0..n_chunks).for_each(f);
@@ -123,6 +127,10 @@ impl Pool {
         }
         assert!(n_chunks < 1 << 16, "too many chunks");
         let sh = self.shared;
+        let Ok(_dispatching) = sh.dispatch.try_lock() else {
+            (0..n_chunks).for_each(f);
+            return;
+        };
         let job = Job { f };
         sh.completed.store(0, Relaxed);
         // Safety (lifetime erasure): workers only dereference `job` while this job
@@ -160,6 +168,7 @@ pub fn init(threads: usize, on_start: fn()) -> usize {
             sleeping: AtomicUsize::new(0),
             lock: Mutex::new(()),
             wake: Condvar::new(),
+            dispatch: Mutex::new(()),
         }));
         for i in 1..threads {
             std::thread::Builder::new()
@@ -196,5 +205,24 @@ mod tests {
             });
             assert!(hits.iter().all(|h| h.load(Relaxed) == 1), "round {round}");
         }
+    }
+
+    #[test]
+    fn concurrent_dispatchers_are_safe() {
+        std::thread::scope(|sc| {
+            for t in 0..4 {
+                sc.spawn(move || {
+                    let pool = global();
+                    for round in 0..500usize {
+                        let n = 1 + (round + t) % 23;
+                        let hits: Vec<AtomicUsize> = (0..n).map(|_| AtomicUsize::new(0)).collect();
+                        pool.run(n, &|i| {
+                            hits[i].fetch_add(1, Relaxed);
+                        });
+                        assert!(hits.iter().all(|h| h.load(Relaxed) == 1));
+                    }
+                });
+            }
+        });
     }
 }
