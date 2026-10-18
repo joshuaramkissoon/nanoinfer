@@ -1,7 +1,9 @@
-import { defineConfig, type Plugin, type Connect } from "vite";
+import { defineConfig, loadEnv, type Plugin, type Connect } from "vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
+import { askEnvFrom, handleAsk } from "./server/ask";
 
 // Cross-origin isolation: gives the worker ~5 µs performance.now() (vs ~100 µs)
 // and, later, SharedArrayBuffer for threaded wasm.
@@ -50,10 +52,42 @@ function localData(): Plugin {
   };
 }
 
-export default defineConfig({
-  plugins: [react(), localData()],
+/** Select-to-ask in dev: /api/ask runs server/ask.ts here, so the key (from the shell
+ *  env or web/.env.local, never VITE_-prefixed) stays on the server. */
+function askApi(mode: string): Plugin {
+  const env = { ...loadEnv(mode, __dirname, ""), ...process.env } as Record<string, string | undefined>;
+  const mw: Connect.NextHandleFunction = async (req, res, next) => {
+    if (!(req.url ?? "").startsWith("/api/ask")) return next();
+    try {
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c as Buffer);
+      const request = new Request(`http://localhost${req.url}`, {
+        method: req.method,
+        headers: { "content-type": String(req.headers["content-type"] ?? "application/json") },
+        body: req.method === "POST" ? Buffer.concat(chunks) : undefined,
+      });
+      const r = await handleAsk(request, askEnvFrom(env), req.socket.remoteAddress ?? "?");
+      res.statusCode = r.status;
+      r.headers.forEach((v, k) => res.setHeader(k, v));
+      for (const [k, v] of Object.entries(isolation)) res.setHeader(k, v);
+      if (r.body) Readable.fromWeb(r.body as import("node:stream/web").ReadableStream).pipe(res);
+      else res.end();
+    } catch (e) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: (e as Error).message }));
+    }
+  };
+  return {
+    name: "nanoinfer-ask",
+    configureServer: (s) => void s.middlewares.use(mw),
+    configurePreviewServer: (s) => void s.middlewares.use(mw),
+  };
+}
+
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), localData(), askApi(mode)],
   server: { headers: isolation, port: 5199 },
   preview: { headers: isolation, port: 5199 },
   worker: { format: "es" },
   build: { target: "es2022" },
-});
+}));

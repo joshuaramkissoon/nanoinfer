@@ -66,7 +66,7 @@ scale, with the speed limit) gains one bar. Details of individual stages are fol
 | 14 | Many cores | one core can't drain memory → threads (and stop them sleeping) | 100 → 146 tok/s decode, prefill 2,415 tok/s | Threads slider over measured bandwidth per thread count |
 | 15 | Smaller numbers | bytes are the limit → f16, 8-bit and 4-bit weights | 146 → 497 tok/s (q4) / 425 (q8, near-lossless) | Quantize a real block of 32 weights at 8/4/2 bits; climb |
 | 16 | The GPU | CPU-shaped code and waiting → GPU-shaped kernels, stop waiting | 14.6 → 641 tok/s decode, 8,900 tok/s prefill | "Wait after every op" vs "wait once" timeline; climb |
-| 17 | Batching | one user leaves the GPU idle → serve many per weight read | 657 → 4,986 tok/s total (B=256), first token 4.4 s → 62 ms with continuous batching | Batch-size slider: total vs per-user speed |
+| 17 | Batching | one user leaves the GPU idle → serve many per weight read | 788 → 6,453 tok/s total (B=256), first token 4.4 s → 62 ms with continuous batching | Batch-size slider: total vs per-user speed |
 | 18 | Many GPUs (teaser) | the model doesn't fit → split it, and pay for talking | (later post) | Ring all-reduce toy |
 
 ## Part 4: The Lab (/lab)

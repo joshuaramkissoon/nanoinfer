@@ -1,74 +1,34 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { boot, loadModel, useEngine, engine, setState, WEIGHTS_BASE, weightLabel } from "./engine/client";
 import { Figure } from "./ui/Figure";
+import { TopBar } from "./site/TopBar";
 import { PANELS } from "./panels/registry";
 import { fmtBytes, fmtMs, sig } from "./lib/fmt";
 
-type Theme = "light" | "dark";
-const THEME_KEY = "minimal-theme"; // same key as jkmr, so the choice carries over
-
-function useTheme(): [Theme, () => void] {
-  const [t, setT] = useState<Theme>(() => {
-    try {
-      const s = localStorage.getItem(THEME_KEY);
-      if (s === "light" || s === "dark") return s;
-    } catch {
-      /* ignore */
-    }
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  });
-  useEffect(() => {
-    document.body.dataset.theme = t;
-  }, [t]);
-  return [
-    t,
-    () =>
-      setT((x) => {
-        const n = x === "dark" ? "light" : "dark";
-        try {
-          localStorage.setItem(THEME_KEY, n);
-        } catch {
-          /* ignore */
-        }
-        return n;
-      }),
-  ];
-}
-
 export default function App() {
-  const [theme, toggle] = useTheme();
-  useEffect(() => void boot(), []);
+  useEffect(() => {
+    document.title = "The lab · nanoinfer";
+    void boot();
+  }, []);
   return (
-    <main className="nv">
-      <div className="nv-wide nv-top">
-        <span className="nv-brand">
-          nanoinfer<span>.</span>live
-        </span>
-        <span style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
-          <a className="nv-muted" href="https://github.com/joshuaramkissoon/nanoinfer" style={{ textDecoration: "none" }}>
-            source
-          </a>
-          <button className="nv-iconbtn" onClick={toggle} aria-label="toggle theme">
-            {theme === "dark" ? "☀" : "☾"}
-          </button>
-        </span>
-      </div>
+    <main className="nv lr" data-askable data-ask-title="The lab: the engine room">
+      <TopBar here="lab" crumb={<span> / lab</span>} />
 
-      <header className="nv-col nv-hero">
-        <div className="nv-kicker">GPT-2 124M · from scratch in Rust · compiled to WebAssembly</div>
+      <header className="nv-col nv-hero" data-ask-section>
+        <div className="nv-kicker">part 4 · the lab</div>
         <h1 className="nv-h1">
-          A language model, running <em>in this tab</em>, with the lid off.
+          The engine room: everything, <em>running in this tab</em>.
         </h1>
         <p className="nv-lead">
-          Every token re-reads the whole book of weights to say one word. Below, the same engine that's being hillclimbed
-          natively on a Mac mini runs on your CPU. Nothing is a mock-up or a screenshot: each figure is drawn from the timings
-          the engine reports as it runs.
+          This is for after the <a href="/learn">course</a>. Every figure here is drawn from the engine as it runs, with
+          nothing simplified away, and each one links back to the chapter that explains its idea. Load GPT-2 below (once,
+          cached afterwards) to drive them all live; until then they show a recorded run.
         </p>
         <EngineCard />
       </header>
 
       {PANELS.map((p, i) => (
-        <section key={p.id}>
+        <section key={p.id} data-ask-section>
           {p.intro && <div className="nv-col nv-prose">{p.intro}</div>}
           <Figure id={p.id} n={i + 1} title={p.title} caption={p.caption} narrow={p.narrow}>
             <p.Component />
@@ -122,6 +82,8 @@ function EngineCard() {
           <i style={{ width: `${(frac * 100).toFixed(1)}%` }} />
         </div>
       )}
+      <details className="nv-engine-more">
+        <summary className="nv-muted">engine details</summary>
       <div className="nv-engine-row nv-muted" style={{ fontSize: "0.72rem" }}>
         <span>stages: {s.stages.map((x) => x.name).join(" → ") || "…"}</span>
         <span>
@@ -152,6 +114,7 @@ function EngineCard() {
           {s.dtype === "f16" ? " (rounded to f16 for the download, widened to f32 on load)" : ""}
         </span>
       </div>
+      </details>
     </div>
   );
 }

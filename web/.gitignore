@@ -5,3 +5,7 @@ src/engine/pkg-*/
 screenshots/*.png
 !screenshots/README.md
 tsconfig.tsbuildinfo
+
+.env
+.env.local
+.env.*.local

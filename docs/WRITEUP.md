@@ -636,3 +636,26 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
   int8 trick pays both bills, for different reasons.
 
 ## Open questions / things to verify before publishing
+
+## The learner path (web: /, /learn, /lab)
+
+The demo page was a wall of expert figures. It's now a course with the engine as its evidence (plan in `web/IA.md`):
+a landing page asking *what happens when a model writes the next word, and how fast can one computer do it?*, then 18
+one-idea chapters in three parts, then the Lab (the old page, curated).
+
+- **Part 1, how a model writes text** (8 chapters): next-token guessing on a real run, a live GPT-2 BPE tokenizer in
+  ~80 lines of TS (cross-checked ID-for-ID against the engine's Rust tokenizer), real embedding neighbours (" Monday" →
+  the other six days at cosine 0.80–0.89), a real 8×8 corner of a GPT-2 matrix times a real embedding, toy attention
+  then the real 144 heads, the residual stream + logit lens, sampling on real logits, the loop replayed at its measured
+  timings (prefill 14 tokens in 82 ms; decode ~10 ms/token in V8).
+- **Part 2, why it's slow**: the truck and the factory (0.5 FLOP/B vs the tab's 1.6 ridge), the speed-limit
+  calculator (bandwidth ÷ bytes; 243 tok/s for f32 GPT-2 on a 120 GB/s M4), and the starting line (0.37 tok/s, 0.15% of
+  the limit, because naive recomputes the whole text: 26 tok/s prefill ÷ 72 tokens ≈ 0.36).
+- **Part 3, making it fast**: the hillclimb regrouped into six milestones, each "bottleneck → idea → result", with one
+  climb chart gaining a bar per chapter: KV cache 19 → faster arithmetic 100 → many cores 146 → smaller numbers 497 →
+  the GPU 641 tok/s → batching 6,453 tok/s total (256 users, 25 each). Ending on a ring all-reduce teaser.
+- Every figure says what you're looking at and what to try, carries a provenance tag (toy / diagram / real weights /
+  recorded engine run / measured / live), and the chart colours are a validated 3-hue palette.
+- Select any text to ask about it: a Tangent-style tooltip and streamed side panel, proxied server-side (Together,
+  DeepSeek V4.1 Flash; the `-1017` release is preferred automatically once Together serves it).
+- **Line:** "One idea per page, and every number on it is one we measured."

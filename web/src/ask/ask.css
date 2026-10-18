@@ -1,0 +1,265 @@
+/* Select-to-ask: the toolbar over a selection and the answers panel. */
+
+.ask-bar {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--m-fg);
+  color: var(--m-bg);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+  font-size: 0.78rem;
+  animation: ask-in 0.16s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes ask-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.ask-bar button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0.38rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+.ask-bar button:hover {
+  background: color-mix(in srgb, var(--m-bg) 16%, transparent);
+}
+.ask-bar button.primary {
+  font-weight: 700;
+}
+.ask-bar form {
+  display: flex;
+  gap: 2px;
+}
+.ask-bar input {
+  width: 15.5rem;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0.38rem 0.5rem;
+}
+.ask-bar input::placeholder {
+  color: color-mix(in srgb, var(--m-bg) 55%, transparent);
+}
+.spark {
+  color: var(--m-accent);
+}
+.ask-bar .spark {
+  color: color-mix(in srgb, var(--m-accent) 60%, var(--m-bg));
+}
+
+.ask-panel {
+  position: fixed;
+  z-index: 55;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(400px, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--m-bg);
+  border-left: 1px solid var(--m-rule);
+  box-shadow: -18px 0 50px rgb(0 0 0 / 0.07);
+  transform: translateX(105%);
+  transition: transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
+  font-size: 0.86rem;
+  color: var(--m-fg);
+}
+.ask-panel.open {
+  transform: none;
+}
+.ask-panel header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--m-rule);
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+.ask-model {
+  font-weight: 400;
+  color: var(--m-muted);
+  font-size: 0.7rem;
+}
+.ask-modes {
+  display: inline-flex;
+  border: 1px solid var(--m-rule);
+  border-radius: 6px;
+  padding: 2px;
+}
+.ask-modes button {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--m-sub);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ask-modes button[aria-pressed="true"] {
+  background: var(--m-code-bg);
+  color: var(--m-fg);
+  font-weight: 700;
+}
+.ask-x {
+  border: 0;
+  background: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: var(--m-muted);
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+.ask-x:hover {
+  color: var(--m-fg);
+}
+.ask-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.4rem 1rem 1.2rem;
+}
+.ask-turn {
+  padding-top: 1rem;
+}
+.ask-turn blockquote {
+  margin: 0.6rem 0 0.7rem;
+  padding: 0.1rem 0 0.1rem 0.8rem;
+  border-left: 2px solid var(--m-accent);
+  color: var(--m-sub);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+.ask-q {
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+.ask-a {
+  line-height: 1.7;
+  margin-top: 0.3rem;
+}
+.ask-a p {
+  margin: 0.55em 0 0;
+}
+.ask-a ul {
+  margin: 0.5em 0 0;
+  padding-left: 1.1rem;
+}
+.ask-a code {
+  background: var(--m-code-bg);
+  border-radius: 3px;
+  padding: 0.05em 0.3em;
+  font-size: 0.86em;
+}
+.ask-a pre {
+  background: var(--m-code-bg);
+  border-radius: 6px;
+  padding: 0.6rem 0.7rem;
+  overflow-x: auto;
+  font-size: 0.78rem;
+}
+.ask-a pre code {
+  background: none;
+  padding: 0;
+}
+.ask-a mark {
+  background: color-mix(in srgb, var(--m-accent) 22%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 0.1em;
+}
+.ask-dots {
+  color: var(--m-muted);
+  font-size: 0.78rem;
+}
+.ask-dots::after {
+  content: "…";
+  animation: nv-pulse 1s infinite;
+}
+.ask-err {
+  color: var(--m-up);
+  font-size: 0.8rem;
+  margin-top: 0.4rem;
+}
+.ask-err button {
+  border: 1px solid var(--m-rule);
+  background: none;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 0.74rem;
+  color: var(--m-fg);
+  cursor: pointer;
+  padding: 0.1rem 0.45rem;
+}
+.ask-off,
+.ask-empty {
+  margin-top: 1rem;
+  color: var(--m-sub);
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+.ask-off code {
+  background: var(--m-code-bg);
+  border-radius: 3px;
+  padding: 0.05em 0.3em;
+}
+.ask-follow {
+  border-top: 1px solid var(--m-rule);
+  padding: 0.7rem 1rem;
+}
+.ask-follow input {
+  width: 100%;
+  border: 1px solid var(--m-rule);
+  border-radius: 8px;
+  background: var(--nv-panel);
+  color: var(--m-fg);
+  font: inherit;
+  font-size: 0.84rem;
+  padding: 0.55rem 0.7rem;
+  outline: none;
+}
+.ask-follow input:focus {
+  border-color: var(--m-accent);
+}
+.ask-reopen {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 50;
+  border: 1px solid var(--m-rule);
+  background: var(--m-bg);
+  color: var(--m-fg);
+  border-radius: 999px;
+  padding: 0.45rem 0.85rem;
+  font: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.08);
+}
+.ask-reopen:hover {
+  border-color: var(--m-accent);
+}
+@media (max-width: 640px) {
+  .ask-panel {
+    top: auto;
+    height: 72vh;
+    width: 100vw;
+    border-left: 0;
+    border-top: 1px solid var(--m-rule);
+    border-radius: 14px 14px 0 0;
+    transform: translateY(105%);
+  }
+}
