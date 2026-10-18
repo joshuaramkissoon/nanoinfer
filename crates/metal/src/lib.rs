@@ -90,6 +90,19 @@ pub enum Par {
     Simd,
 }
 
+/// How much of a decode step is fused into the matvecs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fusion {
+    /// One dispatch per op (11 per layer).
+    None,
+    /// LayerNorm in every matvec's prologue + epilogues: 5 per layer
+    /// (slower: each threadgroup re-stages and re-normalises the input row).
+    Full,
+    /// Epilogues only (bias + GELU, residual add, KV-cache write); LayerNorm
+    /// stays its own small kernel: 7 per layer.
+    Epilogue,
+}
+
 /// Everything that distinguishes one Metal stage from another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Recipe {
@@ -101,11 +114,13 @@ pub struct Recipe {
     pub matmul: Matmul,
     pub norm: Par,
     pub attn: Par,
-    /// Fused kernels (layernorm into matvec, bias+gelu, residual into the
-    /// projection) instead of one dispatch per op.
-    pub fused: bool,
+    /// Decode-time kernel fusion.
+    pub fused: Fusion,
     /// Argmax over the logits on the GPU (only 4 bytes read back).
     pub gpu_argmax: bool,
+    /// Greedy decode commits every token's command buffer up front; each
+    /// forward reads the token the previous one's argmax wrote on the GPU.
+    pub pipelined: bool,
 }
 
 /// The Metal hillclimb, in order.
@@ -129,6 +144,18 @@ pub enum MetalStage {
     Q8,
     /// metal-mma with Q4_0 weights, dequantised in registers.
     Q4,
+    /// metal-q4 + argmax on the GPU.
+    Argmax,
+    /// + LayerNorm fused into the matvec prologues and epilogue fusion (dead end, kept runnable).
+    FusedLn,
+    /// + epilogue fusion: bias+GELU, residual add, KV write inside the matvecs.
+    Fused,
+    /// + the CPU stops waiting between tokens (GPU-resident greedy loop).
+    Pipelined,
+    /// metal-pipelined with f16 weights (the fastest lossless-ish stage).
+    PipelinedF16,
+    /// metal-pipelined with Q8_0 weights everywhere.
+    PipelinedQ8,
 }
 
 impl MetalStage {
@@ -142,6 +169,12 @@ impl MetalStage {
         MetalStage::F16,
         MetalStage::Q8,
         MetalStage::Q4,
+        MetalStage::Argmax,
+        MetalStage::FusedLn,
+        MetalStage::Fused,
+        MetalStage::Pipelined,
+        MetalStage::PipelinedF16,
+        MetalStage::PipelinedQ8,
     ];
 
     pub fn name(self) -> &'static str {
@@ -155,6 +188,12 @@ impl MetalStage {
             MetalStage::F16 => "metal-f16",
             MetalStage::Q8 => "metal-q8",
             MetalStage::Q4 => "metal-q4",
+            MetalStage::Argmax => "metal-argmax",
+            MetalStage::FusedLn => "metal-fused-ln",
+            MetalStage::Fused => "metal-fused",
+            MetalStage::Pipelined => "metal-pipelined",
+            MetalStage::PipelinedF16 => "metal-pipelined-f16",
+            MetalStage::PipelinedQ8 => "metal-pipelined-q8",
         }
     }
 
@@ -167,11 +206,14 @@ impl MetalStage {
             matmul: Matmul::Naive,
             norm: Par::Naive,
             attn: Par::Naive,
-            fused: false,
+            fused: Fusion::None,
             gpu_argmax: false,
+            pipelined: false,
         };
         let par = Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, norm: Par::Simd, attn: Par::Simd, ..naive };
         let mma = Recipe { matmul: Matmul::SimdMatrix, ..par };
+        let q4 = Recipe { dtype: DType::Q4_0, head_dtype: DType::Q8_0, ..mma };
+        let pipelined = Recipe { gpu_argmax: true, fused: Fusion::Epilogue, pipelined: true, ..q4 };
         match self {
             MetalStage::Naive => naive,
             MetalStage::OneCb => Recipe { sync: Sync::PerForward, ..naive },
@@ -181,7 +223,13 @@ impl MetalStage {
             MetalStage::Mma => mma,
             MetalStage::F16 => Recipe { dtype: DType::F16, head_dtype: DType::F16, ..mma },
             MetalStage::Q8 => Recipe { dtype: DType::Q8_0, head_dtype: DType::Q8_0, ..mma },
-            MetalStage::Q4 => Recipe { dtype: DType::Q4_0, head_dtype: DType::Q8_0, ..mma },
+            MetalStage::Q4 => q4,
+            MetalStage::Argmax => Recipe { gpu_argmax: true, ..q4 },
+            MetalStage::FusedLn => Recipe { gpu_argmax: true, fused: Fusion::Full, ..q4 },
+            MetalStage::Fused => Recipe { gpu_argmax: true, fused: Fusion::Epilogue, ..q4 },
+            MetalStage::Pipelined => pipelined,
+            MetalStage::PipelinedF16 => Recipe { dtype: DType::F16, head_dtype: DType::F16, ..pipelined },
+            MetalStage::PipelinedQ8 => Recipe { dtype: DType::Q8_0, head_dtype: DType::Q8_0, ..pipelined },
         }
     }
 

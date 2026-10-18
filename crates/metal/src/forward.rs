@@ -7,7 +7,7 @@
 
 use crate::gpu::{Arg, Buf, Gpu, RunStats, Runner};
 use crate::weights::{Mat, Weights};
-use crate::{DType, Matmul, Matvec, MetalStage, Par, Recipe};
+use crate::{DType, Fusion, Matmul, Matvec, MetalStage, Par, Recipe};
 use nanoinfer_core::{Config, Model};
 
 /// GPU-resident model for one stage (weights in that stage's dtype).
@@ -51,6 +51,13 @@ pub struct MetalSession<'e> {
     scores: Buf,
     logits: Buf,
     argmax: Buf,
+    /// Argmax partials (value, index) per threadgroup.
+    arg_v: Buf,
+    arg_i: Buf,
+    /// Token ids by absolute position, written by the CPU or by `argmax_final`
+    /// (gen[pos + 1] = argmax of the forward at pos). Lets decode run without
+    /// the CPU in the loop.
+    gen: Buf,
     k_cache: Buf,
     v_cache: Buf,
     /// Counters for the most recent `step`.
@@ -66,6 +73,12 @@ const F: usize = 4; // bytes per f32
 const MV_ROWS: usize = 4;
 const MV_SIMDGROUPS: usize = 4;
 const MV_KERNEL: &str = "matvec_simd_r4";
+
+/// Threadgroups (of 1024 threads) in the first argmax pass.
+const ARGMAX_GROUPS: usize = 32;
+/// Fused matvec shape: 4 rows per SIMD-group, 8 SIMD-groups = 32 rows per threadgroup.
+const FUSED_ROWS: usize = 4;
+const FUSED_SIMDGROUPS: usize = 8;
 
 impl<'e> MetalSession<'e> {
     fn new(e: &'e MetalEngine) -> Self {
@@ -87,7 +100,10 @@ impl<'e> MetalSession<'e> {
             fc: g.buffer(rows * 4 * c * F),
             scores: g.buffer(scores),
             logits: g.buffer(v * F),
-            argmax: g.buffer(1024 * 8),
+            argmax: g.buffer(16),
+            arg_v: g.buffer(ARGMAX_GROUPS * 4),
+            arg_i: g.buffer(ARGMAX_GROUPS * 4),
+            gen: g.buffer((rows + 1) * 4),
             k_cache: g.buffer(kv),
             v_cache: g.buffer(kv),
             last: RunStats::default(),
@@ -144,6 +160,7 @@ impl<'e> MetalSession<'e> {
 
     fn run(&mut self, tokens: &[u32], argmax: bool) {
         self.tokens.write(0, tokens);
+        self.gen.write(self.pos, &tokens[tokens.len() - 1..]);
         let mut r = self.e.gpu.runner(self.e.recipe.sync);
         r.profile = self.profile.take();
         self.encode_forward(&mut r, tokens.len(), argmax);
@@ -151,6 +168,46 @@ impl<'e> MetalSession<'e> {
         self.profile = r.profile.take();
         self.last = r.stats;
         self.pos += tokens.len();
+    }
+
+    /// Greedy-decode `n` tokens, the first one fed `first`; returns the `n`
+    /// generated tokens. Same result as calling [`step_greedy`](Self::step_greedy)
+    /// in a loop. With `Recipe::pipelined`, the CPU never waits between
+    /// tokens: every forward reads its input token from `gen[pos]`, which the
+    /// previous forward's argmax wrote, so all `n` command buffers are
+    /// committed up front and the GPU runs them back to back.
+    pub fn decode_greedy(&mut self, first: u32, n: usize) -> Result<Vec<u32>, String> {
+        self.check(&[first])?;
+        let rec = self.e.recipe;
+        if !(rec.pipelined && rec.gpu_argmax && rec.fused != Fusion::None) {
+            let mut out = Vec::with_capacity(n);
+            let mut next = first;
+            for _ in 0..n {
+                next = self.step_greedy(&[next])?;
+                out.push(next);
+            }
+            return Ok(out);
+        }
+        if self.pos + n > self.max_seq {
+            return Err(format!("context full: {} > {}", self.pos + n, self.max_seq));
+        }
+        let pos0 = self.pos;
+        self.gen.write(pos0, &[first]);
+        let mut stats = RunStats::default();
+        let mut pending = Vec::with_capacity(n);
+        for _ in 0..n {
+            let mut r = self.e.gpu.runner(rec.sync);
+            self.encode_decode_fused(&mut r, true);
+            stats.dispatches += r.stats.dispatches;
+            pending.push(r.commit());
+            self.pos += 1;
+        }
+        for p in pending.into_iter().flatten() {
+            stats.gpu_seconds += p.wait();
+            stats.command_buffers += 1;
+        }
+        self.last = stats;
+        Ok(self.gen.slice::<u32>(pos0 + n + 1)[pos0 + 1..].to_vec())
     }
 
     /// `out[n, rows] = x[n, cols] · Wᵀ (+ bias)`.
@@ -296,7 +353,241 @@ impl<'e> MetalSession<'e> {
         }
     }
 
-    fn encode_forward(&self, r: &mut Runner, n: usize, _argmax: bool) {
+    fn encode_forward(&self, r: &mut Runner, n: usize, argmax: bool) {
+        if self.e.recipe.fused != Fusion::None && n == 1 {
+            return self.encode_decode_fused(r, argmax);
+        }
+        self.encode_forward_unfused(r, n);
+        if argmax {
+            self.encode_argmax(r);
+        }
+    }
+
+    /// Argmax over the logits on the GPU; writes `argmax[0]` and `gen[pos + n]`.
+    fn encode_argmax(&self, r: &mut Runner) {
+        let v = self.e.config.n_vocab as u32;
+        r.dispatch_tg(
+            "argmax",
+            "argmax_partial",
+            &[Arg::Buf(&self.logits), Arg::Buf(&self.arg_v), Arg::Buf(&self.arg_i), Arg::U32(v)],
+            (ARGMAX_GROUPS, 1, 1),
+            (1024, 1, 1),
+            64 * F,
+        );
+        // The slot this forward's prediction belongs to (pos is not yet advanced).
+        let slot = (self.pos + r.pending_tokens()) as u32;
+        r.dispatch_tg(
+            "argmax",
+            "argmax_final",
+            &[
+                Arg::Buf(&self.arg_v),
+                Arg::Buf(&self.arg_i),
+                Arg::U32(ARGMAX_GROUPS as u32),
+                Arg::Buf(&self.argmax),
+                Arg::Buf(&self.gen),
+                Arg::U32(slot),
+            ],
+            (1, 1, 1),
+            (32, 1, 1),
+            0,
+        );
+    }
+
+    /// One decode step (n = 1) with fused kernels: 5 dispatches per layer.
+    /// Input token is `gen[pos]`.
+    fn encode_decode_fused(&self, r: &mut Runner, argmax: bool) {
+        let cfg = self.e.config;
+        let w = &self.e.w;
+        let c = cfg.n_embd;
+        let pos = self.pos as u32;
+        r.set_pending_tokens(1);
+        r.dispatch(
+            "embed",
+            "embed_gen",
+            &[
+                Arg::Buf(&self.x),
+                Arg::Buf(&w.wte),
+                Arg::Buf(&w.wpe),
+                Arg::Buf(&self.gen),
+                Arg::U32(pos),
+                Arg::U32(pos),
+                Arg::U32(c as u32),
+            ],
+            c,
+            256,
+        );
+        if self.e.recipe.fused == Fusion::Epilogue {
+            return self.encode_decode_epilogue(r, argmax);
+        }
+        for (l, lw) in w.layers.iter().enumerate() {
+            let layer_off = l * cfg.n_ctx * c * F;
+            let kc = Arg::BufAt(&self.k_cache, layer_off);
+            let vc = Arg::BufAt(&self.v_cache, layer_off);
+            self.fused(
+                r,
+                "qkv",
+                "mvf_ln_qkv",
+                &self.qkv,
+                &self.x,
+                &lw.attn_w,
+                &lw.attn_b,
+                Some((&lw.ln1_w, &lw.ln1_b)),
+                Some((kc, vc)),
+            );
+            self.attention(r, l, 1);
+            self.fused(r, "attn_proj", "mvf_resid", &self.x, &self.att, &lw.proj_w, &lw.proj_b, None, None);
+            self.fused(
+                r,
+                "fc",
+                "mvf_ln_gelu",
+                &self.fc,
+                &self.x,
+                &lw.fc_w,
+                &lw.fc_b,
+                Some((&lw.ln2_w, &lw.ln2_b)),
+                None,
+            );
+            self.fused(r, "fc_proj", "mvf_resid", &self.x, &self.fc, &lw.fcp_w, &lw.fcp_b, None, None);
+        }
+        // ln_f + LM head; `bias` is unused (has_bias = 0).
+        let head = &w.lm_head;
+        let args = [
+            Arg::Buf(&self.logits),
+            Arg::Buf(&self.x),
+            Arg::Buf(&head.buf),
+            Arg::Buf(&self.x),
+            Arg::Buf(&w.ln_f_w),
+            Arg::Buf(&w.ln_f_b),
+            Arg::Buf(&self.x),
+            Arg::Buf(&self.x),
+            Arg::U32(c as u32),
+            Arg::U32(head.rows as u32),
+            Arg::U32(0),
+            Arg::U32(pos),
+        ];
+        let kernel = format!("mvf_ln_{}", head.dtype.name());
+        self.dispatch_fused(r, "lm_head", &kernel, &args, head.rows, c);
+        if argmax {
+            self.encode_argmax(r);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn fused(
+        &self,
+        r: &mut Runner,
+        label: &'static str,
+        kernel: &str,
+        out: &Buf,
+        x: &Buf,
+        w: &Mat,
+        bias: &Buf,
+        ln: Option<(&Buf, &Buf)>,
+        kv: Option<(Arg, Arg)>,
+    ) {
+        let (lw, lb) = ln.unwrap_or((bias, bias));
+        let (kc, vc) = kv.unwrap_or((Arg::Buf(out), Arg::Buf(out)));
+        let args = [
+            Arg::Buf(out),
+            Arg::Buf(x),
+            Arg::Buf(&w.buf),
+            Arg::Buf(bias),
+            Arg::Buf(lw),
+            Arg::Buf(lb),
+            kc,
+            vc,
+            Arg::U32(w.cols as u32),
+            Arg::U32(w.rows as u32),
+            Arg::U32(1),
+            Arg::U32(self.pos as u32),
+        ];
+        let kernel = format!("{kernel}_{}", w.dtype.name());
+        self.dispatch_fused(r, label, &kernel, &args, w.rows, w.cols);
+    }
+
+    fn dispatch_fused(
+        &self,
+        r: &mut Runner,
+        label: &'static str,
+        kernel: &str,
+        args: &[Arg],
+        rows: usize,
+        d_in: usize,
+    ) {
+        let rows_per_tg = FUSED_ROWS * FUSED_SIMDGROUPS;
+        r.dispatch_tg(
+            label,
+            kernel,
+            args,
+            (rows.div_ceil(rows_per_tg), 1, 1),
+            (32 * FUSED_SIMDGROUPS, 1, 1),
+            (32 + d_in) * F,
+        );
+    }
+
+    /// Fusion::Epilogue decode body (after the embedding): LayerNorms stay
+    /// separate; bias+GELU, residuals and KV writes ride in matvec epilogues.
+    fn encode_decode_epilogue(&self, r: &mut Runner, argmax: bool) {
+        let cfg = self.e.config;
+        let w = &self.e.w;
+        let c = cfg.n_embd;
+        for (l, lw) in w.layers.iter().enumerate() {
+            let layer_off = l * cfg.n_ctx * c * F;
+            let kv = Some((Arg::BufAt(&self.k_cache, layer_off), Arg::BufAt(&self.v_cache, layer_off)));
+            self.layernorm(r, "ln_1", 0, &lw.ln1_w, &lw.ln1_b, 1);
+            self.epi(r, "qkv", "mve_qkv", &self.qkv, &self.xn, &lw.attn_w, Some(&lw.attn_b), kv);
+            self.attention(r, l, 1);
+            self.epi(r, "attn_proj", "mve_resid", &self.x, &self.att, &lw.proj_w, Some(&lw.proj_b), None);
+            self.layernorm(r, "ln_2", 0, &lw.ln2_w, &lw.ln2_b, 1);
+            self.epi(r, "fc", "mve_gelu", &self.fc, &self.xn, &lw.fc_w, Some(&lw.fc_b), None);
+            self.epi(r, "fc_proj", "mve_resid", &self.x, &self.fc, &lw.fcp_w, Some(&lw.fcp_b), None);
+        }
+        self.layernorm(r, "ln_f", 0, &w.ln_f_w, &w.ln_f_b, 1);
+        self.epi(r, "lm_head", "mve", &self.logits, &self.xn, &w.lm_head, None, None);
+        if argmax {
+            self.encode_argmax(r);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn epi(
+        &self,
+        r: &mut Runner,
+        label: &'static str,
+        kernel: &str,
+        out: &Buf,
+        x: &Buf,
+        w: &Mat,
+        bias: Option<&Buf>,
+        kv: Option<(Arg, Arg)>,
+    ) {
+        let (kc, vc) = kv.unwrap_or((Arg::Buf(out), Arg::Buf(out)));
+        let has_bias = bias.is_some() as u32;
+        let bias = bias.unwrap_or(x);
+        let args = [
+            Arg::Buf(out),
+            Arg::Buf(x),
+            Arg::Buf(&w.buf),
+            Arg::Buf(bias),
+            Arg::Buf(bias), // 4, 5: unused (LayerNorm params in matvec_fused)
+            Arg::Buf(bias),
+            kc,
+            vc,
+            Arg::U32(w.cols as u32),
+            Arg::U32(w.rows as u32),
+            Arg::U32(has_bias),
+            Arg::U32(self.pos as u32),
+        ];
+        let rows_per_sg = match w.dtype {
+            DType::F32 | DType::F16 => 4,
+            DType::Q8_0 | DType::Q4_0 => 2,
+        };
+        let kernel = format!("{kernel}_{}", w.dtype.name());
+        r.dispatch_tg(label, &kernel, &args, (w.rows.div_ceil(rows_per_sg * 4), 1, 1), (128, 1, 1), 0);
+    }
+
+    fn encode_forward_unfused(&self, r: &mut Runner, n: usize) {
+        r.set_pending_tokens(n);
         let cfg = self.e.config;
         let w = &self.e.w;
         let c = cfg.n_embd;

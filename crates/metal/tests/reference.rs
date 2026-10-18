@@ -123,3 +123,57 @@ fn metal_greedy_matches_hf() {
         }
     }
 }
+
+/// GPU argmax and the pipelined greedy loop must pick exactly the tokens a
+/// CPU argmax over the same stage's logits picks.
+#[test]
+fn gpu_greedy_paths_agree_with_cpu_argmax() {
+    let Some(model) = model() else { return };
+    let prompt = ids(&reference()["prompts"][2]["ids"]);
+    for &stage in MetalStage::ALL {
+        let engine = MetalEngine::new(model, stage).unwrap();
+        let mut a = engine.session();
+        let mut next = nanoinfer_core::sampler::argmax(a.step(&prompt).unwrap());
+        let first = next;
+        let mut cpu = vec![];
+        for _ in 0..16 {
+            next = nanoinfer_core::sampler::argmax(a.step(&[next]).unwrap());
+            cpu.push(next);
+        }
+        let mut b = engine.session();
+        assert_eq!(b.step_greedy(&prompt).unwrap(), first, "{stage}");
+        assert_eq!(b.decode_greedy(first, 16).unwrap(), cpu, "{stage} decode_greedy");
+    }
+}
+
+/// The fused decode kernels exist for every dtype (only q4 has a named
+/// stage): f32 and f16 must still reproduce HF's greedy continuation exactly.
+#[test]
+fn fused_pipelined_matches_hf_greedy_in_every_dtype() {
+    let Some(model) = model() else { return };
+    let r = reference();
+    for (dtype, fused) in [DType::F32, DType::F16, DType::Q8_0, DType::Q4_0]
+        .into_iter()
+        .flat_map(|d| [(d, nanoinfer_metal::Fusion::Full), (d, nanoinfer_metal::Fusion::Epilogue)])
+    {
+        let head_dtype = if dtype == DType::Q4_0 { DType::Q8_0 } else { dtype };
+        let recipe = nanoinfer_metal::Recipe { dtype, head_dtype, fused, ..MetalStage::Pipelined.recipe() };
+        let engine = MetalEngine::with_recipe(model, MetalStage::Pipelined, recipe).unwrap();
+        for g in r["greedy"].as_array().unwrap() {
+            let prompt = ids(&r["prompts"][g["prompt"].as_u64().unwrap() as usize]["ids"]);
+            let expected = ids(&g["new_ids"]);
+            let mut s = engine.session();
+            let first = s.step_greedy(&prompt).unwrap();
+            let mut out = vec![first];
+            out.extend(s.decode_greedy(first, expected.len() - 1).unwrap());
+            let agree = out.iter().zip(&expected).take_while(|(a, b)| a == b).count();
+            println!(
+                "fused ({fused:?}) + pipelined {dtype:?}: first {agree}/{} greedy tokens match HF",
+                expected.len()
+            );
+            if matches!(dtype, DType::F32 | DType::F16) {
+                assert_eq!(out, expected, "{dtype:?}");
+            }
+        }
+    }
+}

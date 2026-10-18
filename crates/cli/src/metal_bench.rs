@@ -74,11 +74,19 @@ fn time_run(engine: &MetalEngine, prompt: &[u32], tokens: usize) -> Result<RunRe
     let prefill_gpu_s = s.last.gpu_seconds;
     let (mut decode_gpu_s, mut dispatches, mut command_buffers) = (0.0, 0, 0);
     let t = Instant::now();
-    for _ in 0..tokens {
-        next = s.step_greedy(&[next])?;
-        decode_gpu_s += s.last.gpu_seconds;
-        dispatches = s.last.dispatches;
-        command_buffers = s.last.command_buffers;
+    if engine.stage.recipe().pipelined {
+        // All tokens' command buffers in flight at once; stats are totals.
+        s.decode_greedy(next, tokens)?;
+        decode_gpu_s = s.last.gpu_seconds;
+        dispatches = s.last.dispatches / tokens.max(1);
+        command_buffers = s.last.command_buffers / tokens.max(1);
+    } else {
+        for _ in 0..tokens {
+            next = s.step_greedy(&[next])?;
+            decode_gpu_s += s.last.gpu_seconds;
+            dispatches = s.last.dispatches;
+            command_buffers = s.last.command_buffers;
+        }
     }
     Ok(RunResult {
         prefill_s,

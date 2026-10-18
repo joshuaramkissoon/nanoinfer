@@ -142,7 +142,7 @@ impl Gpu {
     }
 
     pub fn runner(&self, sync: Sync) -> Runner<'_> {
-        Runner { gpu: self, sync, cb: None, enc: None, stats: RunStats::default(), profile: None }
+        Runner { gpu: self, pending_tokens: 0, sync, cb: None, enc: None, stats: RunStats::default(), profile: None }
     }
 }
 
@@ -178,6 +178,8 @@ pub enum Arg<'a> {
 
 pub struct Runner<'g> {
     gpu: &'g Gpu,
+    /// Tokens the forward being encoded will append (for argmax's output slot).
+    pending_tokens: usize,
     sync: Sync,
     cb: Option<CmdBuf>,
     enc: Option<Encoder>,
@@ -188,7 +190,35 @@ pub struct Runner<'g> {
     pub profile: Option<Vec<(&'static str, f64)>>,
 }
 
+/// A committed command buffer the CPU hasn't waited for yet.
+pub struct Pending(CmdBuf);
+
+impl Pending {
+    /// Wait for completion; returns GPU seconds.
+    pub fn wait(self) -> f64 {
+        self.0.waitUntilCompleted();
+        if let Some(e) = self.0.error() {
+            panic!("Metal command buffer failed: {}", e.localizedDescription());
+        }
+        self.0.GPUEndTime() - self.0.GPUStartTime()
+    }
+}
+
 impl Runner<'_> {
+    pub fn set_pending_tokens(&mut self, n: usize) {
+        self.pending_tokens = n;
+    }
+    pub fn pending_tokens(&self) -> usize {
+        self.pending_tokens
+    }
+
+    /// Commit whatever is encoded without waiting.
+    pub fn commit(&mut self) -> Option<Pending> {
+        let (enc, cb) = (self.enc.take()?, self.cb.take()?);
+        enc.endEncoding();
+        cb.commit();
+        Some(Pending(cb))
+    }
     fn encoder(&mut self) -> &Encoder {
         if self.enc.is_none() {
             let cb = self.gpu.queue.commandBuffer().expect("command buffer");

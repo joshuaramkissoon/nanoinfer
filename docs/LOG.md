@@ -644,6 +644,78 @@ token, CPU wake-up latency on the commit → wait path shows up directly.)
 This is DISTILLED law 6 arriving on schedule: at the quantised tiers, GPT-2
 small is overhead-bound, not bandwidth-bound.
 
+### Metal stage 6: attacking the fixed costs (metal-argmax, metal-fused-ln, metal-fused, metal-pipelined)
+
+All four build on metal-q4 (Q4_0 blocks, Q8_0 head), where the fixed per-token
+costs are largest relative to the token. Each stage keeps the previous one's
+changes.
+
+**6a, metal-argmax.** `argmax_partial` (32 threadgroups × 1024 threads, strided,
+`simd_shuffle_down` reductions on (value, index), ties → lowest index like
+`sampler::argmax`) + `argmax_final` (one SIMD-group). The CPU reads 4 bytes
+instead of scanning 50257 floats. +2 dispatches.
+
+**6b, metal-fused-ln (dead end, kept runnable).** Fuse everything into the
+matvecs: LayerNorm in the prologue (every threadgroup stages its input row in
+threadgroup memory and normalises it, recomputing mean/variance), and
+epilogues for bias + GELU, `x += …` residuals, and writing K/V rows straight
+into the cache. 11 dispatches per layer → 5; 137 → 64 per token. Per-op
+profile showed why it doesn't pay: lm_head went 530 → 658 µs (1571
+threadgroups each re-normalising the same 768 floats before their first
+weight load) and fc_proj 171 → 282 µs (32 rows per threadgroup → only 24
+threadgroups for 768 rows, and each stages 12 KB of input first). It saved
+~115 µs of small kernels and lost ~240 µs in the matvecs.
+
+**6c, metal-fused.** Epilogue fusion only (`matvec_epi<W, R, EPI>`: x read from
+device memory exactly like the unfused matvec, same shapes), LayerNorm kept as
+its own 2.5 µs kernel: 7 dispatches per layer, 89 per token. Removes the
+residual, GELU and kv_write kernels and their dispatch drains.
+
+**6d, metal-pipelined.** The CPU stops waiting between tokens.
+`MetalSession::decode_greedy(first, n)` encodes token i's forward to read its
+input id from `gen[pos]` (`embed_gen`) and its argmax to write `gen[pos + 1]`,
+then commits all n command buffers up front and waits once at the end. The
+GPU runs the forwards back to back; the CPU's encode time, the commit → start
+latency and the completion wake-up all overlap GPU work. Same tokens as the
+step-by-step loop (test `gpu_greedy_paths_agree_with_cpu_argmax`), and the
+fused + pipelined path reproduces HF's greedy continuation exactly in f32 and
+f16 (`fused_pipelined_matches_hf_greedy_in_every_dtype`). Real streaming would
+keep 2–3 command buffers in flight and read tokens from completion handlers;
+the throughput is the same.
+
+**Numbers** (prompt 64, 64 decode steps, **10 runs** each, back to back,
+uncontended; run-to-run noise on this machine is ±5–10%):
+
+| stage | dispatches / token | GPU-busy ms | wall ms | GPU % of wall | decode tok/s | % of ceiling |
+|---|---|---|---|---|---|---|
+| metal-q4 (stage 5) | 135 | 2.03–2.18 | 2.43–2.83 | 77–83% | 353–412 | 26–31% of 1344 |
+| metal-argmax | 137 | 1.82 | 2.29 | 79% | 437 ± 34 | 32.5% |
+| metal-fused-ln | 64 | 1.73 | 2.10 | 82% | 477 ± 35 | 35.5% |
+| metal-fused | 89 | 1.76 | 2.17 | 81% | 460 ± 28 | 34.2% |
+| **metal-pipelined** | 89 | **1.70** | **1.71** | **100%** | **586 ± 25** (614–632 in other sessions) | **43.6%** |
+| metal-pipelined-q8 | 89 | 2.00 | 2.01 | 100% | 498 ± 37 (517) | 54.7% of 911 |
+| metal-pipelined-f16 | 89 | 3.61 | 3.62 | 100% | 277 ± 14 (284) | 57.1% of 485 |
+
+**What surprised me.**
+- **Fusion was a wash; not waiting was the win.** Halving the dispatch count
+  (137 → 64) moved GPU time by ~5%, inside the noise. The GPU cost of a small
+  dependent dispatch is ~1–3 µs, so removing ~70 of them saves ~0.1–0.2 ms, and
+  the LN-prologue version paid most of that back in slower matvecs. Taking the
+  CPU out of the loop removed ~0.45 ms per token (wall 2.17 → 1.71) *and* the
+  GPU's busy time dropped (1.76 → 1.70): with no gaps, the GPU never idles
+  long enough to clock down. Same effect as stage 2, one level up.
+- **The argmax step's gain is mostly noise-sized** (≈ 0.1 ms: 50257 compares
+  on the CPU + reading 200 KB of logits), but it's what *enables* pipelining:
+  without a GPU-side argmax there's no token for the next forward to read.
+- With pipelining, GPU busy = wall (100%). From here the only levers are GPU
+  kernel time: f16 and Q8 pipelined reach 68.5 / 65.8 GB/s (57% / 55% of their
+  spec ceilings) while Q4 sits at 52.6 GB/s: the Q4 matvec on 768-wide rows is
+  latency-bound (one 16-byte load per lane per row), and attention (12
+  threadgroups, one per head) is now ~9% of a Q4 token.
+- Quality bill reminder: metal-pipelined is Q4_0 (ppl +7%, 80% top-1 vs f32);
+  metal-pipelined-q8 keeps ppl but agrees with f32 on 90% of greedy picks;
+  metal-pipelined-f16 is effectively lossless (99.7%).
+
 ---
 
 ## Stage 3: neon (explicit SIMD), a null result

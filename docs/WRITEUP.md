@@ -219,6 +219,29 @@ chart in this post is the real engine, running in your browser.
   matvec time shrinking, fixed overhead constant.
 - **Line:** "Four-bit weights everywhere except one matrix: fine. Four-bit on that one
   matrix: the model forgets English."
+
+### GPU stage 6: fusion vs. not waiting (argmax on GPU, fused kernels, pipelined decode)
+
+- **Hypothesis:** at ~2 ms/token the fixed costs dominate. Cut dispatches by fusing
+  ops into the matvecs (LayerNorm, bias + GELU, residual add, KV write), and move the
+  argmax onto the GPU.
+- **Change:** GPU argmax; two fusion designs (LayerNorm inside every matvec: 137 → 64
+  dispatches; epilogues only: 89); then a GPU-resident greedy loop: each forward reads
+  its input token from a GPU buffer the previous forward's argmax wrote, so all 64
+  tokens' command buffers are submitted at once and the CPU waits once.
+- **Result (Q4 weights):** fusion **≈ +5%, inside the noise**; full LayerNorm fusion made
+  the big matvecs slower (every threadgroup re-normalised the input). Not waiting:
+  **586–632 tok/s** (+30%), GPU busy 100% of the wall time. Q8: **517**, f16: **284** tok/s.
+- **Aha:** the expensive thing was never the number of kernels; it was the CPU and GPU
+  taking turns. Same lesson as stage 2 (one command buffer per token), one level up
+  (one wait per *generation*).
+- **Aha 2:** the GPU argmax only saves ~0.1 ms, but without it there is no GPU-side token
+  for the next step to read: it's the enabler, not the win.
+- **Viz:** CPU/GPU timeline lanes for 4 tokens: stage 5 alternates (GPU idle while the
+  CPU encodes, waits, picks the argmax), stage 6d is a solid GPU bar with the CPU running
+  ahead.
+- **Line:** "Halving the number of GPU kernels did nothing. Not asking the GPU whether it
+  was done made it 30% faster."
 ### Stage 3: neon (hand-written SIMD), a null result
 
 - **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per
