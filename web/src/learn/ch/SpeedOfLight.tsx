@@ -144,7 +144,8 @@ export default function SpeedOfLight() {
     <>
       <p>
         If decode is waiting on memory, we can work out how fast it could ever go, before writing a line of code. To write
-        one token, the computer has to read every weight once. So:
+        one token, the computer has to read every weight once. (If you read chapter 0.2, you've seen this division; here it
+        becomes the yardstick for every step of the engine.) So:
       </p>
       <code className="lr-math">{"fastest possible tokens per second  =  memory speed  ÷  bytes of weights"}</code>
       <p>

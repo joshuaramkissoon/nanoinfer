@@ -63,7 +63,7 @@ function Replay() {
         <>
           A real run of the engine, replayed with its measured timings. Top: the four steps of the loop, with the current
           one lit. Middle: the text, growing. Bottom: a timeline where each bar is one full <G k="forward pass" /> through all
-          12 layers, its width the time it really took. The tall first bar is <G k="prefill" />: the whole prompt in one go.
+          12 layers, its width the time it really took. The wide first bar is <G k="prefill" />: the whole prompt in one go.
           Every short bar after it is one <G k="decode" /> step, producing one token.
         </>
       }
@@ -133,10 +133,9 @@ function Replay() {
         )}
       </div>
       <div className="lr-stats">
-        <Stat k="prefill" v={`${pre.n} tokens`} unit={`in ${pre.ms.toFixed(0)} ms`} />
-        <Stat k="prefill speed" v={((pre.n / pre.ms) * 1000).toFixed(0)} unit="tok/s" />
+        <Stat k="prefill" v={((pre.n / pre.ms) * 1000).toFixed(0)} unit={`tok/s (${pre.n} tokens in ${pre.ms.toFixed(0)} ms)`} />
         <Stat k="one decode step" v={dMed.toFixed(1)} unit="ms" />
-        <Stat k="decode speed" v={(1000 / dMed).toFixed(0)} unit="tok/s" accent />
+        <Stat k="decode" v={(1000 / dMed).toFixed(0)} unit="tok/s" accent />
       </div>
     </Fig>
   );
@@ -156,9 +155,11 @@ export default function Loop() {
         no way to compute token 20 before you know token 19.
       </p>
       <p>
-        Look at the speeds. Prefill handled its 14 tokens at well over 100 tokens per second. Decode, one at a time, managed
-        about a hundred. And every decode pass, to produce a single token, ran all 12 layers and all 49 matrices: it touched
-        every one of the model's 124 million weights.
+        Look at the speeds: prefill wrote its 14 tokens faster per token than decode did. That's because prefill reads each
+        weight once and uses it for all 14 prompt tokens, while every decode pass reads all 12 layers and all 49 matrices,
+        every one of the model's 124 million weights, to produce a single token. (This early, single-core engine shows only
+        a small gap; on a GPU the same effect makes prefill 8× faster than decode, chapter 16.) Same arithmetic per token,
+        very different bytes per token: hold on to that, it's the whole of part two.
       </p>
       <Idea>Generation is a loop of full forward passes, one per token. Prefill reads the prompt in one go; decode crawls one token per pass, and each pass uses every weight in the model.</Idea>
       <Deeper title="What's the user actually waiting for?">

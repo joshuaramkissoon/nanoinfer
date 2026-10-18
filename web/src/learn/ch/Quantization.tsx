@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
 import { Climb } from "../Climb";
-import { chartColors, Deeper, Fig, G, Idea, Seg, useLearnData } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, Stat, Swatch, useLearnData } from "../kit";
 
 function Block() {
   const d = useLearnData();
@@ -41,8 +41,9 @@ function Block() {
       prov="weights"
       caption={
         <>
-          32 consecutive weights from one of GPT-2's real matrices (layer 6's MLP). Blue stems: the original 32-bit values,
-          above or below zero. Ember dots: what's left after storing each one in fewer bits. The block shares one scale (its
+          32 consecutive weights from one of GPT-2's real matrices (layer 6's feed-forward). <Swatch c={cc.c2}>Blue</Swatch>{" "}
+          stems: the original 32-bit values, above or below zero. <Swatch c={cc.c1}>Ember</Swatch> dots: what's left after
+          storing each one in fewer bits. The block shares one scale (its
           biggest weight sets it), and every weight is rounded to the nearest of the allowed levels (the faint horizontal
           lines, drawn when there are few enough to see).
         </>
@@ -56,6 +57,18 @@ function Block() {
           onChange={setBits}
           label="bits per weight"
         />
+      </div>
+      <div className="p0-legend lr-small">
+        <span>
+          <i style={{ background: cc.c2 }} />
+          original weight (32-bit)
+        </span>
+        {bits !== 32 && (
+          <span>
+            <i style={{ background: cc.c1, borderRadius: "50%" }} />
+            what {bits} bits can store
+          </span>
+        )}
       </div>
       <div ref={ref}>
         {w > 0 && (
@@ -75,26 +88,9 @@ function Block() {
         )}
       </div>
       <div className="lr-stats">
-        <div className="lr-stat">
-          <div className="k">bytes for these 32 weights</div>
-          <div className="v">
-            {bytes} <small>{bits === 32 ? "(4 each)" : `(${bits} bits each + a 2-byte scale)`}</small>
-          </div>
-        </div>
-        <div className="lr-stat">
-          <div className="k">size vs 32-bit</div>
-          <div className="v accent">{((bytes / 128) * 100).toFixed(0)}%</div>
-        </div>
-        <div className="lr-stat">
-          <div className="k">error, this block</div>
-          <div className="v">{bits === 32 ? "0" : `${(rel * 100).toFixed(1)}%`}</div>
-        </div>
-        {whole && (
-          <div className="lr-stat">
-            <div className="k">error, whole matrix (2.4M weights)</div>
-            <div className="v">{(whole.rel * 100).toFixed(1)}%</div>
-          </div>
-        )}
+        <Stat k="bytes for these 32" v={bytes} unit={bits === 32 ? "(4 each)" : `(${((bytes / 128) * 100).toFixed(0)}% of 32-bit)`} />
+        <Stat k="speed limit" v={`${(128 / bytes).toFixed(1)}×`} unit="vs 32-bit" accent />
+        <Stat k="rounding error" v={whole ? `${(whole.rel * 100).toFixed(1)}%` : "0%"} unit={bits === 32 ? "none" : `whole matrix · ${(rel * 100).toFixed(1)}% here`} />
       </div>
     </Fig>
   );
@@ -125,7 +121,9 @@ export default function Quantization() {
       <p>
         16-bit weights: <b>146 → 249</b> tokens per second. 8-bit: <b>315</b>, and <b>425</b> after a few more tricks, with the
         same top-choice token 98% of the time. 4-bit: <span className="k">497 tokens per second</span>, the fastest the CPU
-        got, with predictions about 8% worse.
+        got, and here the cost is visible: its top choice for the next word differs from the 32-bit model's about one time
+        in five, and its <G k="perplexity" /> (how surprised it is by real text) rises about 8%. Speed is bought with
+        accuracy, a little at a time.
       </p>
       <Climb upto={4} n="15.2" />
       <p>

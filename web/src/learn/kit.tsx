@@ -445,6 +445,7 @@ export const GLOSSARY: Record<string, string> = {
   "compute-bound": "Waiting on arithmetic: the numbers are there, but the processor can't do the maths any faster.",
   "KV cache": "Each past token's keys and values, saved so they never have to be recomputed.",
   quantization: "Storing each weight in fewer bits (say 8 or 4 instead of 32), so there are fewer bytes to read.",
+  perplexity: "How surprised a model is by real text, on average: lower is better. A rise of 8% means its guesses got measurably worse.",
   SIMD: "Single instruction, multiple data: one instruction that does the same operation on 4, 8 or more numbers at once.",
   thread: "One independent stream of work. A CPU core runs one at a time; a GPU runs thousands.",
   GPU: "A chip with thousands of small, simple cores built to do the same arithmetic on lots of numbers at once.",
