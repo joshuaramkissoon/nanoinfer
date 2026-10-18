@@ -555,6 +555,93 @@ Prefill profile at P = 512 (`--profile`, each op timed alone):
 - P = 64 prefill is much worse than P = 512 per token (3.3k vs 5.9k): 64
   tokens = 2 row tiles, so most GEMMs launch only 2 × 36 threadgroups.
 
+### Metal stage 5: fewer bytes (metal-f16, metal-q8, metal-q4)
+
+**Hypothesis.** Decode is at ~75 GB/s while the GPU is busy, so tok/s should
+scale with 1 / bytes per weight: f16 ≈ 2×, Q8_0 ≈ 3.8×, Q4_0 ≈ 7× on the GPU
+part, until fixed per-token costs (dispatch gaps, commit/wait, CPU argmax)
+start to dominate.
+
+**What changed** (`shaders/quant.metal`, `weights.rs`; all on the metal-mma recipe):
+- `matvec_f16<R>`: half weights, each lane reads 2 × half4 = 16 B per step
+  (512 B per SIMD-group), converts in registers, f32 accumulate.
+- `matvec_q8_0<R>` / `matvec_q4_0<R>`: block-of-32 formats with an f16 scale,
+  **structure-of-arrays** (all quants, then all scales) instead of GGML's
+  interleaved 34/18-byte blocks, so every load is 4/16-byte aligned. Same
+  bytes as GGML. Q8 lanes read 16 int8 (half a block); Q4 lanes read one whole
+  block as a `uint4`, unpacking low nibbles (elements 0–15) and high nibbles
+  (16–31) GGML-style.
+- Prefill: one `matmul_mma_q<Loader>` template whose W-tile loader dequantises
+  to f32 into threadgroup memory; the MMA loop is unchanged.
+- Quantisation on the CPU at load (Q8_0: d = max|w|/127; Q4_0: GGML rounding,
+  d = signed-max / −8). 0.1–0.25 s.
+- `tests/kernels.rs`: every matvec/matmul kernel in every dtype vs a CPU dot
+  product over the *same dequantised* weights (≤ 1e-3), so layout bugs and
+  quantisation error are tested separately.
+- `Recipe.head_dtype`: the tied LM head (wte, 31% of the bytes) gets its own dtype.
+
+**Quality first** (`examples/quant_quality.rs`: KL(HF || ours) and top-1 on
+the 4 fixture prompts; WikiText-2 ppl / KL / top-1 vs our f32 over 2 × 512
+tokens, decoded token by token):
+
+| blocks | LM head | fixture KL (mean) | top-1 | wiki ppl | wiki KL | wiki top-1 vs f32 |
+|---|---|---|---|---|---|---|
+| f32 | f32 | 3.7e-10 | 4/4 | 35.230 | 0 | 100% |
+| f16 | f16 | 7.8e-6 | 4/4 | 35.233 | 1.1e-5 | 99.7% |
+| q8_0 | f16 | 8.0e-5 | 4/4 | 35.198 | 2.8e-4 | 98.3% |
+| q8_0 | **q8_0** | 4.7e-3 | 4/4 | 35.196 | 9.4e-3 | **90.1%** |
+| q4_0 | f16 | 1.5e-2 | 4/4 | 37.699 | 6.8e-2 | 82.5% |
+| q4_0 | q8_0 | 1.9e-2 | 4/4 | 37.600 | 7.4e-2 | 80.5% |
+| q4_0 | **q4_0** | 1.76 | **0/4** | **282** | 2.17 | 31.7% |
+| f16 | **q4_0** | 1.98 | 0/4 | 266 | 2.12 | 32.8% |
+
+**The LM head is the fragile part of GPT-2 small.** Q4_0 on the head alone
+(f16 everywhere else) destroys the model (ppl 35 → 266); Q4_0 on every block
+matrix with a Q8 head costs ppl +7%. Even Q8_0 on the head raises KL 34× over
+Q8_0 blocks with an f16 head, and flips 10% of greedy choices, **while
+perplexity doesn't move (35.196 vs 35.230)**. Perplexity alone would have
+called all-Q8 lossless. Hypothesis (not yet verified): ln_f's output has a few
+huge outlier dimensions, so logit = Σ x_i w_i amplifies the quantisation error
+of exactly those weights, and block scales set by outliers starve the rest of
+the block. So: **metal-q8 = all Q8_0** (top-1 4/4, ppl unchanged, 90% greedy
+agreement), **metal-q4 = Q4_0 blocks + Q8_0 head** (the Q4 head is unusable).
+Correctness tests: f16 max |Δlogit| ≤ 0.10 (tol 0.25) and greedy equal to HF;
+quantised stages are tested by KL (Q8 < 0.01, Q4 < 0.25) and top-1.
+
+**Numbers** (prompt 64, 64 decode steps, 5 runs; ceiling = 120 GB/s ÷ that
+stage's bytes per token):
+
+| stage | MB / token | decode tok/s | % of its ceiling | GPU-busy ms | wall ms | GB/s busy | prefill P=512 |
+|---|---|---|---|---|---|---|---|
+| metal-mma (f32) | 494.6 | 133 ± 2 | 54.8% of 243 | 6.78 | 7.52 | 72.9 | 5947 |
+| **metal-f16** | 247.4 | **245 ± 8** | 50.5% of 485 | 3.48 | 4.08 | 71.1 | 6166 |
+| **metal-q8** | 131.7 | **365 ± 10** | 40.1% of 911 | 2.26 | 2.74 | 58.4 | 6452 |
+| **metal-q4** | 89.3 | 363–475 | 27–35% of 1344 | 1.72–2.21 | 2.1–2.76 | 40–52 | 6465 |
+
+(metal-q4 measured 475 ± 27 in one quiet session and 315–363 in three later
+ones, while Spotlight's `mdworker` processes were using ~4 cores. At ~2 ms per
+token, CPU wake-up latency on the commit → wait path shows up directly.)
+
+**What surprised me.**
+- **f16 is a clean 1.84× decode** at the same ~71 GB/s: bandwidth-bound,
+  exactly as the roofline says. Prefill barely changes (compute-bound; the
+  loader converts to f32 anyway).
+- **Q8 and Q4 stop scaling.** Q8 reads 1.9× fewer bytes than f16 but is 1.5×
+  faster; Q4 reads 1.5× fewer than Q8 and is about the same speed. GB/s while
+  busy falls 71 → 58 → 40–52. Two reasons, both visible in the q4 profile
+  (sum 1.78 ms): (1) small matrices become latency-bound: attn_proj at Q4 is
+  0.33 MB, takes 16 µs per layer = 20 GB/s; (2) a fixed per-token floor:
+  ~0.5 ms of wall time outside the GPU (encode 135 dispatches, commit, wait,
+  wake up, CPU argmax over 50257 logits), plus ~0.3 ms of non-matvec kernels
+  and ~135 × 0.7 µs dispatch drains. At 2 ms/token that floor is ~40%.
+- In `matvec_sweep`, Q4 on 768-wide rows reaches 37–60 GB/s vs 80 for 3072-wide:
+  a row is 24 blocks, so 8 of 32 lanes idle and each lane has one 16-byte load
+  in flight. Wider per-lane work or more rows per SIMD-group would help; the
+  bigger win is cutting the fixed costs (next stage).
+
+This is DISTILLED law 6 arriving on schedule: at the quantised tiers, GPT-2
+small is overhead-bound, not bandwidth-bound.
+
 ---
 
 ## Stage 3: neon (explicit SIMD), a null result

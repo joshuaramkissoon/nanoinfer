@@ -21,9 +21,13 @@ pub struct MetalEngine {
 
 impl MetalEngine {
     pub fn new(model: &Model, stage: MetalStage) -> Result<MetalEngine, String> {
+        Self::with_recipe(model, stage, stage.recipe())
+    }
+
+    /// An engine with a custom recipe (for experiments; `stage` is only a label).
+    pub fn with_recipe(model: &Model, stage: MetalStage, recipe: Recipe) -> Result<MetalEngine, String> {
         let gpu = Gpu::new()?;
-        let recipe = stage.recipe();
-        let w = Weights::upload(&gpu, model, recipe.dtype);
+        let w = Weights::upload(&gpu, model, recipe.dtype, recipe.head_dtype);
         Ok(MetalEngine { gpu, config: model.config, stage, recipe, w })
     }
 
@@ -186,7 +190,7 @@ impl<'e> MetalSession<'e> {
             Some(_) => None,
         };
         if let Some(mv) = mv {
-            match (mv, rec.dtype) {
+            match (mv, w.dtype) {
                 (Matvec::Naive, DType::F32) => r.dispatch(label, "matmul_naive", &args, n * rows, 256),
                 (Matvec::Simd, dtype) => {
                     let (kernel, rows_per_sg, nsg) = matvec_kernel(dtype);
@@ -197,12 +201,20 @@ impl<'e> MetalSession<'e> {
             }
             return;
         }
-        match (rec.matmul, rec.dtype) {
+        match (rec.matmul, w.dtype) {
             (Matmul::Tiled, DType::F32) => {
                 r.dispatch_tg(label, "matmul_tiled", &args, (rows.div_ceil(32), n.div_ceil(32), 1), (256, 1, 1), 0)
             }
             (Matmul::SimdMatrix, DType::F32) => {
                 r.dispatch_tg(label, "matmul_mma", &args, (rows.div_ceil(64), n.div_ceil(32), 1), (128, 1, 1), 0)
+            }
+            (Matmul::SimdMatrix, dtype) => {
+                let kernel = match dtype {
+                    DType::F16 => "matmul_mma_f16",
+                    DType::Q8_0 => "matmul_mma_q8_0",
+                    _ => "matmul_mma_q4_0",
+                };
+                r.dispatch_tg(label, kernel, &args, (rows.div_ceil(64), n.div_ceil(32), 1), (128, 1, 1), 0)
             }
             other => unimplemented!("matmul {other:?}"),
         }
@@ -346,6 +358,8 @@ impl<'e> MetalSession<'e> {
 fn matvec_kernel(dtype: DType) -> (&'static str, usize, usize) {
     match dtype {
         DType::F32 => (MV_KERNEL, MV_ROWS, MV_SIMDGROUPS),
-        other => unimplemented!("matvec for {other:?}"),
+        DType::F16 => ("matvec_f16_r4", 4, 4),
+        DType::Q8_0 => ("matvec_q8_0_r2", 2, 4),
+        DType::Q4_0 => ("matvec_q4_0_r2", 2, 4),
     }
 }

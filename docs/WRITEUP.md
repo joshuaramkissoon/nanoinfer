@@ -198,6 +198,27 @@ chart in this post is the real engine, running in your browser.
   compute-bound" dial that swings as the prompt grows.
 - **Line:** "The GPU has a matrix-multiply instruction. Using it made prefill 2.7× faster
   than my best hand-written tiling."
+
+### GPU stage 5: f16, Q8_0, Q4_0 weights on the GPU
+
+- **Hypothesis:** decode is bandwidth-bound, so halving bytes per weight halves the time.
+- **Change:** matvec and matmul kernels that read f16 / 8-bit / 4-bit weights and expand
+  them in registers (block-of-32 formats with a scale per block, like llama.cpp's
+  Q8_0/Q4_0, but laid out as "all quants, then all scales" so loads stay aligned).
+- **Result:** f16 **245 tok/s** (1.84×, same 71 GB/s), Q8_0 **365 tok/s**, Q4_0 **363–475 tok/s**
+  (noisy). Each step buys less: Q4 reads 1.5× fewer bytes than Q8 for ~no speed-up.
+- **Aha 1 (the quality bill):** GPT-2 small's *LM head* is fragile. 4-bit on the head
+  alone wrecks the model (perplexity 35 → 266, top-1 0/4). 8-bit on the head leaves
+  perplexity unchanged (35.20 vs 35.23) but changes **10% of greedy choices**.
+  Perplexity said "lossless"; top-1 agreement said otherwise. Track several metrics.
+- **Aha 2 (law 6 arrives):** at 2 ms per token the fixed costs (encoding 135 GPU commands,
+  waiting for the GPU, waking up, picking the argmax on the CPU) are ~40% of the token.
+  The small model became overhead-bound, as predicted before writing any code.
+- **Viz:** quality-vs-speed scatter: one dot per (blocks dtype, head dtype), x = tok/s,
+  y = KL vs f32, with the Q4-head dots falling off a cliff. Stacked bar per dtype: GPU
+  matvec time shrinking, fixed overhead constant.
+- **Line:** "Four-bit weights everywhere except one matrix: fine. Four-bit on that one
+  matrix: the model forgets English."
 ### Stage 3: neon (hand-written SIMD), a null result
 
 - **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per

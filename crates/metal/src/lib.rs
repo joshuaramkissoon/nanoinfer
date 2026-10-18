@@ -21,7 +21,7 @@
 
 mod forward;
 pub mod gpu;
-mod weights;
+pub mod weights;
 
 pub use forward::{MetalEngine, MetalSession};
 pub use gpu::{RunStats, Sync};
@@ -95,6 +95,8 @@ pub enum Par {
 pub struct Recipe {
     pub sync: Sync,
     pub dtype: DType,
+    /// dtype of the tied LM head (wte), which small models are most sensitive to.
+    pub head_dtype: DType,
     pub matvec: Matvec,
     pub matmul: Matmul,
     pub norm: Par,
@@ -121,11 +123,26 @@ pub enum MetalStage {
     Tiled,
     /// + simdgroup_matrix (8x8 hardware MMA) matmul for prefill.
     Mma,
+    /// metal-mma with f16 weights (f32 activations and accumulation).
+    F16,
+    /// metal-mma with Q8_0 weights, dequantised in registers.
+    Q8,
+    /// metal-mma with Q4_0 weights, dequantised in registers.
+    Q4,
 }
 
 impl MetalStage {
-    pub const ALL: &'static [MetalStage] =
-        &[MetalStage::Naive, MetalStage::OneCb, MetalStage::Simd, MetalStage::Par, MetalStage::Tiled, MetalStage::Mma];
+    pub const ALL: &'static [MetalStage] = &[
+        MetalStage::Naive,
+        MetalStage::OneCb,
+        MetalStage::Simd,
+        MetalStage::Par,
+        MetalStage::Tiled,
+        MetalStage::Mma,
+        MetalStage::F16,
+        MetalStage::Q8,
+        MetalStage::Q4,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -135,6 +152,9 @@ impl MetalStage {
             MetalStage::Par => "metal-par",
             MetalStage::Tiled => "metal-tiled",
             MetalStage::Mma => "metal-mma",
+            MetalStage::F16 => "metal-f16",
+            MetalStage::Q8 => "metal-q8",
+            MetalStage::Q4 => "metal-q4",
         }
     }
 
@@ -142,6 +162,7 @@ impl MetalStage {
         let naive = Recipe {
             sync: Sync::PerOp,
             dtype: DType::F32,
+            head_dtype: DType::F32,
             matvec: Matvec::Naive,
             matmul: Matmul::Naive,
             norm: Par::Naive,
@@ -150,13 +171,17 @@ impl MetalStage {
             gpu_argmax: false,
         };
         let par = Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, norm: Par::Simd, attn: Par::Simd, ..naive };
+        let mma = Recipe { matmul: Matmul::SimdMatrix, ..par };
         match self {
             MetalStage::Naive => naive,
             MetalStage::OneCb => Recipe { sync: Sync::PerForward, ..naive },
             MetalStage::Simd => Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, ..naive },
             MetalStage::Par => par,
             MetalStage::Tiled => Recipe { matmul: Matmul::Tiled, ..par },
-            MetalStage::Mma => Recipe { matmul: Matmul::SimdMatrix, ..par },
+            MetalStage::Mma => mma,
+            MetalStage::F16 => Recipe { dtype: DType::F16, head_dtype: DType::F16, ..mma },
+            MetalStage::Q8 => Recipe { dtype: DType::Q8_0, head_dtype: DType::Q8_0, ..mma },
+            MetalStage::Q4 => Recipe { dtype: DType::Q4_0, head_dtype: DType::Q8_0, ..mma },
         }
     }
 
@@ -169,9 +194,11 @@ impl MetalStage {
     /// Bytes of weights read from memory per decoded token (the ceiling's denominator).
     pub fn decode_weight_bytes(self, cfg: &nanoinfer_core::Config) -> f64 {
         let c = cfg.n_embd;
-        let matrices = cfg.n_layer * 12 * c * c + cfg.n_vocab * c; // 3C*C + C*C + 4C*C + 4C*C, + wte
-        let small = cfg.n_params() - cfg.n_ctx * c - matrices; // biases + layernorms, kept f32
-        matrices as f64 * self.recipe().dtype.bytes_per_weight() + small as f64 * 4.0
+        let r = self.recipe();
+        let blocks = cfg.n_layer * 12 * c * c; // 3C*C + C*C + 4C*C + 4C*C per layer
+        let head = cfg.n_vocab * c;
+        let small = cfg.n_params() - cfg.n_ctx * c - blocks - head; // biases + layernorms, kept f32
+        blocks as f64 * r.dtype.bytes_per_weight() + head as f64 * r.head_dtype.bytes_per_weight() + small as f64 * 4.0
     }
 }
 

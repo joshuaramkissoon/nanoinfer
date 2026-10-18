@@ -43,13 +43,31 @@ fn ref_logits(file: &str) -> Vec<f32> {
     b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect()
 }
 
+/// Max |Δlogit| allowed. Block-quantised stages are judged by KL instead.
 fn tolerance(d: DType) -> f32 {
     match d {
         DType::F32 => 1e-3,
-        DType::F16 => 0.1,
-        DType::Q8_0 => 1.0,
-        DType::Q4_0 => 4.0,
+        DType::F16 => 0.25,
+        DType::Q8_0 | DType::Q4_0 => f32::INFINITY,
     }
+}
+
+/// Max KL(HF || ours) in nats over the next-token distribution.
+fn kl_tolerance(d: DType) -> f64 {
+    match d {
+        DType::F32 | DType::F16 => 1e-3,
+        DType::Q8_0 => 0.01,
+        DType::Q4_0 => 0.25,
+    }
+}
+
+fn kl(p_logits: &[f32], q_logits: &[f32]) -> f64 {
+    let lse = |l: &[f32]| {
+        let m = l.iter().copied().fold(f32::NEG_INFINITY, f32::max) as f64;
+        m + l.iter().map(|&v| (v as f64 - m).exp()).sum::<f64>().ln()
+    };
+    let (lp, lq) = (lse(p_logits), lse(q_logits));
+    p_logits.iter().zip(q_logits).map(|(&a, &b)| (a as f64 - lp).exp() * ((a as f64 - lp) - (b as f64 - lq))).sum()
 }
 
 #[test]
@@ -65,8 +83,10 @@ fn every_metal_stage_matches_hf_logits() {
             let logits = s.step(&prompt).unwrap();
             let d = logits.iter().zip(&expected).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
             let top = nanoinfer_core::sampler::argmax(logits);
-            println!("{stage} {:?}: max |diff| = {d:.2e}, top-1 {top}", p["text"].as_str().unwrap());
+            let k = kl(&expected, logits);
+            println!("{stage} {:?}: max |diff| = {d:.2e}, KL = {k:.2e}, top-1 {top}", p["text"].as_str().unwrap());
             assert!(d < tolerance(dtype), "{stage}: max abs diff {d}");
+            assert!(k < kl_tolerance(dtype), "{stage}: KL {k}");
             assert_eq!(top as u64, p["argmax"].as_u64().unwrap(), "{stage}: top-1 differs");
             // Decode path (n = 1) too: feed the prompt one token at a time.
             let mut s = engine.session();

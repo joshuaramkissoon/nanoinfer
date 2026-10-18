@@ -14,6 +14,8 @@ nanoinfer-core = { path = "../core" }
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-metal = "0.3"
+half = "2"
 
 [dev-dependencies]
 serde_json.workspace = true
+half = "2"

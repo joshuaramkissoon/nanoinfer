@@ -173,7 +173,8 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     if a.profile {
-        let bpw = a.stage.recipe().dtype.bytes_per_weight();
+        let rec = a.stage.recipe();
+        let bpw = (rec.dtype.bytes_per_weight(), rec.head_dtype.bytes_per_weight());
         let mut s = engine.session();
         s.profile = Some(Vec::new());
         s.step(&prompt)?;
@@ -228,7 +229,7 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Aggregate per-op GPU times by label and print them, with GB/s of weights
 /// for the matrix ops and GFLOP/s when `n` tokens went through them.
-fn print_profile(title: &str, prof: &[(&'static str, f64)], cfg: &nanoinfer_core::Config, bpw: f64, n: usize) {
+fn print_profile(title: &str, prof: &[(&'static str, f64)], cfg: &nanoinfer_core::Config, bpw: (f64, f64), n: usize) {
     let c = cfg.n_embd;
     let mut by: Vec<(&str, f64, usize)> = Vec::new();
     for (name, t) in prof {
@@ -244,20 +245,21 @@ fn print_profile(title: &str, prof: &[(&'static str, f64)], cfg: &nanoinfer_core
     let total: f64 = by.iter().map(|e| e.1).sum();
     println!("  GPU time per op ({title}; sum {:.3} ms):", total * 1e3);
     // Weights per op (all layers), and how many token rows went through it.
-    let weights = |name: &str| -> Option<(f64, usize)> {
+    // (params, bytes per param, token rows) per op, summed over layers.
+    let weights = |name: &str| -> Option<(f64, f64, usize)> {
         let per = match name {
             "qkv" => 3 * c * c,
             "attn_proj" => c * c,
             "fc" | "fc_proj" => 4 * c * c,
-            "lm_head" => return Some(((cfg.n_vocab * c) as f64, 1)),
+            "lm_head" => return Some(((cfg.n_vocab * c) as f64, bpw.1, 1)),
             _ => return None,
         };
-        Some(((cfg.n_layer * per) as f64, n))
+        Some(((cfg.n_layer * per) as f64, bpw.0, n))
     };
     for (name, t, k) in by {
         let rate = weights(name)
-            .map(|(params, rows)| {
-                format!("{:>6.1} GB/s {:>7.1} GFLOP/s", params * bpw / t / 1e9, 2.0 * params * rows as f64 / t / 1e9)
+            .map(|(params, b, rows)| {
+                format!("{:>6.1} GB/s {:>7.1} GFLOP/s", params * b / t / 1e9, 2.0 * params * rows as f64 / t / 1e9)
             })
             .unwrap_or_default();
         println!("    {name:<11} {:>9.1} us  {:>5.1}%  ({k:>2} dispatches)  {rate}", t * 1e6, 100.0 * t / total);
