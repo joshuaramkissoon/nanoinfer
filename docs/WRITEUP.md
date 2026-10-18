@@ -242,6 +242,25 @@ chart in this post is the real engine, running in your browser.
   ahead.
 - **Line:** "Halving the number of GPU kernels did nothing. Not asking the GPU whether it
   was done made it 30% faster."
+
+### GPU stage 7: flash-decoding and flash attention
+
+- **Hypothesis:** at long context the KV cache, not the weights, is the problem. At 960
+  tokens the f32 cache is 71 MB per token (more than the 89 MB of Q4 weights), attention
+  is 46% of a decode token and 54% of a 960-token prefill.
+- **Change:** decode: split the keys into 64-key chunks across threadgroups and merge
+  the partial softmaxes (flash-decoding). Prefill: a flash-attention kernel that keeps a
+  32-query × 32-key score tile in on-chip memory, with an online softmax and 8×8 hardware
+  matrix multiplies, so keys are read once per 32 queries instead of once per query.
+- **Result:** prefill attention at 960 tokens **113 → 14 ms (8×)**; prefill **4.8k → 8.7k
+  tok/s**. Decode at context 930: **362 → ~390 tok/s**, the long-context decode is now
+  bound by reading the KV cache itself.
+- **Aha:** the "online softmax" trick (keep a running max and sum, rescale what you
+  have when the max grows) is what lets attention be computed in tiles without ever
+  writing the n × n score matrix.
+- **Viz:** decode tok/s vs context length for pipelined / flash-decoding; prefill time
+  stacked by op at P=960 before/after (attention block shrinking from half to an eighth).
+- **Line:** "At 1,000 tokens of context the model's notes weigh more than the model."
 ### Stage 3: neon (hand-written SIMD), a null result
 
 - **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per

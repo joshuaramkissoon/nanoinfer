@@ -717,6 +717,55 @@ uncontended; run-to-run noise on this machine is ±5–10%):
   metal-pipelined-q8 keeps ppl but agrees with f32 on 90% of greedy picks;
   metal-pipelined-f16 is effectively lossless (99.7%).
 
+### Metal stage 7: attention that scales with context (metal-flashdec, metal-flash)
+
+At prompt 64 attention is ~9% of a Q4 token. At context ~960 (`--profile`,
+metal-fused) it is **46% of a decode token** (1233 µs) and **54% of a
+960-token prefill** (113 ms): the f32 KV cache at 960 positions is 70.8 MB per
+token, *more than the Q4 weights* (89 MB), and `attention_simd` streams it with
+only 12 threadgroups (one per head) at decode, while at prefill every query's
+threadgroup re-reads all earlier keys.
+
+**7a, metal-flashdec (flash-decoding).** `attn_decode_split`: grid (head,
+64-key chunk); each 256-thread threadgroup computes a partial softmax over its
+chunk (local max m, sum l, unnormalised o[64]) into a scratch buffer;
+`attn_decode_merge` combines the chunks per head (M = max m_s, L = Σ l_s
+e^(m_s−M), out = Σ o_s e^(m_s−M) / L). 12 → up to 192 threadgroups at decode;
++12 dispatches per token. Prefill still uses `attention_simd`.
+
+**7b, metal-flash (flash-attention prefill).** `attn_prefill_flash`: a
+128-thread threadgroup owns 32 queries of one head and walks the keys in
+blocks of 32, staging each K/V block in threadgroup memory once for all 32
+queries. Per block each SIMD-group (8 queries): S = Q·Kᵀ via 8×8 MMAs
+(transposed K loads), online softmax on S in threadgroup memory (lane = one
+row × 8 columns, `simd_shuffle_xor` across the row's 4 lanes, causal mask),
+rescale O by diag(α) with one more MMA per 8×8 tile, O += P·V. Divide by l at
+the end. Scores never touch device memory.
+
+**Correctness.** Fixture prompts are shorter than one chunk, so a new test
+compares SplitK and Flash against `attention_simd` at context 300 (5 chunks;
+prefill split as 100 + 150 tokens so the flash kernel runs with pos0 > 0):
+max |Δlogit| 9.2e-5 (prefill) and 6.1e-5 / 9.2e-5 (decode), f32.
+
+**Numbers** (Q4 pipelined base, 64 decode steps, 5 runs):
+
+| stage | prefill P=512 | prefill P=960 | decode @ ctx ~100 | decode @ ctx ~550 | decode @ ctx ~930 |
+|---|---|---|---|---|---|
+| metal-pipelined | ~6000 | 4763 | 586–632 | — | 362 |
+| metal-flashdec | 6562 | 4437–4900 | 641 | 470 | 352–406 |
+| **metal-flash** | **8901** | **8496–8696** | 575–626 | 469 | 386–391 |
+
+Prefill attention at P = 960: **113 ms → 13.9 ms (8.2×)**; prefill is now
+GEMM-bound again (GEMMs ~1.8–2.0 TFLOP/s, 87% of the 107 ms). Decode attention
+at context 961: 1233 → 673 µs. Long-context decode improved only ~10%
+(362 → ~390): at context 930 a Q4 token reads 89 MB of weights + 69 MB of f32
+KV cache, so the remaining lever is fewer KV bytes (f16 KV), not more
+parallelism.
+
+**Surprise.** The flash prefill kernel was right first time, and the cheapest
+trick in it is the diag(α) rescale: a simdgroup matrix has no per-row scale
+op, but multiplying by an 8×8 diagonal matrix is one more MMA per tile.
+
 ---
 
 ## Stage 3: neon (explicit SIMD), a null result

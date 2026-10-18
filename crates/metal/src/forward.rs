@@ -7,7 +7,7 @@
 
 use crate::gpu::{Arg, Buf, Gpu, RunStats, Runner};
 use crate::weights::{Mat, Weights};
-use crate::{DType, Fusion, Matmul, Matvec, MetalStage, Par, Recipe};
+use crate::{Attn, DType, Fusion, Matmul, Matvec, MetalStage, Par, Recipe};
 use nanoinfer_core::{Config, Model};
 
 /// GPU-resident model for one stage (weights in that stage's dtype).
@@ -58,6 +58,8 @@ pub struct MetalSession<'e> {
     /// (gen[pos + 1] = argmax of the forward at pos). Lets decode run without
     /// the CPU in the loop.
     gen: Buf,
+    /// Flash-decoding partials [n_head, max_chunks, 2 + head_dim].
+    att_part: Buf,
     k_cache: Buf,
     v_cache: Buf,
     /// Counters for the most recent `step`.
@@ -74,6 +76,8 @@ const MV_ROWS: usize = 4;
 const MV_SIMDGROUPS: usize = 4;
 const MV_KERNEL: &str = "matvec_simd_r4";
 
+/// Keys per flash-decoding chunk (must match ATT_CHUNK in attn.metal).
+const ATT_CHUNK: usize = 64;
 /// Threadgroups (of 1024 threads) in the first argmax pass.
 const ARGMAX_GROUPS: usize = 32;
 /// Fused matvec shape: 4 rows per SIMD-group, 8 SIMD-groups = 32 rows per threadgroup.
@@ -86,7 +90,7 @@ impl<'e> MetalSession<'e> {
         let (c, rows, v) = (cfg.n_embd, cfg.n_ctx, cfg.n_vocab);
         let g = &e.gpu;
         let kv = cfg.n_layer * cfg.n_ctx * c * F;
-        let scores = if e.recipe.attn == Par::Naive { rows * cfg.n_head * cfg.n_ctx * F } else { 16 };
+        let scores = if e.recipe.attn == Attn::Naive { rows * cfg.n_head * cfg.n_ctx * F } else { 16 };
         MetalSession {
             e,
             pos: 0,
@@ -104,6 +108,7 @@ impl<'e> MetalSession<'e> {
             arg_v: g.buffer(ARGMAX_GROUPS * 4),
             arg_i: g.buffer(ARGMAX_GROUPS * 4),
             gen: g.buffer((rows + 1) * 4),
+            att_part: g.buffer(cfg.n_head * cfg.n_ctx.div_ceil(ATT_CHUNK) * (cfg.head_dim() + 2) * F),
             k_cache: g.buffer(kv),
             v_cache: g.buffer(kv),
             last: RunStats::default(),
@@ -315,8 +320,12 @@ impl<'e> MetalSession<'e> {
     fn attention(&self, r: &mut Runner, l: usize, n: usize) {
         let cfg = &self.e.config;
         let layer_off = l * cfg.n_ctx * cfg.n_embd * F;
-        match self.e.recipe.attn {
-            Par::Naive => r.dispatch(
+        let attn = match self.e.recipe.attn {
+            Attn::SplitK | Attn::Flash if n == 1 => return self.attention_split(r, l),
+            a => a,
+        };
+        match attn {
+            Attn::Naive => r.dispatch(
                 "attn",
                 "attention_naive",
                 &[
@@ -334,7 +343,23 @@ impl<'e> MetalSession<'e> {
                 n * cfg.n_head,
                 32,
             ),
-            Par::Simd => r.dispatch_tg(
+            Attn::Flash => r.dispatch_tg(
+                "attn",
+                "attn_prefill_flash",
+                &[
+                    Arg::Buf(&self.att),
+                    Arg::Buf(&self.qkv),
+                    Arg::BufAt(&self.k_cache, layer_off),
+                    Arg::BufAt(&self.v_cache, layer_off),
+                    Arg::U32(n as u32),
+                    Arg::U32(self.pos as u32),
+                    Arg::U32(cfg.n_head as u32),
+                ],
+                (n.div_ceil(32), cfg.n_head, 1),
+                (128, 1, 1),
+                0,
+            ),
+            Attn::Simd | Attn::SplitK => r.dispatch_tg(
                 "attn",
                 "attention_simd",
                 &[
@@ -351,6 +376,45 @@ impl<'e> MetalSession<'e> {
                 (1024 + 32 + 256) * F,
             ),
         }
+    }
+
+    /// Flash-decoding: (head, 64-key chunk) threadgroups, then a merge per head.
+    fn attention_split(&self, r: &mut Runner, l: usize) {
+        let cfg = &self.e.config;
+        let layer_off = l * cfg.n_ctx * cfg.n_embd * F;
+        let n_kv = self.pos + 1;
+        let chunks = n_kv.div_ceil(ATT_CHUNK);
+        let max_chunks = cfg.n_ctx.div_ceil(ATT_CHUNK) as u32;
+        r.dispatch_tg(
+            "attn",
+            "attn_decode_split",
+            &[
+                Arg::Buf(&self.qkv),
+                Arg::BufAt(&self.k_cache, layer_off),
+                Arg::BufAt(&self.v_cache, layer_off),
+                Arg::Buf(&self.att_part),
+                Arg::U32(n_kv as u32),
+                Arg::U32(cfg.n_head as u32),
+                Arg::U32(max_chunks),
+            ],
+            (cfg.n_head, chunks, 1),
+            (256, 1, 1),
+            (64 + 32 + 256) * F,
+        );
+        r.dispatch_tg(
+            "attn",
+            "attn_decode_merge",
+            &[
+                Arg::Buf(&self.att_part),
+                Arg::Buf(&self.att),
+                Arg::U32(chunks as u32),
+                Arg::U32(cfg.n_head as u32),
+                Arg::U32(max_chunks),
+            ],
+            (cfg.n_head, 1, 1),
+            (64, 1, 1),
+            0,
+        );
     }
 
     fn encode_forward(&self, r: &mut Runner, n: usize, argmax: bool) {

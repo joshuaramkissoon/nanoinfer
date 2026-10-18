@@ -90,6 +90,20 @@ pub enum Par {
     Simd,
 }
 
+/// Attention kernel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Attn {
+    /// One thread per (query, head).
+    Naive,
+    /// One 256-thread threadgroup per (query, head).
+    Simd,
+    /// Decode: keys split into 64-key chunks across threadgroups, then merged
+    /// (flash-decoding). Prefill: as `Simd`.
+    SplitK,
+    /// `SplitK` for decode + a simdgroup-matrix flash-attention kernel for prefill.
+    Flash,
+}
+
 /// How much of a decode step is fused into the matvecs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fusion {
@@ -113,7 +127,7 @@ pub struct Recipe {
     pub matvec: Matvec,
     pub matmul: Matmul,
     pub norm: Par,
-    pub attn: Par,
+    pub attn: Attn,
     /// Decode-time kernel fusion.
     pub fused: Fusion,
     /// Argmax over the logits on the GPU (only 4 bytes read back).
@@ -156,6 +170,10 @@ pub enum MetalStage {
     PipelinedF16,
     /// metal-pipelined with Q8_0 weights everywhere.
     PipelinedQ8,
+    /// metal-pipelined + split-K (flash-decoding) attention.
+    FlashDec,
+    /// + flash-attention prefill (simdgroup matrices, online softmax).
+    Flash,
 }
 
 impl MetalStage {
@@ -175,6 +193,8 @@ impl MetalStage {
         MetalStage::Pipelined,
         MetalStage::PipelinedF16,
         MetalStage::PipelinedQ8,
+        MetalStage::FlashDec,
+        MetalStage::Flash,
     ];
 
     pub fn name(self) -> &'static str {
@@ -194,6 +214,8 @@ impl MetalStage {
             MetalStage::Pipelined => "metal-pipelined",
             MetalStage::PipelinedF16 => "metal-pipelined-f16",
             MetalStage::PipelinedQ8 => "metal-pipelined-q8",
+            MetalStage::FlashDec => "metal-flashdec",
+            MetalStage::Flash => "metal-flash",
         }
     }
 
@@ -205,12 +227,12 @@ impl MetalStage {
             matvec: Matvec::Naive,
             matmul: Matmul::Naive,
             norm: Par::Naive,
-            attn: Par::Naive,
+            attn: Attn::Naive,
             fused: Fusion::None,
             gpu_argmax: false,
             pipelined: false,
         };
-        let par = Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, norm: Par::Simd, attn: Par::Simd, ..naive };
+        let par = Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, norm: Par::Simd, attn: Attn::Simd, ..naive };
         let mma = Recipe { matmul: Matmul::SimdMatrix, ..par };
         let q4 = Recipe { dtype: DType::Q4_0, head_dtype: DType::Q8_0, ..mma };
         let pipelined = Recipe { gpu_argmax: true, fused: Fusion::Epilogue, pipelined: true, ..q4 };
@@ -230,6 +252,8 @@ impl MetalStage {
             MetalStage::Pipelined => pipelined,
             MetalStage::PipelinedF16 => Recipe { dtype: DType::F16, head_dtype: DType::F16, ..pipelined },
             MetalStage::PipelinedQ8 => Recipe { dtype: DType::Q8_0, head_dtype: DType::Q8_0, ..pipelined },
+            MetalStage::FlashDec => Recipe { attn: Attn::SplitK, ..pipelined },
+            MetalStage::Flash => Recipe { attn: Attn::Flash, ..pipelined },
         }
     }
 

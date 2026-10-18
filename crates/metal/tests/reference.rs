@@ -177,3 +177,37 @@ fn fused_pipelined_matches_hf_greedy_in_every_dtype() {
         }
     }
 }
+
+/// Fixture prompts are shorter than one 64-key chunk, so check the split-K /
+/// flash attention paths against attention_simd at a context of 300 tokens
+/// (5 chunks), in f32 so only the attention arithmetic differs.
+#[test]
+fn split_and_flash_attention_match_simd_at_long_context() {
+    let Some(model) = model() else { return };
+    let mut seq = vec![];
+    while seq.len() < 300 {
+        seq.extend(ids(&reference()["prompts"][3]["ids"]));
+    }
+    seq.truncate(300);
+    let base = nanoinfer_metal::Recipe { dtype: DType::F32, head_dtype: DType::F32, ..MetalStage::Mma.recipe() };
+    let run = |attn: nanoinfer_metal::Attn| {
+        let engine =
+            MetalEngine::with_recipe(model, MetalStage::Mma, nanoinfer_metal::Recipe { attn, ..base }).unwrap();
+        let mut s = engine.session();
+        // Two prefill chunks, so the second one starts at pos0 = 100.
+        s.step(&seq[..100]).unwrap();
+        let prefill = s.step(&seq[100..250]).unwrap().to_vec();
+        for &t in &seq[250..299] {
+            s.step(&[t]).unwrap();
+        }
+        (prefill, s.step(&seq[299..]).unwrap().to_vec())
+    };
+    let (p0, d0) = run(nanoinfer_metal::Attn::Simd);
+    for attn in [nanoinfer_metal::Attn::SplitK, nanoinfer_metal::Attn::Flash] {
+        let (p, d) = run(attn);
+        let dp = p.iter().zip(&p0).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        let dd = d.iter().zip(&d0).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        println!("{attn:?} vs Simd at context 300: prefill max diff {dp:.2e}, decode max diff {dd:.2e}");
+        assert!(dp < 1e-3 && dd < 1e-3, "{attn:?}: {dp} {dd}");
+    }
+}
