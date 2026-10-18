@@ -502,7 +502,13 @@ impl<'e> Batch<'e> {
         n: usize,
         (kv_off, step): (usize, usize),
     ) {
-        let nb = n.next_power_of_two().min(MAX_NB);
+        // Chunk size: a power of two up to 8, then 12 or 16 (9 rows on the
+        // 16-row kernel cost ~25% more than 8: speculative verify at k = 8).
+        let nb = match n {
+            0..=8 => n.next_power_of_two(),
+            9..=12 => 12,
+            _ => MAX_NB,
+        };
         let has_bias = bias.is_some() as u32;
         let bias = bias.unwrap_or(x);
         let args = [
@@ -521,7 +527,8 @@ impl<'e> Batch<'e> {
             Arg::U32(step as u32),
             Arg::U32(self.max_blocks as u32),
         ];
-        let rpl = self.e.opts.rows_per_lane[nb.trailing_zeros() as usize];
+        // rows per lane by chunk size; 12 shares the 16-row setting
+        let rpl = self.e.opts.rows_per_lane[if nb == 12 { 4 } else { nb.trailing_zeros() as usize }];
         let (kernel, rows_per_sg) = if rpl == 0 {
             (format!("{kernel}_{}_b{nb}", w.dtype.name()), 4)
         } else {

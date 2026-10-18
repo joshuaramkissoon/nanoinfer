@@ -174,7 +174,7 @@ template [[host_name("mvb_resid_" NAME "_b" #NB)]] kernel void matvec_batch<W, U
 template [[host_name("mvb_qkv_" NAME "_b" #NB)]] kernel void matvec_batch<W, UF4, NB, BEPI_QKV>(MVB_ARGS);
 #define MVB_SET(NAME, W, UF4) \
 MVB_EPIS(NAME, W, UF4, 1) MVB_EPIS(NAME, W, UF4, 2) MVB_EPIS(NAME, W, UF4, 4) \
-MVB_EPIS(NAME, W, UF4, 8) MVB_EPIS(NAME, W, UF4, 16)
+MVB_EPIS(NAME, W, UF4, 8) MVB_EPIS(NAME, W, UF4, 12) MVB_EPIS(NAME, W, UF4, 16)
 MVB_SET("q4_0", BQ4, 8)
 MVB_SET("q8_0", BQ8, 4)
 MVB_SET("f16", BF16, 2)
@@ -316,6 +316,7 @@ template [[host_name("mvr_qkv_" NAME "_b" #NB "_r" #R)]] kernel void matvec_batc
 #define MVR_SET(NAME, W, UF4) \
 MVR_EPIS(NAME, W, UF4, 1, 1) MVR_EPIS(NAME, W, UF4, 1, 2) MVR_EPIS(NAME, W, UF4, 2, 2) MVR_EPIS(NAME, W, UF4, 2, 4) \
 MVR_EPIS(NAME, W, UF4, 4, 2) MVR_EPIS(NAME, W, UF4, 4, 4) MVR_EPIS(NAME, W, UF4, 8, 2) MVR_EPIS(NAME, W, UF4, 8, 4) \
+MVR_EPIS(NAME, W, UF4, 12, 1) MVR_EPIS(NAME, W, UF4, 12, 2) MVR_EPIS(NAME, W, UF4, 12, 4) \
 MVR_EPIS(NAME, W, UF4, 16, 1) MVR_EPIS(NAME, W, UF4, 16, 2) MVR_EPIS(NAME, W, UF4, 16, 4)
 MVR_SET("q4_0", RQ4, 8)
 MVR_SET("q8_0", RQ8, 4)

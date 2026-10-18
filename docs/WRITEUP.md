@@ -395,6 +395,10 @@ chart in this post is the real engine, running in your browser.
   formula curve per prompt, α in the legend.
 - **Line:** "The big model never generates faster. It just gets to say 'yes,
   yes, yes, no' four tokens at a time."
+- **Aha 3 (round 2):** "verifying k tokens costs one step" is true to 8 rows within
+  27%, then the batched matvec runs out of arithmetic (16 rows = 2× a step). With
+  the measured verify cost in the formula, every (prompt, k) is predicted within
+  5–15%. A 12-row kernel shaved the k = 8 cliff (13.9 → 12.3 ms).
 - **Caveat for the post:** greedy GPT-2 loops after ~50 tokens, inflating α on
   every prompt; say so, or use 48-token continuations for the headline.
 

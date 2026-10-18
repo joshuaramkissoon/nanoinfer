@@ -1233,6 +1233,37 @@ alone ~700–800 tok/s, c ≈ 0.16–0.17; speedup measured / formula E/(kc+1)):
   every prompt (the list and Q&A prompts loop almost immediately).
 - k = 1 already gives 1.3–1.7×: one free draft token per target step.
 
+### Speculative decoding, round 2: what verification really costs
+
+**Verify cost vs rows** (gpt2-medium f16, one forward over B rows through the
+batched matvec, `metal-batch --weights weights/gpt2-medium --dtype f16`):
+
+| rows | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 12 | 13 | 16 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| step ms | 7.85 | 8.17 | 8.83 | 8.90 | 9.57 | 9.56 | 9.80 | 10.00 | 11.87 | 12.03 | 12.82 | 14.11 | 15.77 |
+| × one row | 1.00 | 1.04 | 1.12 | 1.13 | 1.22 | 1.22 | 1.25 | **1.27** | 1.51 | 1.53 | 1.63 | 1.80 | 2.01 |
+
+So "checking k + 1 tokens costs one step" holds to 8 rows within 27%, then
+the batched matvec turns compute-bound (~570–720 GFLOP/s, ~15% of peak: the
+kernel does plain FMAs, no simdgroup_matrix). The GEMM path is no rescue
+below 32 rows: with `--gemm-min-rows 4`, 16 rows take 21 ms (39 GB/s).
+
+**The k = 8 cliff, fixed halfway.** The batched matvec rounded rows up to a
+power of two, so 9 rows ran the 16-row kernel. Added a 12-row chunk
+(`mvb_*_b12`, `mvr_*_b12_r{1,2,4}`; same per-token summation order, so
+batch invariance holds). Verify at k = 8: 13.8–14.8 → **12.2–12.4 ms**;
+k = 8 speedup 2.57–2.61 → 2.69–2.72 on the α ≈ 1 prompts. Still not better
+than k = 7, because the draft keeps getting longer (1.4 ms per draft token).
+
+**The model, corrected.** With the measured verify cost v(k+1) in place of
+1, speedup ≈ E / (k·c + v(k+1)) predicts every (prompt, k) to within 5–15%
+(license k=7: 3.23 predicted, 2.94 measured; naive formula 3.65). The rest is
+the three CPU↔GPU waits per round (~0.4 ms of a ~20 ms round) and the draft's
+first, non-resident step.
+
+Re-run (`bench/specdec.json`, gpt2-medium pair, load 3): best 394–397 tok/s
+(list, license, k=7: 2.93–2.94× over 132–135 tok/s).
+
 ### Failures and dead ends (round 2)
 
 - None of the salvaged code had to be fixed; the crash left it building.
