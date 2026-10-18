@@ -86,16 +86,16 @@ function BytesPerToken() {
                 </span>
               </span>
               <span className="track">
-                {[1, 10, 100, 1000, 10000].map((g) => (
-                  <i key={g} className="grid" style={{ left: `${x(g)}%` }} />
-                ))}
+                {fits && [1, 10, 100, 1000, 10000].map((g) => <i key={g} className="grid" style={{ left: `${x(g)}%` }} />)}
                 {fits ? (
                   <>
                     <i className="bar" style={{ width: `${Math.max(0.5, x(ceil))}%`, background: cc.c2 }} />
                     {meas != null && <i className="meas" style={{ left: `${x(meas)}%`, background: cc.c1 }} title={`our engine: ${meas.toFixed(0)} tok/s`} />}
                   </>
                 ) : (
-                  <span className="nofit-k">doesn't fit: needs {fmtBytes(bytes)}, has {mach.cap} GB</span>
+                  <span className="nofit-k">
+                    <span>doesn't fit: needs {fmtBytes(bytes)}, has {mach.cap} GB</span>
+                  </span>
                 )}
               </span>
               <span className="v">{fits ? `${fmtRate(ceil)} tok/s` : "–"}</span>

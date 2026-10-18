@@ -383,6 +383,10 @@
   background: repeating-linear-gradient(135deg, transparent 0 5px, var(--m-rule) 5px 6px);
   padding-left: 0.3rem;
 }
+.nofit-k > span {
+  background: var(--nv-panel);
+  padding: 0 0.35rem;
+}
 .p0-ceil-axis {
   position: relative;
   height: 1.6rem;

@@ -326,7 +326,9 @@ function SplitCost() {
             ) : (
               <>
                 <span className="track nofit">
-                  <span className="nofit-k">doesn't fit: 140 GB of weights, 80 GB per GPU</span>
+                  <span className="nofit-k">
+                    <span>doesn't fit: 140 GB of weights, 80 GB per GPU</span>
+                  </span>
                 </span>
                 <span className="v">–</span>
               </>
