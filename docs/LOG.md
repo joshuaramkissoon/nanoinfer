@@ -68,6 +68,7 @@ of the weights).
 | 12 q8-rescore / q4-rescore | ~1400 | **394 (q8) / 480 (q4)**, 6 threads | 46% of 860 / 39% of 1237 | 1.13–1.17× |
 | 13 q8-attn (NEON attention) | ~1425 | **404** (ctx 64–128), 292 (ctx 512+) | 47% of 860 | 1.03× short / 1.065× long ctx |
 | 14 q8-kv16 (head-major f16 KV) | ~1415 | +7% short ctx / **+60% at 900 ctx** (A/B; bandwidth-starved period) | | |
+| 15 q8-prefill (int8 sdot prefill) | **2415** (P=64), 2143 (P=512) | ~400 (6t, per-token) | 58% of 693 | 1.5× prefill |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -1869,3 +1870,40 @@ the GPU side (other agents' Metal/WebGPU benches and a Chrome renderer at 98%)
 was saturating memory. The A/B ratios above are valid; absolute numbers from
 this period (recorded: q8-kv16 271 / 240 / 206 tok/s at prompts 64 / 512 / 900,
 q4-kv16 278) are depressed ~2× and don't compare with earlier stages.
+
+---
+
+## Stage 15: q8-prefill (int8 `sdot` prefill tile)
+
+**Hypothesis.** Prefill (85% matmuls) is compute-bound, and since stage 8 it has
+dequantised each weight panel to f32 and run f32 FMAs (~2.7 multiply-adds per
+instruction once loads are counted). With the prompt rows quantised to Q8_0
+too (as decode already does), a 4 × 4 output tile can use `sdot`: per block of 32
+and per (row, weight-row) pair, 2 `sdot` (32 multiply-adds) + 1 convert + 1 FMA by
+the scales, ~8 multiply-adds per instruction. Expect prefill ~1.5–2×.
+
+**What changed.** `kernels/q8gemm.rs`: `Q8GemmMatrix` (Q8_0 storage; decode =
+stage 9's `dot_q8`; prefill = activation quantisation + `tile_4x4`: 4 weight rows'
+two 16-byte halves kept in 8 registers per block, 16 int32→f32 accumulators).
+Ragged rows/columns fall back to `dot_q8`. Test: tile output equals the per-row
+integer dot to 1e-4 relative. Stage `q8-prefill` = stage 14 with this matrix.
+
+**Numbers** (interleaved A/B, 10 threads):
+
+| | q8-kv16 prefill | **q8-prefill** prefill | decode (per-token) |
+|---|---|---|---|
+| P=64 | 1657 | **2510** (+52%) | 346 → 359 |
+| P=512 | 1523 | **2277** (+50%) | 282 → 268 (noise) |
+
+Recorded: **P=64 2415 ± 145 tok/s (413 GFLOP/s), P=512 2143 ± 174 (364 GFLOP/s)**
+at 10 threads; 6 threads: prefill 2015, decode **401 tok/s per-token** (69.5 GB/s,
+58% of its 693 tok/s spec ceiling). membw had recovered by then (51 / 82 / 86
+GB/s at 1 / 4 / 10 threads).
+
+**Quality.** HF prompts (which go through prefill) give KL vs HF 3.0e-3 / 1.5e-3 /
+4.5e-4 / 4.7e-5, against q8-kv16's 2.7e-3 / 1.2e-3 / 3.6e-4 / 4.9e-5. Int8
+activations in prefill add very little on top of the rescored head's tail error.
+
+**vs Apple Accelerate:** prefill **2415 vs 1480 tok/s at P=64 (1.6×)** and 2143 vs
+891 at P=512 (2.4×). Accelerate's AMX/SME does f32 GEMM; we do int8 on NEON
+and every other op in parallel.

@@ -28,6 +28,7 @@ use crate::kernels::lowlat::FastPar;
 use crate::kernels::packed::SpinPar;
 use crate::kernels::q4::Q4Matrix;
 use crate::kernels::q8::Q8Matrix;
+use crate::kernels::q8gemm::Q8GemmMatrix;
 use crate::kernels::q8hilo::Q8HiLoMatrix;
 use crate::kernels::{AttnNeon, FastOps, Kernels, LowLat, Neon, Reference, Spin, Threaded, Tiled, Unrolled};
 use crate::trace::{ForwardInfo, Phase, Trace};
@@ -76,6 +77,8 @@ pub enum Stage {
     Q8Kv16,
     /// Stage 14b: stage 13b (Q4_0, rescored head) with the head-major f16 KV cache.
     Q4Kv16,
+    /// Stage 15: stage 14 (Q8_0, rescored head, f16 KV) with an int8 sdot prefill tile.
+    Q8Prefill,
 }
 
 impl Stage {
@@ -99,6 +102,7 @@ impl Stage {
         Stage::Q4Attn,
         Stage::Q8Kv16,
         Stage::Q4Kv16,
+        Stage::Q8Prefill,
     ];
 
     /// Name of the kernel set this stage runs.
@@ -122,6 +126,7 @@ impl Stage {
             Stage::Q4Attn => "attn-neon + q4_0 (rescored head)",
             Stage::Q8Kv16 => "attn-neon + q8_0 (rescored head) + f16 kv",
             Stage::Q4Kv16 => "attn-neon + q4_0 (rescored head) + f16 kv",
+            Stage::Q8Prefill => "attn-neon + q8_0 sdot prefill (rescored head) + f16 kv",
         }
     }
 
@@ -146,6 +151,7 @@ impl Stage {
             Stage::Q4Attn => WeightFormat::Q4_0,
             Stage::Q8Kv16 => WeightFormat::Q8_0,
             Stage::Q4Kv16 => WeightFormat::Q4_0,
+            Stage::Q8Prefill => WeightFormat::Q8_0,
             _ => WeightFormat::F32,
         }
     }
@@ -196,6 +202,7 @@ impl Stage {
             Stage::Q4Attn => "q4-attn",
             Stage::Q8Kv16 => "q8-kv16",
             Stage::Q4Kv16 => "q4-kv16",
+            Stage::Q8Prefill => "q8-prefill",
         }
     }
 }
@@ -339,6 +346,8 @@ enum PackedWeights {
     Q4(Box<packed::PackedModel<Q4Matrix, packed::PlainHead<F16Matrix>>>),
     /// Q8_0 blocks, rescored head (Q8 × two-level int8 approximate, f16 exact for candidates).
     Q8R(Box<packed::PackedModel<Q8Matrix, packed::RescoredHead<Q8HiLoMatrix>>>),
+    /// Q8_0 blocks with the int8 prefill tile, rescored head (stage 15).
+    Q8G(Box<packed::PackedModel<Q8GemmMatrix, packed::RescoredHead<Q8HiLoMatrix>>>),
     /// Q4_0 blocks, rescored head.
     Q4R(Box<packed::PackedModel<Q4Matrix, packed::RescoredHead<Q8HiLoMatrix>>>),
 }
@@ -346,6 +355,7 @@ enum PackedWeights {
 impl PackedWeights {
     fn for_stage(model: &Model, stage: Stage) -> Self {
         match stage {
+            Stage::Q8Prefill => return PackedWeights::Q8G(Box::new(packed::PackedModel::new(model))),
             Stage::Q8Rescore | Stage::Q8Attn | Stage::Q8Kv16 => {
                 return PackedWeights::Q8R(Box::new(packed::PackedModel::new(model)))
             }
@@ -384,7 +394,7 @@ impl Session {
 
     pub fn with_max_seq(model: &Model, stage: Stage, max_seq: usize) -> Self {
         let max_seq = max_seq.min(model.config.n_ctx);
-        let uses_kv16 = matches!(stage, Stage::Q8Kv16 | Stage::Q4Kv16);
+        let uses_kv16 = matches!(stage, Stage::Q8Kv16 | Stage::Q4Kv16 | Stage::Q8Prefill);
         let kv = match stage {
             Stage::Naive => KvCache::default(),
             // f16 stages keep their cache in `kv16`; `kv` only tracks the length.
@@ -590,6 +600,19 @@ impl Session {
             },
             Stage::Q4Kv16 => match &self.packed {
                 PackedWeights::Q4R(p) => kv16::forward::<AttnNeon, Q4Matrix, _, FastPar, T>(
+                    model,
+                    p,
+                    new_tokens,
+                    &mut self.kv16,
+                    &mut self.kv.len,
+                    &mut self.acts,
+                    &mut self.scratch,
+                    trace,
+                ),
+                _ => unreachable!(),
+            },
+            Stage::Q8Prefill => match &self.packed {
+                PackedWeights::Q8G(p) => kv16::forward::<AttnNeon, Q8GemmMatrix, _, FastPar, T>(
                     model,
                     p,
                     new_tokens,

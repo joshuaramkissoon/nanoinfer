@@ -626,4 +626,13 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
 - **Aha 2:** halfway through, memory bandwidth on this machine halved (another
   workload on the GPU). Only interleaved A/B measurements survived it.
 
+### Stage 15: q8-prefill (integer math for the prompt)
+
+- **Change:** the prompt's activations are quantised to 8-bit too, and the prefill
+  matmul uses `sdot` (32 multiply-adds per 2 instructions) instead of float FMAs.
+- **Result:** prefill **2415 tok/s** at 64 tokens (+52%) and **2143** at 512, now **1.6–2.4×
+  Apple's Accelerate**. Quality unchanged within noise.
+- **Aha:** decode wanted fewer *bytes*; prefill wants fewer *instructions*. The same
+  int8 trick pays both bills, for different reasons.
+
 ## Open questions / things to verify before publishing

@@ -33,6 +33,7 @@ pub mod neon;
 pub mod packed;
 pub mod q4;
 pub mod q8;
+pub mod q8gemm;
 pub mod q8hilo;
 pub mod reference;
 pub mod spin;
