@@ -2,13 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { boot } from "../engine/client";
-import { CHAPTERS, PARTS, chapterHref, type Chapter } from "./chapters";
+import { CHAPTERS, GUIDE_HREF, PARTS, chapterHref, chapterNum, type Chapter } from "./chapters";
+import { checksFor, CheckYourself } from "./Check";
+import FieldGuide from "./FieldGuide";
 import { climbFactor } from "./Climb";
 import { useLearnData } from "./kit";
 import { Journey } from "../site/Journey";
 import { linkTo, navigate, usePath } from "./router";
 import { TopBar } from "../site/TopBar";
 import "./learn.css";
+import "./p0.css";
 
 const VISITED_KEY = "nanoinfer-learn-visited";
 function readVisited(): Set<string> {
@@ -35,23 +38,24 @@ export default function LearnApp() {
   const slug = path.replace(/^\/learn\/?/, "").replace(/\/$/, "");
   const idx = CHAPTERS.findIndex((c) => c.slug === slug);
   const ch = idx >= 0 ? CHAPTERS[idx] : null;
+  const guide = slug === "field-guide";
 
   useEffect(() => {
-    document.title = ch ? `${ch.title} · nanoinfer foundations` : "Foundations · nanoinfer";
+    document.title = ch ? `${ch.title} · nanoinfer foundations` : guide ? "Field guide · nanoinfer" : "Foundations · nanoinfer";
     if (ch) markVisited(ch.slug);
-  }, [ch]);
+  }, [ch, guide]);
 
   // ← / → between chapters
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (e.metaKey || e.ctrlKey || e.altKey || t.closest("input, textarea, select, [contenteditable]")) return;
+      if (guide || e.metaKey || e.ctrlKey || e.altKey || t.closest("input, textarea, select, [contenteditable]")) return;
       if (e.key === "ArrowRight" && idx < CHAPTERS.length - 1) navigate(chapterHref(CHAPTERS[idx + 1]));
       if (e.key === "ArrowLeft") navigate(idx > 0 ? chapterHref(CHAPTERS[idx - 1]) : "/learn");
     };
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
-  }, [idx]);
+  }, [idx, guide]);
 
   return (
     <main className="nv lr">
@@ -66,11 +70,12 @@ export default function LearnApp() {
             <a href="/learn" onClick={linkTo("/learn")}>
               course
             </a>
-            {ch && <span className="nv-muted"> / {String(idx + 1).padStart(2, "0")}</span>}
+            {ch && <span className="nv-muted"> / {chapterNum(ch)}</span>}
+            {guide && <span className="nv-muted"> / field guide</span>}
           </>
         }
       />
-      {ch ? <ChapterPage ch={ch} idx={idx} key={ch.slug} /> : <Index />}
+      {ch ? <ChapterPage ch={ch} idx={idx} key={ch.slug} /> : guide ? <FieldGuide /> : <Index />}
     </main>
   );
 }
@@ -94,7 +99,7 @@ function Rail({ idx }: { idx: number }) {
           <div key={c.slug} className={first ? "lr-rail-first" : undefined}>
             {first && (
               <span className="lr-rail-part">
-                part {c.part + 1} · {PARTS[c.part].toLowerCase()}
+                part {c.part} · {PARTS[c.part].toLowerCase()}
               </span>
             )}
             <a
@@ -102,11 +107,11 @@ function Rail({ idx }: { idx: number }) {
               onClick={linkTo(chapterHref(c))}
               className={`${i === idx ? "on" : ""} ${visited.has(c.slug) ? "seen" : ""}`}
               aria-current={i === idx ? "page" : undefined}
-              aria-label={`${String(i + 1).padStart(2, "0")} ${c.title}`}
+              aria-label={`${chapterNum(c)} ${c.title}`}
             >
               <span className="d" />
               <span className="t">
-                <span className="nv-muted">{String(i + 1).padStart(2, "0")}</span> {c.title}
+                <span className="nv-muted">{chapterNum(c)}</span> {c.title}
               </span>
             </a>
           </div>
@@ -126,9 +131,9 @@ function ChapterPage({ ch, idx }: { ch: Chapter; idx: number }) {
       <article className="lr-ch" data-askable data-ask-title={ch.title}>
         <header className="lr-head" data-ask-section>
           <div className="lr-kicker">
-            <span className="nv-accent">{String(idx + 1).padStart(2, "0")}</span>
+            <span className="nv-accent">{chapterNum(ch)}</span>
             <span className="nv-muted">
-              {" · "}part {ch.part + 1} · {PARTS[ch.part].toLowerCase()}
+              {" · "}part {ch.part} · {PARTS[ch.part].toLowerCase()}
             </span>
           </div>
           <h1 className="lr-h1">{ch.title}</h1>
@@ -136,11 +141,12 @@ function ChapterPage({ ch, idx }: { ch: Chapter; idx: number }) {
         </header>
         <div className="lr-body">
           <C />
+          <CheckYourself qs={checksFor(ch.slug)} />
         </div>
         <nav className="lr-pn">
           {prev ? (
             <a href={chapterHref(prev)} onClick={linkTo(chapterHref(prev))} className="prev">
-              <span className="k">← {String(idx).padStart(2, "0")}</span>
+              <span className="k">← {chapterNum(prev)}</span>
               <span className="t">{prev.title}</span>
             </a>
           ) : (
@@ -151,7 +157,7 @@ function ChapterPage({ ch, idx }: { ch: Chapter; idx: number }) {
           )}
           {next ? (
             <a href={chapterHref(next)} onClick={linkTo(chapterHref(next))} className="next">
-              <span className="k">next · {String(idx + 2).padStart(2, "0")} →</span>
+              <span className="k">next · {chapterNum(next)} →</span>
               <span className="t">{next.title}</span>
               <span className="q">{next.q}</span>
             </a>
@@ -164,7 +170,10 @@ function ChapterPage({ ch, idx }: { ch: Chapter; idx: number }) {
           )}
         </nav>
         <p className="lr-hint nv-muted">
-          ← → to move between chapters · select any text to ask about it
+          ← → to move between chapters · select any text to ask about it ·{" "}
+          <a href={GUIDE_HREF} onClick={linkTo(GUIDE_HREF)}>
+            field guide
+          </a>
         </p>
       </article>
     </>
@@ -178,14 +187,15 @@ function Index() {
   return (
     <div className="lr-index" data-askable data-ask-title="The course: contents">
       <header className="nv-col lr-ihero" data-ask-section>
-        <div className="nv-kicker">The course · {CHAPTERS.length} short chapters · about an hour</div>
+        <div className="nv-kicker">The course · {CHAPTERS.length} short chapters in 4 parts · about 90 minutes</div>
         <h1 className="nv-h1">
           How a language model runs, <em>from the ground up</em>.
         </h1>
         <p className="nv-lead">
-          One idea per page, each with a figure you can poke. Start with a machine that guesses the next word; end knowing
-          why it's slow, what made our engine {factor ? `${factor}×` : "thousands of times"} faster, and how to work out the speed limit of any model on any computer.
-          No maths beyond multiplying and adding.
+          One idea per page, each with a figure you can poke. Part 0 frames the field for people who know systems but not
+          ML: what a model is, why serving one is expensive, the hardware, and the jargon. Then a machine that guesses the next
+          word; then why it's slow, what made our engine {factor ? `${factor}×` : "thousands of times"} faster, and how to work
+          out the speed limit of any model on any computer. No maths beyond multiplying and adding.
         </p>
         <div className="lr-start">
           <a className="nv-btn" href={chapterHref(firstUnseen)} onClick={linkTo(chapterHref(firstUnseen))}>
@@ -200,6 +210,14 @@ function Index() {
       </header>
       <div className="nv-col lr-toc">
         <Journey showQuestions />
+        <a className="lr-guide-card" href={GUIDE_HREF} onClick={linkTo(GUIDE_HREF)} data-ask-section>
+          <span className="k">reference</span>
+          <span className="t">The field guide →</span>
+          <span className="q">
+            MoE, GQA, bf16, AWQ, FlashAttention, TTFT, goodput, NVLink… every term people throw around, in one plain sentence
+            each, with the constraint it works around.
+          </span>
+        </a>
         <p className="nv-muted lr-foot">
           Numbers come from nanoinfer's own logs: GPT-2 124M on an Apple M4 Mac mini (CPU and GPU), and the same Rust compiled
           to WebAssembly in your browser. Toy figures are labelled as toys.

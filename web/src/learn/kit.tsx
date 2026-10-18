@@ -3,6 +3,7 @@
 // public/recorded/ and the precomputed public/learn/data.json).
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { linkTo } from "./router";
 import { loadRecorded, type Recorded } from "../lib/recorded";
 import { claim, engine, getState, release } from "../engine/client";
 import type { ForwardTrace } from "../engine/types";
@@ -165,7 +166,7 @@ export function unpackVec(v: { s: number; b64: string }): Float32Array {
 
 // ---- frame --------------------------------------------------------------------------
 
-export type Prov = "toy" | "diagram" | "recorded" | "live" | "measured" | "weights";
+export type Prov = "toy" | "diagram" | "recorded" | "live" | "measured" | "weights" | "external" | "estimate";
 const PROV: Record<Prov, string> = {
   toy: "toy example",
   diagram: "diagram",
@@ -173,6 +174,8 @@ const PROV: Record<Prov, string> = {
   live: "live · the engine in this tab",
   measured: "measured · our M4 benchmarks",
   weights: "real GPT-2 weights",
+  external: "external · spec sheets",
+  estimate: "estimate · arithmetic shown",
 };
 
 export function Fig({
@@ -184,6 +187,7 @@ export function Fig({
   tryit,
   wide,
   aside,
+  source,
 }: {
   n: string;
   title: string;
@@ -196,6 +200,8 @@ export function Fig({
   wide?: boolean;
   /** extra element in the header (e.g. a "run live" button) */
   aside?: ReactNode;
+  /** where external numbers come from (shown under the caption) */
+  source?: ReactNode;
 }) {
   return (
     <figure className={`lr-fig${wide ? " wide" : ""}`} data-ask-section>
@@ -210,7 +216,7 @@ export function Fig({
         </span>
       </header>
       <div className="lr-fig-body">{children}</div>
-      {(caption || tryit) && (
+      {(caption || tryit || source) && (
         <figcaption className="lr-cap">
           {caption && (
             <p>
@@ -222,6 +228,12 @@ export function Fig({
             <p>
               <span className="lr-cap-k">try</span>
               {tryit}
+            </p>
+          )}
+          {source && (
+            <p className="lr-src">
+              <span className="lr-cap-k">sources</span>
+              {source}
             </p>
           )}
         </figcaption>
@@ -418,17 +430,99 @@ export const GLOSSARY: Record<string, string> = {
   "time to first token": "How long a user waits, after sending a request, before the first word of the answer appears.",
   page: "A fixed-size block of KV-cache memory (here 16 tokens' worth). A request gets pages as it grows and hands them back when it's done.",
   GB: "Gigabyte: a billion bytes. A byte is 8 bits; one 32-bit number takes 4 bytes.",
+  inference: "Running a trained model to get answers. The weights are frozen; only the input changes.",
+  training: "Finding the weights: adjusting billions of numbers until the model predicts text well. Done once, at great expense.",
+  parameters: "Another word for weights. “7B” means seven billion of them.",
+  HBM: "High-bandwidth memory: stacks of DRAM packaged right next to a GPU die. An H100 has 80 GB of it at ~3.35 TB/s.",
+  "unified memory": "One pool of memory shared by the CPU and GPU (Apple silicon), so nothing is copied between them.",
+  MoE: "Mixture of experts: each layer has many parallel feed-forward blocks and a router sends each token to only a few of them.",
+  "all-reduce": "Every device contributes a partial result and every device ends up with the total.",
+  TTFT: "Time to first token: how long until the first word of the answer appears. Dominated by prefill and queueing.",
+  TPOT: "Time per output token: the gap between words once the answer is streaming. Dominated by decode.",
+  throughput: "Total tokens per second across all users: what the operator pays for.",
+  latency: "How long one user waits: for the first token, and between tokens.",
+  bf16: "A 16-bit number format with fp32's range and less precision: the default for modern model weights.",
+  NVLink: "NVIDIA's GPU-to-GPU link inside a server: ~900 GB/s total per H100, about 7× PCIe 5.",
+  kernel: "One function that runs on the GPU across thousands of threads, such as one matrix multiply.",
+  "context window": "The most tokens a model can look at at once (its prompt plus its answer so far).",
+  "tensor parallel": "Splitting every weight matrix across GPUs so each does a slice of every multiply; needs an all-reduce per layer.",
+  "pipeline parallel": "Splitting the model by layers across GPUs, like stages of an assembly line.",
+  "continuous batching": "Re-forming the batch at every decode step: finished requests leave, waiting ones join.",
+  "paged attention": "Storing the KV cache in fixed-size pages with a per-request page table, like virtual memory.",
+  "prefix caching": "Keeping the KV cache of a shared prompt prefix (a system prompt) so the next request skips its prefill.",
+  goodput: "Throughput counting only requests that met their latency targets.",
 };
 
-/** A glossary term: dotted underline, one-line definition on hover or focus. */
+/** Glossary terms that have a fuller entry in the field guide (/learn/field-guide#id). */
+export const GUIDE_LINK: Record<string, string> = {
+  token: "token",
+  weights: "parameters",
+  embedding: "embeddings",
+  layer: "layers",
+  attention: "attention",
+  softmax: "attention",
+  prefill: "prefill",
+  decode: "decode",
+  "tok/s": "toks",
+  bandwidth: "mbu",
+  "memory-bound": "memory-bound",
+  "compute-bound": "memory-bound",
+  "KV cache": "kv-cache",
+  quantization: "quantisation",
+  GPU: "tensor-cores",
+  batch: "batching",
+  "speculative decoding": "speculative",
+  "time to first token": "ttft",
+  page: "paged-attention",
+  inference: "inference",
+  parameters: "parameters",
+  HBM: "hbm",
+  "unified memory": "unified-memory",
+  MoE: "moe",
+  "all-reduce": "all-reduce",
+  TTFT: "ttft",
+  TPOT: "tpot",
+  throughput: "throughput-latency",
+  latency: "throughput-latency",
+  bf16: "formats",
+  NVLink: "nvlink",
+  kernel: "kernels",
+  "context window": "context-window",
+  "tensor parallel": "tensor-parallel",
+  "pipeline parallel": "pipeline-parallel",
+  "continuous batching": "continuous-batching",
+  "paged attention": "paged-attention",
+  "prefix caching": "prefix-caching",
+  goodput: "goodput",
+  "forward pass": "forward-pass",
+};
+
+/** Small colour key for captions: <Swatch c={cc.c2}>blue</Swatch>: bytes read. */
+export function Swatch({ c, children }: { c: string; children: ReactNode }) {
+  return (
+    <b className="lr-sw">
+      <i style={{ background: c }} />
+      {children}
+    </b>
+  );
+}
+
+/** A glossary term: dotted underline, one-line definition on hover or focus, and a link to the field guide entry. */
 export function G({ k, children }: { k: string; children?: ReactNode }) {
   const def = GLOSSARY[k];
   if (!def) return <>{children ?? k}</>;
+  const gid = GUIDE_LINK[k];
+  const href = gid ? `/learn/field-guide#${gid}` : null;
   return (
     <span className="lr-g" tabIndex={0}>
       {children ?? k}
       <span className="lr-g-tip" role="tooltip">
         <b>{k}</b> {def}
+        {href && (
+          <a className="lr-g-more" href={href} onClick={linkTo(href)}>
+            field guide →
+          </a>
+        )}
       </span>
     </span>
   );

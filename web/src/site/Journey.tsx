@@ -1,4 +1,4 @@
-import { CHAPTERS, PARTS, PART_BLURB, chapterHref } from "../learn/chapters";
+import { CHAPTERS, PARTS, PART_BLURB, chapterHref, chapterNum } from "../learn/chapters";
 import { linkTo } from "../learn/router";
 
 const VISITED_KEY = "nanoinfer-learn-visited";
@@ -10,27 +10,30 @@ export function readVisited(): Set<string> {
   }
 }
 
-/** The map of the course: the three parts as stops on a route, then the lab. */
+/** The map of the course: parts 0–3 as stops on a route, then the lab. Part 0 is flagged as the recommended start. */
 export function Journey({ showQuestions = false }: { showQuestions?: boolean }) {
   const visited = readVisited();
   return (
     <ol className="jr">
       {PARTS.map((p, pi) => (
-        <li key={p} className="jr-part" data-ask-section>
+        <li key={p} className={`jr-part${pi === 0 ? " p0" : ""}`} data-ask-section>
           <span className="jr-node" aria-hidden>
-            {pi + 1}
+            {pi}
           </span>
           <div className="jr-head">
-            <span className="jr-k">part {pi + 1}</span>
+            <span className="jr-k">
+              part {pi}
+              {pi === 0 && <span className="jr-rec"> · start here if ML is new to you</span>}
+            </span>
             <h3>{p}</h3>
             <p>{PART_BLURB[pi]}</p>
           </div>
           <ol className="jr-ch">
-            {CHAPTERS.map((c, i) =>
+            {CHAPTERS.map((c) =>
               c.part !== pi ? null : (
                 <li key={c.slug}>
                   <a href={chapterHref(c)} onClick={linkTo(chapterHref(c))} className={visited.has(c.slug) ? "seen" : ""}>
-                    <span className="n">{String(i + 1).padStart(2, "0")}</span>
+                    <span className="n">{chapterNum(c)}</span>
                     <span className="t">{c.title}</span>
                     {showQuestions && <span className="q">{c.q}</span>}
                   </a>

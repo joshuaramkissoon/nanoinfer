@@ -22,7 +22,8 @@ Rules for every page:
 ```
 /                     Landing: the question, one live demo, the map of the journey
 /learn                Contents (same map, with progress)
-/learn/<chapter>      19 chapters in 3 parts (below), prev/next, progress rail
+/learn/<chapter>      23 chapters in 4 parts (part 0 + parts 1–3, below), prev/next, progress rail
+/learn/field-guide    Reference: the constraint map + every term, grouped (deep links: #moe, #gqa, ...)
 /lab                  The engine room: the full live demo, curated and simplified
 ```
 
@@ -31,7 +32,40 @@ Rules for every page:
 - The question: *What happens when a model writes the next word, and how fast can one computer do it?*
 - One demo: type a prompt, GPT-2 continues it (recorded run until the reader loads the engine; then live, in the tab).
   Speed shown in plain words: "≈ 100 tokens a second: for every token, your computer reads all 500 MB of the model".
-- The map: four parts as four cards, each with its chapters. A "start" button into chapter 1.
+- The map: parts 0–3 as stops, then the lab. "Start here" goes to chapter 0.1 (part 0 is the recommended start);
+  secondary links jump to part 1 or the field guide.
+
+Every chapter ends with **check yourself**: 2–3 intuition questions (pick one, the reasoning appears; nothing is scored
+or stored), from `src/learn/checks.ts`, rendered by `src/learn/Check.tsx` under the chapter body.
+
+Chapter numbers: part 0 is 0.1–0.4; parts 1–3 keep 01–19, so "chapter 9" in older prose still means memory-or-maths.
+Visual language (colour and shape semantics, figure template, motion) is in `DESIGN.md`.
+
+## Part 0: Inference for systems engineers
+
+For a reader who knows distributed systems but no ML. Leans on systems analogies; explains ML ideas from scratch.
+
+| # | chapter | the one idea | primary figures |
+|---|---|---|---|
+| 0.1 | What inference is | Training writes the weights once; inference runs a frozen function over them per token, forever. A model is a file of numbers + a fixed program; an engine is a stateful server (load, run, schedule, manage state) | Write-once/run-forever diagram; GPT-2's 124M weights as a clickable strip (real shapes); the serving stack stepped through its four jobs, each with its systems analogue |
+| 0.2 | Every word reads every weight | Bytes per token = params × bytes/weight; bandwidth ÷ that = the speed limit; decode does ~1 FLOP/byte vs ~295 an H100 can do; batching shares reads until the KV cache fills memory | Bytes-per-token calculator (GPT-2/7B/70B/405B × fp32–int4 × M4 CPU/GPU/H100/8×H100, with our measured ticks); idle-maths lanes vs users per step; $/M tokens vs batch for a 7B on an H100 (context, GQA); the constraint → technique map |
+| 0.3 | The hardware in one picture | GPUs win decode mainly through HBM bandwidth; lanes win prefill/batching; capacity decides what fits; links are 7–70× slower than local memory, so splitting is a trade | CPU vs GPU vs H100 schematic (lanes, bus ∝ bandwidth); bandwidth ladder (memory blue, links olive); tensor-parallel 70B split: read time vs all-reduce time for 1/2/4/8 GPUs, NVLink vs network |
+| 0.4 | A Rosetta stone | Inference terms ↔ distributed-systems analogues, where each holds and breaks | 19-row translation table, filterable, each row linking to its chapter or field-guide entry |
+
+Numbers: M4 figures are measured (docs/LOG.md, data.json); H100 / NVLink / PCIe / InfiniBand are spec-sheet figures
+labelled *external* with a sources line; cost and multi-GPU figures are labelled *estimate* and state their
+assumptions ($2.50/GPU-hour, Llama-2-7B KV shape, ~8 µs / ~30 µs per small all-reduce).
+
+## Field guide (/learn/field-guide)
+
+Entry point is the constraint map (six limits: bandwidth, capacity, sequential decode, compute, communication,
+unpredictable traffic → the techniques that work around each; shared with fig 0.2.4 via `src/learn/concepts.ts`). Below
+it, 53 terms in six groups (models & architecture, numbers, running it, scale, metrics, hardware) as calm cards: term,
+aka, one plain sentence; open one for *why it exists* (the constraint), a tiny visual where it helps, *where you'll see
+it*, and its chapter. Visuals: number-format bit layouts, MHA/GQA/MQA head sharing, five parallelism patterns, and the
+MoE lab (top-k of 8 experts per token, tokens per step, balanced vs skewed router: compute per token vs memory held vs
+bytes read per step, and the hot-expert factor). Filter box and group jumps are sticky. Glossary tooltips across the
+course link to their entry (`GUIDE_LINK` in `kit.tsx`). Content: `src/learn/guide/entries.tsx`.
 
 ## Part 1: How a model writes text
 
@@ -76,7 +110,7 @@ read `public/learn/data.json`, which `scripts/learn-data.py` builds from `bench/
 the first version (817 / 0.37 ≈ 2,200×), computed from the same file. Batching's total is a different measure and is
 never used for that claim. Chapter 18 has no climb bar: its target model is GPT-2 large, not the 124M model on the climb.
 
-## Part 4: The Lab (/lab)
+## The Lab (/lab, "part 4")
 
 The original demo page, re-framed as "the engine room". Engine card + the figures that earn their place, each with a
 plain intro that links back to the chapter it extends, a "what you're looking at" caption and sensible defaults:

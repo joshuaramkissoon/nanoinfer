@@ -4,11 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { boot, claim, decodeTokens, engine, loadModel, release, useEngine, weightLabel } from "../engine/client";
 import { Seg, bestStage, useLearnData, useRecorded } from "../learn/kit";
 import { climbFactor } from "../learn/Climb";
-import { CHAPTERS, chapterHref } from "../learn/chapters";
+import { CHAPTERS, GUIDE_HREF, chapterHref } from "../learn/chapters";
 import { linkTo } from "../learn/router";
 import { Journey } from "./Journey";
 import { TopBar } from "./TopBar";
 import "../learn/learn.css";
+import "../learn/p0.css";
 
 const MB_PER_TOKEN = 494.6;
 
@@ -184,6 +185,7 @@ export default function Landing() {
     void boot();
   }, []);
   const first = CHAPTERS[0];
+  const part1 = CHAPTERS.find((c) => c.part === 1)!;
   const factor = climbFactor(useLearnData());
   return (
     <main className="nv lr ld" data-askable data-ask-title="nanoinfer: home">
@@ -195,7 +197,8 @@ export default function Landing() {
         </h1>
         <p className="nv-lead">
           Below, GPT-2 is writing, run by nanoinfer: a small engine written from scratch in Rust, compiled to run in your
-          browser. The course starts from nothing and builds up to why this is slow, then follows the engine as it gets
+          browser. The course starts with what inference is and why it's expensive, framed for engineers who know systems
+          but not ML; builds up to why this is slow; then follows the engine as it gets
           {factor ? ` ${factor}× faster for one user` : " thousands of times faster"}, one measured step at a time.
         </p>
       </header>
@@ -203,12 +206,23 @@ export default function Landing() {
         <Demo />
         <div className="lr-start" style={{ marginTop: "2.2rem" }}>
           <a className="nv-btn" href={chapterHref(first)} onClick={linkTo(chapterHref(first))}>
-            Start the course · {first.title} →
+            Start here · {first.title} →
           </a>
           <span className="nv-muted" style={{ fontSize: "0.78rem" }}>
-            {CHAPTERS.length} short chapters · select any text to ask about it
+            recommended: part 0 frames inference for engineers who know systems, not ML
           </span>
         </div>
+        <p className="ld-alt">
+          Or jump to{" "}
+          <a href={chapterHref(part1)} onClick={linkTo(chapterHref(part1))}>
+            part 1 · {part1.title.toLowerCase()}
+          </a>
+          , or browse the{" "}
+          <a href={GUIDE_HREF} onClick={linkTo(GUIDE_HREF)}>
+            field guide
+          </a>{" "}
+          of terms. {CHAPTERS.length} short chapters · select any text to ask about it.
+        </p>
       </div>
       <section className="nv-col ld-map">
         <h2 className="ld-h2">The journey</h2>
