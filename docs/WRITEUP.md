@@ -213,4 +213,50 @@ chart in this post is the real engine, running in your browser.
   suddenly visible.
 - **Line:** "The arithmetic was never the problem. Fetching the same number 64 times was."
 
+### Browser (wasm simd128, 1 thread, Chrome on the M4)
+
+Same Rust, compiled to `wasm32-unknown-unknown` with `+simd128`, running in a Web Worker on the demo page (`web/`).
+Measured with the page's Ladder benchmark: 64-token prompt (same text as `nanoinfer bench`), greedy, median of 8 decode
+steps, `performance.now()` at 5 µs resolution (the page is cross-origin isolated). Engine wasm is 270 KB (100 KB gzipped).
+
+| stage | browser decode tok/s | native decode | browser prefill tok/s (P=64) | native prefill |
+|---|---|---|---|---|
+| naive | 0.29 | 0.37 | n/a | 26 |
+| kv-cache | 13.8–14.0 | 18.9 | 20 | 27 |
+| unrolled | 83–101 | 100.5 | 171 | 185 |
+| neon (runs `unrolled` in wasm) | 85 | 100.3 | n/a | 183 |
+| tiled (scalar tiles in wasm) | 93 | 101.1 | 175 | 469 |
+
+Browser ranges are two sessions. The low end was measured while the native hillclimb was benchmarking on the same Mac,
+so treat the spread as contention.
+
+- **The wasm build gets most of the native speed.** Decode lands at 73–100% of native: `unrolled` reached 101 tok/s
+  in a quiet run, level with native. The 16-accumulator kernel vectorises to simd128 just as it does to NEON, so the
+  hillclimb's biggest step so far carries straight into the browser (6–7× over kv-cache in both).
+- **Aha: tiling needs registers.** `tiled` prefill is 2.5× faster natively (469 vs 185) but flat in wasm (175 vs 171).
+  Without NEON the 4×4 tile falls back to scalar code, and the reuse it buys is eaten by the loss of SIMD. Not every
+  rung transfers to every platform, and the Ladder shows which ones do.
+- **The roofs in a tab.** Streaming read from one wasm thread: 48–62 GB/s (the page takes the best of two probes; the
+  first probe right after the 1 GB weight load reads ~35 GB/s). simd128 multiply-add peak: 15–19 GFLOP/s (no FMA in
+  baseline wasm). So the browser's f32 speed of light is ~100–120 tok/s, and `unrolled` reaches ~75–85% of it.
+- **Aha: in the browser, decode is compute-bound.** Without FMA a single wasm core tops out near 19 GFLOP/s, which puts
+  the ridge at ~0.35 FLOP/byte, *below* decode's 0.5. On the roofline the `unrolled` matmul dots sit on the flat roof,
+  not the slanted one. Natively the ridge is far to the right and decode is memory-bound. The next browser rung is
+  relaxed-SIMD FMA (`f32x4_relaxed_madd`), which should double the roof. That's a nice "same code, different
+  bottleneck" moment for the post.
+- **Aha: the long pole moves.** Under `unrolled`, matmuls each move ~47 GB/s, and `gelu` (a scalar `tanh` per element)
+  has grown from noise to 4% of decode time. The LM head stays ~28–30% of time and 31% of bytes on every stage.
+- **The KV race, live.** naive vs kv-cache under a fair scheduler (whichever lane has used less engine time goes
+  next): after ~23 s of engine time naive had written 25 tokens and kv-cache 96 (in 7 s), a 12.6× gap that keeps widening.
+  Naive's per-token cost climbs linearly to 1.5 s at context 30. kv-cache stays flat at ~70 ms. Greedy outputs are
+  identical token for token.
+- **Main thread vs worker.** The same wasm on the main thread ran `unrolled` at 96 tok/s against ~84 in the worker, with
+  kv-cache equal (14.0 vs 13.8). Partly probe noise, and the native hillclimb was benchmarking on the same machine at the
+  time. Worth re-measuring on a quiet machine before quoting.
+- **Loading:** 548 MB f32 safetensors streamed into wasm memory, parsed and transposed by core in ~1.5 s from localhost.
+  Peak wasm heap ~1.05 GB. Production wants pre-packed f16/Q8 shards (`web/NEEDS_FROM_CORE.md`).
+- **Viz:** fig. 2 speed-of-light gauge, fig. 5 roofline (matmul dots on the compute roof), fig. 6 KV race, fig. 8 ladder
+  (native and browser bars side by side under their ceilings).
+- **Line:** "The same Rust, in a browser tab, matches the native decode speed, and hits a different wall."
+
 ## Open questions / things to verify before publishing

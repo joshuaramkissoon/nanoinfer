@@ -1,0 +1,674 @@
+/* nanoinfer live page. Tokens copied from jkmr's .minimal theme (src/index.css)
+   so these components drop straight into a jkmr post. Everything is scoped under
+   .minimal; the nv- prefix keeps class names from colliding with jkmr's. */
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+}
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+.minimal {
+  --m-bg: #f6f4ef;
+  --m-fg: #1f1d1a;
+  --m-sub: #57534c;
+  --m-muted: #8b867d;
+  --m-rule: #e2ded5;
+  --m-accent: #b8541f;
+  --m-code-bg: #ece8df;
+  --m-heat-0: #e9e5dc;
+  --m-heat-1: #f1cfae;
+  --m-heat-2: #e6a26c;
+  --m-heat-3: #cf6d33;
+  --m-heat-4: #96431a;
+  --m-up: #b0566a;
+  --m-down: #3f8a4f;
+  /* one cool hue, for things that are not weights (attention, KV) */
+  --nv-cool: #3c6e8f;
+  --nv-panel: #fbfaf7;
+  background-color: var(--m-bg);
+  color: var(--m-fg);
+  color-scheme: light;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+.minimal[data-theme="dark"] {
+  --m-bg: #1d1c1a;
+  --m-fg: #dedad2;
+  --m-sub: #aaa59b;
+  --m-muted: #7f7a71;
+  --m-rule: #33312d;
+  --m-accent: #e3915e;
+  --m-code-bg: #272522;
+  --m-heat-0: #292724;
+  --m-heat-1: #4a3426;
+  --m-heat-2: #7a4b2c;
+  --m-heat-3: #b46a38;
+  --m-heat-4: #eb9a62;
+  --m-up: #d98a9b;
+  --m-down: #7cc48a;
+  --nv-cool: #7fb0cf;
+  --nv-panel: #211f1d;
+  color-scheme: dark;
+}
+.minimal ::selection {
+  background-color: var(--m-accent);
+  color: var(--m-bg);
+}
+.minimal a {
+  color: var(--m-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.minimal :focus-visible {
+  outline: 2px solid var(--m-accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* ---- page frame ------------------------------------------------------------ */
+.nv {
+  --nv-prose: 44rem;
+  --nv-wide: 64rem;
+  padding: 0 1rem 6rem;
+}
+.nv-col {
+  max-width: var(--nv-prose);
+  margin: 0 auto;
+}
+.nv-wide {
+  max-width: var(--nv-wide);
+  margin: 0 auto;
+}
+.nv-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.6rem 0 0;
+  font-size: 0.8125rem;
+}
+.nv-top .nv-brand {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.nv-top .nv-brand span {
+  color: var(--m-accent);
+}
+.nv-iconbtn {
+  background: none;
+  border: 0;
+  color: var(--m-muted);
+  cursor: pointer;
+  padding: 0.35rem;
+  display: inline-flex;
+}
+.nv-iconbtn:hover {
+  color: var(--m-fg);
+}
+
+.nv-hero {
+  padding: 4.5rem 0 1rem;
+}
+.nv-kicker {
+  color: var(--m-accent);
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+}
+.nv-h1 {
+  font-size: clamp(1.6rem, 4.2vw, 2.35rem);
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  margin: 0.8rem 0 1.4rem;
+  text-wrap: balance;
+}
+.nv-h1 em {
+  font-style: italic;
+  font-weight: 400;
+  color: var(--m-accent);
+}
+.nv-lead {
+  font-size: 1rem;
+  line-height: 1.75;
+  color: var(--m-sub);
+  margin: 0;
+}
+.nv-prose {
+  line-height: 1.8;
+}
+.nv-prose p {
+  margin: 1.25em 0 0;
+}
+.nv-prose h2 {
+  font-size: 1.125rem;
+  margin: 3.2em 0 0;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+.nv-prose code {
+  background: var(--m-code-bg);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+  font-size: 0.875em;
+}
+.nv-sub {
+  color: var(--m-sub);
+}
+.nv-muted {
+  color: var(--m-muted);
+}
+.nv-accent {
+  color: var(--m-accent);
+}
+.nv-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- engine card ------------------------------------------------------------- */
+.nv-engine {
+  margin-top: 2.4rem;
+  border: 1px solid var(--m-rule);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  background: var(--nv-panel);
+  display: grid;
+  gap: 0.8rem;
+}
+.nv-engine-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1.1rem;
+  font-size: 0.8125rem;
+}
+.nv-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--m-muted);
+  display: inline-block;
+  margin-right: 0.45rem;
+  vertical-align: 0.05em;
+}
+.nv-dot.live {
+  background: var(--m-down);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--m-down) 22%, transparent);
+}
+.nv-dot.busy {
+  background: var(--m-accent);
+  animation: nv-pulse 1s ease-in-out infinite;
+}
+.nv-dot.err {
+  background: var(--m-up);
+}
+@keyframes nv-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.nv-bar {
+  height: 3px;
+  background: var(--m-rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.nv-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--m-accent);
+  transition: width 0.15s linear;
+}
+
+/* ---- controls ---------------------------------------------------------------- */
+.nv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--m-fg);
+  background: var(--m-fg);
+  color: var(--m-bg);
+  border-radius: 6px;
+  padding: 0.5rem 0.9rem;
+  min-height: 2.5rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.15s ease, opacity 0.15s;
+}
+.nv-btn:hover:not(:disabled) {
+  background: var(--m-accent);
+  border-color: var(--m-accent);
+}
+.nv-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.nv-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.nv-btn.ghost {
+  background: transparent;
+  color: var(--m-fg);
+  border-color: var(--m-rule);
+}
+.nv-btn.ghost:hover:not(:disabled) {
+  background: transparent;
+  border-color: var(--m-accent);
+  color: var(--m-accent);
+}
+.nv-seg {
+  display: inline-flex;
+  border: 1px solid var(--m-rule);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.nv-seg button {
+  border: 0;
+  background: transparent;
+  padding: 0.3rem 0.65rem;
+  min-height: 2rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  color: var(--m-sub);
+  cursor: pointer;
+}
+.nv-seg button[aria-pressed="true"] {
+  background: var(--m-code-bg);
+  color: var(--m-fg);
+  font-weight: 700;
+}
+.nv-seg button:hover {
+  color: var(--m-fg);
+}
+.nv-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--m-sub);
+}
+.nv-field input[type="range"] {
+  accent-color: var(--m-accent);
+  width: 7rem;
+  height: 1.6rem;
+}
+.nv-input {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--m-rule);
+  padding: 0.6rem 0;
+  font-size: 1rem;
+  outline: none;
+}
+.nv-input:focus {
+  border-bottom-color: var(--m-accent);
+}
+.nv-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  align-items: center;
+}
+
+/* ---- figures ----------------------------------------------------------------- */
+.nv-fig {
+  margin: 3.2rem auto 0;
+  max-width: var(--nv-wide);
+}
+.nv-fig.narrow {
+  max-width: var(--nv-prose);
+}
+.nv-fig-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  border-top: 1px solid var(--m-fg);
+  padding-top: 0.6rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.nv-fig-title {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.nv-fig-title .n {
+  color: var(--m-accent);
+  font-weight: 400;
+  margin-right: 0.6rem;
+}
+.nv-prov {
+  font-size: 0.72rem;
+  color: var(--m-muted);
+}
+.nv-fig-body {
+  position: relative;
+}
+.nv-cap {
+  margin-top: 1rem;
+  font-size: 0.8125rem;
+  line-height: 1.65;
+  color: var(--m-sub);
+  max-width: var(--nv-prose);
+}
+.nv-cap b {
+  color: var(--m-fg);
+}
+.nv-empty {
+  display: grid;
+  place-items: center;
+  min-height: 9rem;
+  border: 1px dashed var(--m-rule);
+  border-radius: 8px;
+  color: var(--m-muted);
+  font-size: 0.8125rem;
+  text-align: center;
+  padding: 1.5rem;
+}
+.nv-tip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--m-fg);
+  color: var(--m-bg);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  padding: 0.45rem 0.6rem;
+  border-radius: 5px;
+  white-space: nowrap;
+  z-index: 5;
+  transform: translate(-50%, calc(-100% - 10px));
+}
+.nv-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  font-size: 0.72rem;
+  color: var(--m-sub);
+  margin-top: 0.8rem;
+}
+.nv-legend i {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 2px;
+  margin-right: 0.4rem;
+  vertical-align: -0.05em;
+}
+.nv-stat {
+  display: grid;
+  gap: 0.1rem;
+}
+.nv-stat .k {
+  font-size: 0.7rem;
+  color: var(--m-muted);
+  letter-spacing: 0.02em;
+}
+.nv-stat .v {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.nv-stat .v small {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--m-muted);
+  margin-left: 0.25rem;
+}
+.nv-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem 2rem;
+}
+svg.nv-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+svg.nv-svg text {
+  font-family: inherit;
+  fill: var(--m-muted);
+  font-size: 10px;
+}
+svg.nv-svg .axis line,
+svg.nv-svg .axis path {
+  stroke: var(--m-rule);
+}
+canvas.nv-canvas {
+  display: block;
+  width: 100%;
+  touch-action: manipulation;
+}
+
+/* ---- run it -------------------------------------------------------------------- */
+.nv-run {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  gap: 1.6rem;
+}
+@media (max-width: 760px) {
+  .nv-run {
+    grid-template-columns: 1fr;
+  }
+}
+.nv-stream {
+  min-height: 11rem;
+  font-size: 1.02rem;
+  line-height: 2.05;
+  padding: 0.4rem 0 0;
+  white-space: pre-wrap;
+}
+.nv-t {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  color: var(--m-fg);
+  border-bottom: 3px solid var(--nv-heat, transparent);
+  border-radius: 0;
+  transition: background 0.15s;
+  white-space: pre-wrap;
+}
+.nv-t.prompt {
+  color: var(--m-sub);
+  cursor: default;
+  border-bottom-color: transparent;
+}
+.nv-t:hover:not(.prompt),
+.nv-t.sel {
+  background: color-mix(in srgb, var(--m-accent) 16%, transparent);
+}
+.nv-t.sel {
+  outline: 1px solid var(--m-accent);
+  outline-offset: 1px;
+}
+.nv-t.fresh {
+  animation: nv-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes nv-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+}
+.nv-caret {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.1em;
+  background: var(--m-accent);
+  vertical-align: -0.18em;
+  margin-left: 2px;
+  animation: nv-blink 1s steps(2) infinite;
+}
+@keyframes nv-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.nv-probs {
+  display: grid;
+  gap: 0.3rem;
+  align-content: start;
+  font-size: 0.78rem;
+}
+.nv-prob {
+  display: grid;
+  grid-template-columns: minmax(0, 7.5rem) 1fr 3.2rem;
+  align-items: center;
+  gap: 0.5rem;
+  border: 0;
+  background: none;
+  padding: 0.18rem 0.25rem;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--m-fg);
+}
+.nv-prob:hover:not(:disabled) {
+  background: var(--m-code-bg);
+}
+.nv-prob:disabled {
+  cursor: default;
+}
+.nv-prob .tk {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.nv-prob .b {
+  height: 0.7rem;
+  background: var(--m-heat-0);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.nv-prob .b i {
+  display: block;
+  height: 100%;
+  background: var(--m-heat-3);
+  transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.nv-prob.chosen .b i {
+  background: var(--m-accent);
+}
+.nv-prob.chosen .tk {
+  color: var(--m-accent);
+  font-weight: 700;
+}
+.nv-prob .pc {
+  text-align: right;
+  color: var(--m-sub);
+}
+.nv-spark {
+  height: 2.2rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .minimal *,
+  .minimal *::before,
+  .minimal *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---- attention grid ------------------------------------------------------------ */
+.nv-heads {
+  display: grid;
+  grid-template-columns: auto repeat(12, minmax(0, 1fr));
+  gap: 3px;
+  align-items: center;
+}
+.nv-heads .lab {
+  font-size: 0.65rem;
+  color: var(--m-muted);
+  text-align: center;
+}
+.nv-heads canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  display: block;
+  border-radius: 2px;
+  cursor: pointer;
+  image-rendering: pixelated;
+  outline: 1px solid transparent;
+}
+.nv-heads canvas:hover {
+  outline-color: var(--m-sub);
+}
+.nv-heads canvas.on {
+  outline: 2px solid var(--m-accent);
+}
+.nv-attn {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 1.6rem;
+}
+@media (max-width: 760px) {
+  .nv-attn {
+    grid-template-columns: 1fr;
+  }
+}
+.nv-attn-tokens {
+  font-size: 0.86rem;
+  line-height: 1.9;
+  white-space: pre-wrap;
+}
+.nv-attn-tokens span {
+  cursor: pointer;
+  border-radius: 2px;
+}
+.nv-attn-tokens span.q {
+  outline: 1.5px solid var(--m-accent);
+}
+
+.nv-footer {
+  margin-top: 6rem;
+  border-top: 1px solid var(--m-rule);
+  padding-top: 1rem;
+  font-size: 0.75rem;
+  color: var(--m-muted);
+}

@@ -1,0 +1,5 @@
+node_modules/
+dist/
+src/engine/pkg/
+screenshots/*.png
+!screenshots/README.md
