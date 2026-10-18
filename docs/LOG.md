@@ -2588,3 +2588,19 @@ To reproduce: `scripts/headtohead/setup.sh` (downloads, converts, builds
 llama.cpp CPU-only into `~/.cache/nanoinfer-h2h`), then `run.sh`
 (`ROUNDS=3`), `warm_check.sh`, `ppl.sh`, and
 `aggregate.py ~/.cache/nanoinfer-h2h bench/headtohead.json`.
+
+## Correction: q8-prefill's bytes per token (19 Oct)
+
+`Stage::head_format` fell through to f16 for q8-prefill, so its bench lines
+reported 173 MB per token and a 693 tok/s spec ceiling. q8-prefill uses the
+same rescored head as q8-kv16 (Q8_0 approximate, f16 only for candidates), so
+it streams **139.5 MB** and its spec ceiling is **860 tok/s**. The stage 15
+entry's "58% of 693" is really ~47% of 860 (the CPU-climb table already used
+139 MB, and `bench/headtohead.json` was corrected by hand). The measured tok/s
+were never affected, only the ceiling and percentages derived from it.
+
+Fix: every CPU stage's properties now come from one table (`Stage::spec`), and
+the weight and head formats are derived from the packed weights the session
+actually builds. A unit test checks `decode_bytes` against the packed matrices'
+real `bytes()` for every stage, so this can't drift silently again.
+`bench/results.jsonl` lines recorded before the fix keep the old figure.

@@ -765,14 +765,15 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
 - **Line:** "On the GPU the from-scratch engine writes faster than llama.cpp and MLX; it still reads slower, and now
   we know exactly why."
 
-## Open questions / things to verify before publishing
-
 ## The learner path (web: /, /learn, /lab)
 
 The demo page was a wall of expert figures. It's now a course with the engine as its evidence (plan in `web/IA.md`):
-a landing page asking *what happens when a model writes the next word, and how fast can one computer do it?*, then 19
-one-idea chapters in three parts, then the Lab (the old page, curated).
+a landing page asking *what happens when a model writes the next word, and how fast can one computer do it?*, then 23
+one-idea chapters in four parts, then the Lab (the old page, curated).
 
+- **Part 0, the framing** (4 chapters, numbered 0.1–0.4, for people who know systems but not ML): what inference is,
+  why every token reads every weight, the hardware in one picture, and a Rosetta stone of terms. Parts 1–3 keep their
+  original numbers 01–19.
 - **Part 1, how a model writes text** (8 chapters): next-token guessing on a real run, a live GPT-2 BPE tokenizer in
   ~80 lines of TS (cross-checked ID-for-ID against the engine's Rust tokenizer), real embedding neighbours (" Monday" →
   the other six days at cosine 0.80–0.89), a real 8×8 corner of a GPT-2 matrix times a real embedding, toy attention
