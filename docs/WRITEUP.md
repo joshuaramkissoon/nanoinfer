@@ -323,4 +323,24 @@ so treat the spread as contention.
 - **Line:** "Ten cooks, one narrow pantry door, and a manager who takes a nap between
   every order."
 
+### Stage 6: spin-pool (threads that never sleep)
+
+- **Hypothesis:** if waking threads is the cost, don't let them sleep. Workers spin on an
+  atomic counter and see new work in ~100 ns.
+- **Change:** a ~150-line thread pool. Work is published by bumping one 64-bit atomic.
+  Every thread (including the caller) grabs chunks from it, so fast cores take more.
+- **Result:** decode **115–124 tok/s** (~60 GB/s, ~50% of the spec ceiling), 10–20% over
+  rayon. Small matmuls 2× faster to dispatch (41 vs 99 µs). Prefill no better (rayon's
+  984 vs 870).
+- **Aha (failure first):** the first version spun hard and went from 93 to **36 tok/s** at
+  10 threads. With other apps on the machine, spinning threads steal the CPU from the
+  thread doing the last bit of work, and everyone waits for it. Spin, then yield, then
+  sleep fixed it. A spin pool assumes you own the machine. A laptop never does.
+- **Aha 2:** with 10 cores on the matmuls, the "small" serial ops (GELU, attention) are now
+  half of prefill time. Amdahl's law, live.
+- **Viz:** Gantt strip of one decode token: 10 thread lanes, colored bars per matmul chunk,
+  gray gaps = dispatch/join. rayon vs spin side by side.
+- **Line:** "The fastest way to hand out work is to have the workers already standing at
+  the counter, as long as they step aside when someone else needs the room."
+
 ## Open questions / things to verify before publishing

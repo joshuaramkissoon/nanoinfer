@@ -46,12 +46,24 @@ pub fn set_qos(q: Qos) {
 #[cfg(not(target_os = "macos"))]
 pub fn set_qos(_q: Qos) {}
 
+static QOS: std::sync::Mutex<Qos> = std::sync::Mutex::new(Qos::Interactive);
+
+fn set_global_qos() {
+    set_qos(*QOS.lock().unwrap());
+}
+
+/// Size both thread pools (rayon for stage 5, the core spin pool for stage 6+)
+/// to `threads` (0 = one per core), every thread at QoS `q`. Call once, before
+/// any forward. The spin pool's workers start immediately; rayon's lazily.
 pub fn init(threads: usize, q: Qos) -> usize {
+    *QOS.lock().unwrap() = q;
     set_qos(q);
     rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
         .start_handler(move |_| set_qos(q))
         .build_global()
         .expect("rayon pool already initialised");
-    rayon::current_num_threads()
+    let n = rayon::current_num_threads();
+    nanoinfer_core::pool::init(n, set_global_qos);
+    n
 }

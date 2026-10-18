@@ -59,6 +59,7 @@ of the weights).
 | 3 neon (explicit `fmla`) | 182.6 ± 1.8 | 100.3 ± 1.4 | 41.4% | 1.00× (null result) |
 | 4 tiled (4×4 register blocking) | 469 ± 119 (noisy; ~450 in quiet runs) | 101.1 ± 16 | 41.7% | 2.5× prefill |
 | 5 threads (rayon, 8 threads) | 1021 ± 13 | 118.3 ± 1.7 | 48.8% | 2.1× prefill, 1.2× decode |
+| 6 spin-pool (8 threads) | 833 (rayon's 984 better) | 115.0 ± 3.5 (best seen 124) | 47–51% | 1.1–1.2× decode vs rayon |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -812,3 +813,82 @@ E-cores only (`--qos background`):
   path. Re-running gave 100.6. That was another process hogging a P-core.
   Lesson: on a shared machine, always re-run the previous stage in the same
   session before believing a delta.
+
+---
+
+## Stage 6: spin-pool (persistent spinning thread pool)
+
+**Hypothesis.** Stage 5's decode is limited by fork/join: rayon parks idle
+workers, and a token has 49 matmuls of 40–150 µs each. A pool whose workers
+busy-wait on an atomic epoch sees new work in ~100 ns, so small matmuls should
+finally scale. Expect most of the gap between 58 GB/s and membw's ~90 GB/s to close.
+
+**What changed.** `core/src/pool.rs` (behind `threads`, not on wasm): N−1 worker
+threads plus the calling thread. Dispatch publishes a job pointer and bumps an
+epoch packed with the chunk count into one `AtomicU64` (`epoch<<32 | n<<16 |
+next`). Every thread claims chunk indices by CAS on that word, so P-cores just
+take more chunks than E-cores, and a stale worker can never claim a chunk of the
+wrong job. The join spins on a completed-chunk counter. `kernels/spin.rs` = stage
+5's chunking on this pool. Test: 2000 dispatches of 1–37 chunks, each chunk runs
+exactly once.
+
+**Attempt 1: pure spinning (failed badly).** Workers spun up to 2²⁰ iterations
+(~ms) before sleeping, and the joiner spun unconditionally:
+
+| threads | rayon decode | pure-spin decode | pure-spin prefill |
+|---|---|---|---|
+| 4 | 103 | 106 | 645 |
+| 8 | 110 | 84 | 629 |
+| 10 | 93 | **36** | 349 |
+
+At 10 threads on 10 cores, with Backdrop.app holding ~2 cores and Spotlight ~1,
+we're oversubscribed. The OS can't tell a spinning thread from a working one, so
+spinners steal time slices from the thread that holds the last chunk, and
+everyone waits for it. **A spin pool assumes you own the machine.**
+
+A race found while writing it: the first version kept `n_chunks` in its own
+atomic. A worker could read the *next* job's chunk count while still seeing the
+old epoch and claim a phantom chunk. Packing epoch, count and cursor into one
+word makes the claim a single CAS that validates all three.
+
+**Attempt 2 (kept): spin, then yield, then sleep.** Spin 2¹² iterations, then
+`yield_now()` up to 2¹⁴ times (hands the core to any runnable thread, including
+a preempted one of ours), then a condvar sleep. The joiner spins 2¹², then yields.
+
+Per-op decode profile at 4 threads (same session, heavy background load):
+
+| op (per call) | tiled 1t | rayon 4t | spin 4t |
+|---|---|---|---|
+| attn_proj (2.4 MB) | 60 µs | 99 µs | **41 µs** |
+| qkv (7 MB) | 181 µs | 202 µs | **108 µs** |
+| lm_head (154 MB) | 3.9 ms | 2.6 ms | **2.1 ms** (73 GB/s) |
+
+Interleaved sweep (7 runs each, recorded; Backdrop ~200% + Spotlight ~100% CPU
+the whole time, so 1-thread decode was 86 here vs ~100 when quieter):
+
+| threads | rayon prefill | rayon decode | spin prefill | spin decode |
+|---|---|---|---|---|
+| 1 | 475 | 86.1 | 478 | 87.0 |
+| 2 | 628 | 92.7 | 647 | 99.6 |
+| 4 | 818 | 99.1 | 740 | 101.7 |
+| 6 | 868 | 101.9 | 687 ± 149 | 91.3 ± 14 |
+| 8 | 684 ± 70 | 58.5 ± 8 | 833 | **115.0 ± 3.5** |
+| 10 | **984** | 103.3 | 870 | 111.9 ± 8 |
+
+Two earlier unrecorded rounds: spin 6t 107 / 124, 10t 90 / 123 decode vs
+rayon 60 / 101 and 81 / 110. membw under the same load: 4t 69, 6t 74, 10t 86 GB/s
+(median), down from 90 / 96 / 98 when quieter.
+
+**Reading it.**
+- Spin wins decode by ~10–20% (best **115–124 tok/s, ~57–61 GB/s**), because
+  small-matmul dispatch got 2× cheaper. Rayon still wins prefill at 10 threads
+  (984 vs 870): prefill matmuls are milliseconds long, so dispatch cost doesn't
+  matter, and during prefill's long *serial* stretches (GELU, attention on the
+  main thread) our yielding workers compete with the main thread for cores.
+- **The serial ops are now the wall.** At 1 thread, prefill spends 12% in scalar
+  GELU and 7% in attention. With 10 threads on the matmuls, that same ~44 ms of
+  serial work is about half of prefill. Decode spends ~0.5 ms/token in serial
+  ops (≈ 7% at 120 tok/s). Next stage: vectorise and parallelise them.
+- The measurement environment is the hardest part of this stage. Multithreaded
+  numbers on a shared machine have ±10–15% run-to-run noise. Every comparison
+  here is interleaved in one session, and repeated.

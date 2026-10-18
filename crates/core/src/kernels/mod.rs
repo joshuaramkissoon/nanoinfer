@@ -27,6 +27,7 @@
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 pub mod reference;
+pub mod spin;
 pub mod threaded;
 pub mod tiled;
 pub mod unrolled;
@@ -140,5 +141,16 @@ impl Kernels for Threaded {
     const NAME: &'static str = "threaded";
     fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: usize, d_in: usize, d_out: usize) {
         threaded::matmul(out, x, w, bias, n, d_in, d_out)
+    }
+}
+
+/// Stage 6: stage 5's matmul split, dispatched on a persistent spinning pool.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Spin;
+
+impl Kernels for Spin {
+    const NAME: &'static str = "spin";
+    fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: usize, d_in: usize, d_out: usize) {
+        spin::matmul(out, x, w, bias, n, d_in, d_out)
     }
 }

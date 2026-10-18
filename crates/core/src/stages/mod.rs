@@ -21,7 +21,7 @@ pub mod kv_cache;
 pub mod naive;
 
 use crate::error::{Error, Result};
-use crate::kernels::{Kernels, Neon, Reference, Threaded, Tiled, Unrolled};
+use crate::kernels::{Kernels, Neon, Reference, Spin, Threaded, Tiled, Unrolled};
 use crate::trace::{ForwardInfo, Phase, Trace};
 use crate::weights::Model;
 use std::fmt;
@@ -42,11 +42,13 @@ pub enum Stage {
     Tiled,
     /// Stage 5: matmuls split across CPU cores (rayon; single-threaded without the `threads` feature).
     Threads,
+    /// Stage 6: stage 5 on a persistent spin-waiting thread pool (no sleep/wake per matmul).
+    SpinPool,
 }
 
 impl Stage {
     pub const ALL: &'static [Stage] =
-        &[Stage::Naive, Stage::KvCache, Stage::Unrolled, Stage::Neon, Stage::Tiled, Stage::Threads];
+        &[Stage::Naive, Stage::KvCache, Stage::Unrolled, Stage::Neon, Stage::Tiled, Stage::Threads, Stage::SpinPool];
 
     /// Name of the kernel set this stage runs.
     pub fn kernels(self) -> &'static str {
@@ -56,13 +58,14 @@ impl Stage {
             Stage::Neon => Neon::NAME,
             Stage::Tiled => Tiled::NAME,
             Stage::Threads => Threaded::NAME,
+            Stage::SpinPool => Spin::NAME,
         }
     }
 
     /// Whether this stage's kernels use more than one thread (with the
     /// `threads` feature; the thread count is the global rayon pool's).
     pub fn multithreaded(self) -> bool {
-        matches!(self, Stage::Threads)
+        matches!(self, Stage::Threads | Stage::SpinPool)
     }
 
     /// How this stage stores weight matrices (sets its decode ceiling).
@@ -78,6 +81,7 @@ impl Stage {
             Stage::Neon => "neon",
             Stage::Tiled => "tiled",
             Stage::Threads => "threads",
+            Stage::SpinPool => "spin-pool",
         }
     }
 }
@@ -292,6 +296,7 @@ impl Session {
             Stage::Neon => kv_cache::forward::<Neon, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
             Stage::Tiled => kv_cache::forward::<Tiled, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
             Stage::Threads => kv_cache::forward::<Threaded, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
+            Stage::SpinPool => kv_cache::forward::<Spin, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
         }
         if T::ENABLED {
             if trace.wants_logits() {
