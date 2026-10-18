@@ -100,6 +100,7 @@ constant uint EPI_PLAIN = 0;  // out[row] = s (+ bias)
 constant uint EPI_GELU = 1;   // out[row] = gelu(s + bias)
 constant uint EPI_RESID = 2;  // out[row] += s + bias
 constant uint EPI_QKV = 3;    // q -> out, k/v -> cache rows at pos
+constant uint EPI_QKV_H = 4;  // same, f16 KV cache
 
 // One fused decode matvec. R rows per SIMD-group; threadgroup = nsg SIMD-groups.
 // Buffers: 0 out, 1 x, 2 w, 3 bias, 4 ln_w, 5 ln_b, 6 k_cache, 7 v_cache,
@@ -187,11 +188,16 @@ kernel void matvec_epi(device float* out [[buffer(0)]],
         if (EPI == EPI_PLAIN) out[row] = s;
         else if (EPI == EPI_GELU) out[row] = gelu_tanh(s);
         else if (EPI == EPI_RESID) out[row] += s;
-        else {
+        else if (EPI == EPI_QKV) {
             uint C = d_out / 3;
             if (row < C) out[row] = s;
             else if (row < 2 * C) kc[pos * C + row - C] = s;
             else vc[pos * C + row - 2 * C] = s;
+        } else {
+            uint C = d_out / 3;
+            if (row < C) out[row] = s;
+            else if (row < 2 * C) ((device half*)kc)[pos * C + row - C] = half(s);
+            else ((device half*)vc)[pos * C + row - 2 * C] = half(s);
         }
     }
 }
@@ -199,6 +205,7 @@ kernel void matvec_epi(device float* out [[buffer(0)]],
 #define EPI_ARGS device float*, device const float*, device const uchar*, device const float*, device float*, device float*, constant uint&, constant uint&, constant uint&, constant uint&, uint, uint, uint, uint
 #define EPI_SET(NAME, W, R) \
 template [[host_name("mve_qkv_" NAME)]] kernel void matvec_epi<W, R, EPI_QKV>(EPI_ARGS); \
+template [[host_name("mve_qkv_h_" NAME)]] kernel void matvec_epi<W, R, EPI_QKV_H>(EPI_ARGS); \
 template [[host_name("mve_gelu_" NAME)]] kernel void matvec_epi<W, R, EPI_GELU>(EPI_ARGS); \
 template [[host_name("mve_resid_" NAME)]] kernel void matvec_epi<W, R, EPI_RESID>(EPI_ARGS); \
 template [[host_name("mve_" NAME)]] kernel void matvec_epi<W, R, EPI_PLAIN>(EPI_ARGS);

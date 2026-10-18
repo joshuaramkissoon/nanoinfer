@@ -132,6 +132,9 @@ pub struct Recipe {
     pub fused: Fusion,
     /// Argmax over the logits on the GPU (only 4 bytes read back).
     pub gpu_argmax: bool,
+    /// K/V cache stored as f16 (halves the bytes attention reads; needs
+    /// `Attn::Flash` and `Fusion::Epilogue`).
+    pub kv_f16: bool,
     /// Greedy decode commits every token's command buffer up front; each
     /// forward reads the token the previous one's argmax wrote on the GPU.
     pub pipelined: bool,
@@ -174,6 +177,8 @@ pub enum MetalStage {
     FlashDec,
     /// + flash-attention prefill (simdgroup matrices, online softmax).
     Flash,
+    /// + f16 KV cache.
+    Kv16,
 }
 
 impl MetalStage {
@@ -195,6 +200,7 @@ impl MetalStage {
         MetalStage::PipelinedQ8,
         MetalStage::FlashDec,
         MetalStage::Flash,
+        MetalStage::Kv16,
     ];
 
     pub fn name(self) -> &'static str {
@@ -216,6 +222,7 @@ impl MetalStage {
             MetalStage::PipelinedQ8 => "metal-pipelined-q8",
             MetalStage::FlashDec => "metal-flashdec",
             MetalStage::Flash => "metal-flash",
+            MetalStage::Kv16 => "metal-kv16",
         }
     }
 
@@ -231,6 +238,7 @@ impl MetalStage {
             fused: Fusion::None,
             gpu_argmax: false,
             pipelined: false,
+            kv_f16: false,
         };
         let par = Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, norm: Par::Simd, attn: Attn::Simd, ..naive };
         let mma = Recipe { matmul: Matmul::SimdMatrix, ..par };
@@ -254,6 +262,7 @@ impl MetalStage {
             MetalStage::PipelinedQ8 => Recipe { dtype: DType::Q8_0, head_dtype: DType::Q8_0, ..pipelined },
             MetalStage::FlashDec => Recipe { attn: Attn::SplitK, ..pipelined },
             MetalStage::Flash => Recipe { attn: Attn::Flash, ..pipelined },
+            MetalStage::Kv16 => Recipe { attn: Attn::Flash, kv_f16: true, ..pipelined },
         }
     }
 

@@ -13,9 +13,11 @@
 constant uint ATT_CHUNK = 64;
 
 // grid (n_head, n_chunks), 256 threads. part: [n_head, max_chunks, 66] floats (m, l, o[64]).
+// KV = float, or half for the f16 KV cache (metal-kv16).
+template <typename KV>
 kernel void attn_decode_split(device const float* qkv [[buffer(0)]],
-                              device const float* kc [[buffer(1)]],
-                              device const float* vc [[buffer(2)]],
+                              device const KV* kc [[buffer(1)]],
+                              device const KV* vc [[buffer(2)]],
                               device float* part [[buffer(3)]],
                               constant uint& n_kv [[buffer(4)]],
                               constant uint& n_head [[buffer(5)]],
@@ -35,7 +37,7 @@ kernel void attn_decode_split(device const float* qkv [[buffer(0)]],
     threadgroup float* partial = tgm + 96;     // [4 * 64]
     float2 qv = ((device const float2*)(qkv + h * HD))[lane];
     for (uint j = j0 + sg; j < j1; j += nsg) {
-        float d = simd_sum(dot(qv, ((device const float2*)(kc + j * C + h * HD))[lane]));
+        float d = simd_sum(dot(qv, float2(((device const vec<KV, 2>*)(kc + j * C + h * HD))[lane])));
         if (lane == 0) scores[j - j0] = d * 0.125f;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -48,13 +50,17 @@ kernel void attn_decode_split(device const float* qkv [[buffer(0)]],
     threadgroup_barrier(mem_flags::mem_threadgroup);
     uint d = tid % HD, p = tid / HD;  // 4 parts x 64 dims
     float acc = 0.0f;
-    for (uint j = p; j < len; j += 4) acc += scores[j] * vc[(j0 + j) * C + h * HD + d];
+    for (uint j = p; j < len; j += 4) acc += scores[j] * float(vc[(j0 + j) * C + h * HD + d]);
     partial[p * HD + d] = acc;
     threadgroup_barrier(mem_flags::mem_threadgroup);
     device float* out = part + (h * max_chunks + chunk) * (HD + 2);
     if (p == 0) out[2 + d] = partial[d] + partial[HD + d] + partial[2 * HD + d] + partial[3 * HD + d];
     if (tid == 0) { out[0] = mx; out[1] = sum; }
 }
+
+#define SPLIT_ARGS(KV) device const float*, device const KV*, device const KV*, device float*, constant uint&, constant uint&, constant uint&, threadgroup float*, uint2, uint, uint, uint, uint
+template [[host_name("attn_decode_split")]] kernel void attn_decode_split<float>(SPLIT_ARGS(float));
+template [[host_name("attn_decode_split_h")]] kernel void attn_decode_split<half>(SPLIT_ARGS(half));
 
 // grid n_head threadgroups of 64 threads: merge the chunks of one head.
 kernel void attn_decode_merge(device const float* part [[buffer(0)]],
@@ -91,10 +97,11 @@ kernel void attn_decode_merge(device const float* part [[buffer(0)]],
 // the end. Scores never touch device memory.
 // grid (ceil(n / 32), n_head), 128 threads; head_dim must be 64.
 // ---------------------------------------------------------------------------
+template <typename KV>
 kernel void attn_prefill_flash(device float* out [[buffer(0)]],
                                device const float* qkv [[buffer(1)]],
-                               device const float* kc [[buffer(2)]],
-                               device const float* vc [[buffer(3)]],
+                               device const KV* kc [[buffer(2)]],
+                               device const KV* vc [[buffer(3)]],
                                constant uint& n [[buffer(4)]],
                                constant uint& pos0 [[buffer(5)]],
                                constant uint& n_head [[buffer(6)]],
@@ -137,8 +144,8 @@ kernel void attn_prefill_flash(device float* out [[buffer(0)]],
             uint key = k0 + j;
             float4 kv = 0.0f, vv = 0.0f;
             if (key < n_kv) {
-                kv = ((device const float4*)(kc + key * C + h * HD))[d4];
-                vv = ((device const float4*)(vc + key * C + h * HD))[d4];
+                kv = float4(((device const vec<KV, 4>*)(kc + key * C + h * HD))[d4]);
+                vv = float4(((device const vec<KV, 4>*)(vc + key * C + h * HD))[d4]);
             }
             ((threadgroup float4*)ks)[e] = kv;
             ((threadgroup float4*)vs)[e] = vv;
@@ -208,4 +215,22 @@ kernel void attn_prefill_flash(device float* out [[buffer(0)]],
         uint q = q0 + rr;
         if (q < n) out[q * C + h * HD + d] = ot[e] / lsum[sg][rr];
     }
+}
+
+#define FLASH_ARGS(KV) device float*, device const float*, device const KV*, device const KV*, constant uint&, constant uint&, constant uint&, uint2, uint, uint, uint
+template [[host_name("attn_prefill_flash")]] kernel void attn_prefill_flash<float>(FLASH_ARGS(float));
+template [[host_name("attn_prefill_flash_h")]] kernel void attn_prefill_flash<half>(FLASH_ARGS(half));
+
+// f16 KV cache: the prefill-path copy of K/V into the cache, as half.
+kernel void kv_write_h(device half* kc [[buffer(0)]],
+                       device half* vc [[buffer(1)]],
+                       device const float* qkv [[buffer(2)]],
+                       constant uint& pos0 [[buffer(3)]],
+                       constant uint& C [[buffer(4)]],
+                       constant uint& n [[buffer(5)]],
+                       uint gid [[thread_position_in_grid]]) {
+    if (gid >= n * C) return;
+    uint t = gid / C, i = gid % C;
+    kc[(pos0 + t) * C + i] = half(qkv[t * 3 * C + C + i]);
+    vc[(pos0 + t) * C + i] = half(qkv[t * 3 * C + 2 * C + i]);
 }

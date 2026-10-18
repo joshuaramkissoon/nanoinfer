@@ -261,6 +261,27 @@ chart in this post is the real engine, running in your browser.
 - **Viz:** decode tok/s vs context length for pipelined / flash-decoding; prefill time
   stacked by op at P=960 before/after (attention block shrinking from half to an eighth).
 - **Line:** "At 1,000 tokens of context the model's notes weigh more than the model."
+- **Follow-up (f16 KV cache):** storing the notes at half precision: decode at context
+  ~990 **375 → 475 tok/s** (+27%), nothing at short context. Both versions move the same
+  ~60 GB/s; only the byte count changed.
+
+### GPU: the whole climb in one table (for the Ladder viz)
+
+| stage | decode tok/s | prefill (512) | the one idea |
+|---|---|---|---|
+| naive | 14.6 | — | CPU code on a GPU, one wait per op |
+| one command buffer | 41 | — | stop asking "are you done?" 135 times |
+| SIMD matvec + parallel attention | 137–140 | 456 | use 256 threads, not 1 |
+| simdgroup_matrix prefill | 126–133 | 5,947 | the GPU has a matrix instruction |
+| f16 / Q8 / Q4 | 245 / 365 / ~400 | ~6,300 | fewer bytes |
+| pipelined (Q4) | 586–632 | — | the CPU stops waiting between tokens |
+| flash attention + f16 KV (Q4) | 602–641 | 8,700–8,900 | tiles + online softmax |
+
+- **Arc for the post:** naive GPU < one CPU core; the GPU only wins once the code is
+  shaped for it, and at GPT-2 size the last 2× came from *removing waiting*, not from
+  faster maths. Decode ends at ~45% of the spec ceiling (Q4) / ~59% (f16); most of the
+  gap is the GPU's ~80 GB/s practical read bandwidth on this machine plus small-matrix
+  latency.
 ### Stage 3: neon (hand-written SIMD), a null result
 
 - **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per

@@ -89,7 +89,7 @@ impl<'e> MetalSession<'e> {
         let cfg = e.config;
         let (c, rows, v) = (cfg.n_embd, cfg.n_ctx, cfg.n_vocab);
         let g = &e.gpu;
-        let kv = cfg.n_layer * cfg.n_ctx * c * F;
+        let kv = cfg.n_layer * cfg.n_ctx * c * if e.recipe.kv_f16 { 2 } else { F };
         let scores = if e.recipe.attn == Attn::Naive { rows * cfg.n_head * cfg.n_ctx * F } else { 16 };
         MetalSession {
             e,
@@ -319,7 +319,7 @@ impl<'e> MetalSession<'e> {
 
     fn attention(&self, r: &mut Runner, l: usize, n: usize) {
         let cfg = &self.e.config;
-        let layer_off = l * cfg.n_ctx * cfg.n_embd * F;
+        let layer_off = self.kv_layer_off(l);
         let attn = match self.e.recipe.attn {
             Attn::SplitK | Attn::Flash if n == 1 => return self.attention_split(r, l),
             a => a,
@@ -345,7 +345,7 @@ impl<'e> MetalSession<'e> {
             ),
             Attn::Flash => r.dispatch_tg(
                 "attn",
-                "attn_prefill_flash",
+                self.kv_kernel("attn_prefill_flash"),
                 &[
                     Arg::Buf(&self.att),
                     Arg::Buf(&self.qkv),
@@ -378,16 +378,35 @@ impl<'e> MetalSession<'e> {
         }
     }
 
+    /// Byte offset of layer `l` in the K/V cache buffers.
+    fn kv_layer_off(&self, l: usize) -> usize {
+        let cfg = &self.e.config;
+        l * cfg.n_ctx * cfg.n_embd * if self.e.recipe.kv_f16 { 2 } else { F }
+    }
+
+    /// The f16-KV variant of a kernel that reads or writes the cache.
+    fn kv_kernel(&self, name: &'static str) -> &'static str {
+        if !self.e.recipe.kv_f16 {
+            return name;
+        }
+        match name {
+            "attn_prefill_flash" => "attn_prefill_flash_h",
+            "attn_decode_split" => "attn_decode_split_h",
+            "kv_write" => "kv_write_h",
+            other => unimplemented!("{other} has no f16-KV variant"),
+        }
+    }
+
     /// Flash-decoding: (head, 64-key chunk) threadgroups, then a merge per head.
     fn attention_split(&self, r: &mut Runner, l: usize) {
         let cfg = &self.e.config;
-        let layer_off = l * cfg.n_ctx * cfg.n_embd * F;
+        let layer_off = self.kv_layer_off(l);
         let n_kv = self.pos + 1;
         let chunks = n_kv.div_ceil(ATT_CHUNK);
         let max_chunks = cfg.n_ctx.div_ceil(ATT_CHUNK) as u32;
         r.dispatch_tg(
             "attn",
-            "attn_decode_split",
+            self.kv_kernel("attn_decode_split"),
             &[
                 Arg::Buf(&self.qkv),
                 Arg::BufAt(&self.k_cache, layer_off),
@@ -484,7 +503,7 @@ impl<'e> MetalSession<'e> {
             return self.encode_decode_epilogue(r, argmax);
         }
         for (l, lw) in w.layers.iter().enumerate() {
-            let layer_off = l * cfg.n_ctx * c * F;
+            let layer_off = self.kv_layer_off(l);
             let kc = Arg::BufAt(&self.k_cache, layer_off);
             let vc = Arg::BufAt(&self.v_cache, layer_off);
             self.fused(
@@ -592,14 +611,21 @@ impl<'e> MetalSession<'e> {
     /// Fusion::Epilogue decode body (after the embedding): LayerNorms stay
     /// separate; bias+GELU, residuals and KV writes ride in matvec epilogues.
     fn encode_decode_epilogue(&self, r: &mut Runner, argmax: bool) {
-        let cfg = self.e.config;
         let w = &self.e.w;
-        let c = cfg.n_embd;
         for (l, lw) in w.layers.iter().enumerate() {
-            let layer_off = l * cfg.n_ctx * c * F;
+            let layer_off = self.kv_layer_off(l);
             let kv = Some((Arg::BufAt(&self.k_cache, layer_off), Arg::BufAt(&self.v_cache, layer_off)));
             self.layernorm(r, "ln_1", 0, &lw.ln1_w, &lw.ln1_b, 1);
-            self.epi(r, "qkv", "mve_qkv", &self.qkv, &self.xn, &lw.attn_w, Some(&lw.attn_b), kv);
+            self.epi(
+                r,
+                "qkv",
+                if self.e.recipe.kv_f16 { "mve_qkv_h" } else { "mve_qkv" },
+                &self.qkv,
+                &self.xn,
+                &lw.attn_w,
+                Some(&lw.attn_b),
+                kv,
+            );
             self.attention(r, l, 1);
             self.epi(r, "attn_proj", "mve_resid", &self.x, &self.att, &lw.proj_w, Some(&lw.proj_b), None);
             self.layernorm(r, "ln_2", 0, &lw.ln2_w, &lw.ln2_b, 1);
@@ -672,12 +698,12 @@ impl<'e> MetalSession<'e> {
             256,
         );
         for (l, lw) in w.layers.iter().enumerate() {
-            let layer_off = l * cfg.n_ctx * c * F;
+            let layer_off = self.kv_layer_off(l);
             self.layernorm(r, "ln_1", 0, &lw.ln1_w, &lw.ln1_b, n);
             self.linear(r, "qkv", &self.qkv, &self.xn, 0, &lw.attn_w, Some(&lw.attn_b), n);
             r.dispatch(
                 "kv_write",
-                "kv_write",
+                self.kv_kernel("kv_write"),
                 &[
                     Arg::BufAt(&self.k_cache, layer_off),
                     Arg::BufAt(&self.v_cache, layer_off),

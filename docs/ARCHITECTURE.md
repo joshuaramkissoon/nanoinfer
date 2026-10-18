@@ -9,6 +9,13 @@ crates/
   cli/    nanoinfer-cli: binary `nanoinfer`. mmaps weights, owns the clock,
           runs generate / bench / tokenize.
   wasm/   (later) wasm-bindgen wrapper around core for the in-browser figures.
+  metal/  nanoinfer-metal (macOS only; empty crate elsewhere): GPT-2 on the Apple GPU
+          via objc2-metal. Reuses core's Model/tokenizer/config; its own forward pass
+          (forward.rs) picks kernels from a per-stage `Recipe` (sync mode, dtype,
+          matvec/matmul/attention kernels, fusion, GPU argmax, pipelining). MSL
+          shaders in src/shaders/ are compiled at startup. `nanoinfer bench --stage
+          metal-*` runs it; examples/ has the dispatch/bandwidth probe, a matvec
+          sweep and a quantisation-quality table.
 scripts/  fetch_weights.sh (HF download), gen_reference.py (HF reference fixtures)
 tests/fixtures/  committed reference logits + token ids (~800 KB)
 bench/results.jsonl  one JSON line per bench run (the hillclimb's history)

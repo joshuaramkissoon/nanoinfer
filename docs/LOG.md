@@ -766,6 +766,74 @@ parallelism.
 trick in it is the diag(α) rescale: a simdgroup matrix has no per-row scale
 op, but multiplying by an 8×8 diagonal matrix is one more MMA per tile.
 
+**7c, metal-kv16 (f16 KV cache).** K/V stored as half: the qkv epilogue
+(`mve_qkv_h_*`) and `kv_write_h` convert on write; `attn_decode_split<half>` and
+`attn_prefill_flash<half>` convert on load (the kernels became templates over
+the KV element type; the float instantiations keep their names). Halves the
+KV bytes: 37 KB per position instead of 74 KB. Max |Δlogit| vs f32 KV at
+context 300 (f32 weights): 3.9e-3 prefill, 4.1e-3 decode; fixture KL and top-1
+unchanged from metal-flash.
+
+| prompt | metal-flash decode | **metal-kv16 decode** | bytes/token (weights + KV) | effective GB/s |
+|---|---|---|---|---|
+| 64 | 575–579 | 577–602 | 89 + 7 MB → 89 + 3.5 MB | ~55 |
+| 512 | 434–469 | **526–549** | 89 + 44 → 89 + 22 MB | ~60 |
+| 960 | 375–386 | **439–475** | 89 + 73 → 89 + 37 MB | ~60 |
+
+(decode runs 64 steps after the prompt, so "960" averages context ~992.)
++21–27% at long context, nothing at short context, as the byte count predicts:
+both variants move ~60 GB/s of weights + cache. Long-context decode is
+bandwidth-bound on the KV cache now; next levers would be Q8 KV or a smaller
+cache (GQA doesn't apply to GPT-2).
+
+### GPU summary (all stages, M4 10-core GPU)
+
+Decode: prompt 64 + 64 greedy steps, median of 5–10 runs. Ceilings use the
+120 GB/s spec ÷ that stage's bytes per token (practical GPU read bandwidth
+measured ~80 GB/s, i.e. ~67% of spec).
+
+| stage | what changed | dtype | prefill P=64 | prefill P=512 | decode tok/s | % spec ceiling |
+|---|---|---|---|---|---|---|
+| metal-naive | CPU kernels ported, wait per op | f32 | 286 | — | 14.6 | 6.0% |
+| metal-onecb | one command buffer per token | f32 | 403 | — | 41.3 | 17.0% |
+| metal-simd | SIMD-group matvec | f32 | 403 | — | 46.7 | 19.2% |
+| metal-par | parallel layernorm + attention | f32 | 426–436 | 456 | 137–140 | 56–58% |
+| metal-tiled | tiled prefill matmul | f32 | 1964 | 2188 | 122* | 50% |
+| metal-mma | simdgroup_matrix prefill | f32 | 3292 | 5947 | 126–133* | 52–55% |
+| metal-f16 | f16 weights | f16 | 4060 | 6166 | 245 | 50.5% of 485 |
+| metal-q8 | Q8_0 weights | q8_0 | 3279 | 6452 | 365 | 40.1% of 911 |
+| metal-q4 | Q4_0 blocks, Q8_0 head | q4_0 | 3563 | 6465 | 363–475 | 27–35% of 1344 |
+| metal-argmax | GPU argmax | q4_0 | 4253 | — | 437 | 32.5% |
+| metal-fused-ln | LN-prologue fusion (dead end) | q4_0 | 4801 | — | 477 | 35.5% |
+| metal-fused | epilogue fusion | q4_0 | 4181 | — | 460 | 34.2% |
+| metal-pipelined | no CPU wait between tokens | q4_0 | 4528 | — | 586–632 | 43.6–47% |
+| metal-pipelined-q8 | same, Q8_0 | q8_0 | 4541 | — | 498–517 | 55–57% of 911 |
+| metal-pipelined-f16 | same, f16 | f16 | 3848 | — | 277–284 | 57–59% of 485 |
+| metal-flashdec | split-K decode attention | q4_0 | 4900 | 6562 | 641 | 47.7% |
+| metal-flash | flash-attention prefill | q4_0 | 5541 | 8901 | 575–626 | 43–47% |
+| **metal-kv16** | f16 KV cache | q4_0 | 6269 | 8707 | **602** (549 @ ctx 550, 439–475 @ ctx 990) | 44.8% |
+
+\* same decode kernels as metal-par; the difference is machine drift.
+
+Best numbers: **decode 641 tok/s** (Q4 + flash-decoding, short context;
+~72% of the ~890 tok/s practical Q4 ceiling at 80 GB/s), **284 tok/s at f16**
+(88% of the practical f16 ceiling), **140 tok/s f32** (85%). **Prefill 8.9k
+tok/s** at P = 512 (GEMMs at 1.8–2.0 TFLOP/s, ~45% of f32 peak), 33× the
+CPU's 4×4-tiled single core.
+
+**What to try next (GPU).**
+- Q4 matvec on 768-wide rows is latency-bound (one 16 B load per lane per row):
+  give each lane 2–4 rows in flight, or split rows across half-SIMD-groups.
+- Prefill GEMMs: double-buffer the K loop, keep X fragments in registers,
+  try `simdgroup_half8x8` (if FP16 MMA throughput > FP32 on this GPU), and
+  split-K for fc_proj (K = 3072, only 768 outputs).
+- Fuse ln_f + LM head + argmax (the head is 30% of a Q4 token and the logits
+  never need to leave the GPU in greedy mode).
+- Q8 KV cache; batch > 1 decode (the matvec turns into a skinny GEMM, and
+  the weights are read once for the whole batch).
+- Re-measure on a quiet machine: GPU read bandwidth (80 GB/s here) and the
+  run-to-run spread were both affected by a desktop video app and Spotlight.
+
 ---
 
 ## Stage 3: neon (explicit SIMD), a null result

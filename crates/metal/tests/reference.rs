@@ -190,9 +190,9 @@ fn split_and_flash_attention_match_simd_at_long_context() {
     }
     seq.truncate(300);
     let base = nanoinfer_metal::Recipe { dtype: DType::F32, head_dtype: DType::F32, ..MetalStage::Mma.recipe() };
-    let run = |attn: nanoinfer_metal::Attn| {
-        let engine =
-            MetalEngine::with_recipe(model, MetalStage::Mma, nanoinfer_metal::Recipe { attn, ..base }).unwrap();
+    let run = |attn: nanoinfer_metal::Attn, kv_f16: bool| {
+        let recipe = nanoinfer_metal::Recipe { attn, kv_f16, ..base };
+        let engine = MetalEngine::with_recipe(model, MetalStage::Mma, recipe).unwrap();
         let mut s = engine.session();
         // Two prefill chunks, so the second one starts at pos0 = 100.
         s.step(&seq[..100]).unwrap();
@@ -202,12 +202,16 @@ fn split_and_flash_attention_match_simd_at_long_context() {
         }
         (prefill, s.step(&seq[299..]).unwrap().to_vec())
     };
-    let (p0, d0) = run(nanoinfer_metal::Attn::Simd);
-    for attn in [nanoinfer_metal::Attn::SplitK, nanoinfer_metal::Attn::Flash] {
-        let (p, d) = run(attn);
+    let (p0, d0) = run(nanoinfer_metal::Attn::Simd, false);
+    for (attn, kv_f16, tol) in [
+        (nanoinfer_metal::Attn::SplitK, false, 1e-3),
+        (nanoinfer_metal::Attn::Flash, false, 1e-3),
+        (nanoinfer_metal::Attn::Flash, true, 0.1),
+    ] {
+        let (p, d) = run(attn, kv_f16);
         let dp = p.iter().zip(&p0).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
         let dd = d.iter().zip(&d0).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
-        println!("{attn:?} vs Simd at context 300: prefill max diff {dp:.2e}, decode max diff {dd:.2e}");
-        assert!(dp < 1e-3 && dd < 1e-3, "{attn:?}: {dp} {dd}");
+        println!("{attn:?} (f16 KV: {kv_f16}) vs Simd at context 300: prefill max diff {dp:.2e}, decode {dd:.2e}");
+        assert!(dp < tol && dd < tol, "{attn:?} kv_f16={kv_f16}: {dp} {dd}");
     }
 }
