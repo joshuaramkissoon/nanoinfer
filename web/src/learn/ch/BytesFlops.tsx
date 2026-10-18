@@ -3,11 +3,12 @@ import { useEngine } from "../../engine/client";
 import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
 import { log, logTicks, short } from "../../lib/fmt";
-import { Deeper, Fig, G, Idea, Seg, Slider, useFrame, useOnScreen } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, Slider, Swatch, useFrame, useOnScreen } from "../kit";
 
 /** fig 9.1: a truck feeding a factory */
 function Factory() {
   const pal = usePalette();
+  const cc = chartColors(pal.dark);
   const [I, setI] = useState(0.5); // work per box (FLOP per byte)
   const R = 1.6; // the tab's ridge: 97 GFLOP/s / 59 GB/s
   const [ref, w] = useWidth<HTMLDivElement>();
@@ -46,8 +47,10 @@ function Factory() {
   });
   const s = sim.current;
   const factoryBusy = Math.min(1, I / R), truckBusy = Math.min(1, R / I);
-  const W = Math.max(300, w), H = 120;
-  const road0 = 70, road1 = W - 120;
+  const W = Math.max(300, w), H = 132;
+  const narrow = W < 460;
+  const houseW = narrow ? 72 : 92, factW = narrow ? 96 : 120;
+  const road0 = houseW + 14, road1 = W - factW - 18;
   const bound = I < R ? "memory" : "compute";
   return (
     <Fig
@@ -57,9 +60,9 @@ function Factory() {
       prov="toy"
       caption={
         <>
-          Left, the warehouse: memory, where the model's weights live. The road: memory <G k="bandwidth" />, delivering boxes
-          of bytes at a steady rate. Right, the factory: the processor, doing arithmetic on what arrives. Each box needs some
-          amount of work. The two bars say how busy each side is: the truck (memory) and the factory (maths). The crossover is set to this browser tab's measured
+          Left, <Swatch c={cc.c2}>memory</Swatch>, where the weights live; the road is its <G k="bandwidth" />, the truck
+          delivering boxes of bytes at a steady rate. Right, the <Swatch c={cc.c1}>processor</Swatch> (the factory), doing the
+          arithmetic each box needs. The two bars say how busy each side is. The crossover is this browser tab's measured
           numbers: ~97 billion operations per second against ~59 GB/s, so <b>1.6 operations per byte</b>.
         </>
       }
@@ -97,35 +100,40 @@ function Factory() {
       <div ref={ref}>
         {w > 0 && (
           <svg width={W} height={H}>
-            {/* warehouse */}
-            <rect x={4} y={30} width={56} height={56} rx={6} fill="none" stroke={pal.cool} />
-            <text x={32} y={62} textAnchor="middle" fontSize={10} fill={pal.cool}>
+            {/* warehouse: memory (blue) */}
+            <rect x={2} y={26} width={houseW} height={64} rx={8} fill={cc.c2} fillOpacity={0.1} stroke={cc.c2} />
+            <text x={2 + houseW / 2} y={55} textAnchor="middle" fontSize={12.5} fontWeight={700} fill={pal.fg}>
               memory
             </text>
-            <text x={32} y={102} textAnchor="middle" fontSize={9} fill={pal.muted}>
-              weights
+            <text x={2 + houseW / 2} y={72} textAnchor="middle" fontSize={11} fill={pal.sub}>
+              the weights
             </text>
-            {/* road */}
-            <line x1={road0} x2={road1} y1={58} y2={58} stroke={pal.rule} strokeWidth={14} strokeLinecap="round" />
-            <line x1={road0} x2={road1} y1={58} y2={58} stroke={pal.muted} strokeDasharray="6 8" opacity={0.5} />
+            {/* road: bandwidth, carrying boxes of bytes (blue) */}
+            <line x1={road0} x2={road1} y1={58} y2={58} stroke={pal.rule} strokeWidth={16} strokeLinecap="round" />
+            <text x={(road0 + road1) / 2} y={36} textAnchor="middle" fontSize={11} fill={pal.sub}>
+              bytes arriving at a fixed rate →
+            </text>
             {s.boxes.map((x, i) => (
-              <rect key={i} x={road0 + x * (road1 - road0 - 12)} y={52} width={12} height={12} rx={2} fill={pal.heat[3]} />
+              <rect key={i} x={road0 + x * (road1 - road0 - 12)} y={52} width={12} height={12} rx={2} fill={cc.c2} />
             ))}
-            {/* queue */}
+            {/* queue at the factory door */}
             {Array.from({ length: Math.min(9, s.queue) }, (_, i) => (
-              <rect key={i} x={road1 - 4 - (i % 3) * 14} y={78 + Math.floor(i / 3) * -14 + 14} width={12} height={12} rx={2} fill={pal.heat[3]} opacity={0.9} />
+              <rect key={i} x={road1 - 4 - (i % 3) * 14} y={78 + Math.floor(i / 3) * -14 + 14} width={12} height={12} rx={2} fill={cc.c2} opacity={0.75} />
             ))}
-            {/* factory */}
-            <g transform={`translate(${W - 104},20)`}>
-              <rect x={0} y={10} width={96} height={66} rx={6} fill={pal.accent} fillOpacity={s.proc > 0 ? 0.18 : 0.04} stroke={pal.accent} />
-              <path d="M10,10 v-12 h14 v12 M34,10 v-8 h14 v8" fill="none" stroke={pal.accent} />
-              <text x={48} y={40} textAnchor="middle" fontSize={10} fill={pal.accent}>
+            {/* factory: the processor (ember when working) */}
+            <g transform={`translate(${W - factW - 4},18)`}>
+              <rect x={0} y={10} width={factW} height={70} rx={8} fill={cc.c1} fillOpacity={s.proc > 0 ? 0.22 : 0.05} stroke={cc.c1} />
+              <path d="M12,10 v-12 h14 v12 M36,10 v-8 h14 v8" fill="none" stroke={cc.c1} />
+              <text x={factW / 2} y={40} textAnchor="middle" fontSize={12.5} fontWeight={700} fill={pal.fg}>
                 processor
               </text>
-              <text x={48} y={56} textAnchor="middle" fontSize={9.5} fill={pal.fg} fontWeight={700}>
+              <text x={factW / 2} y={58} textAnchor="middle" fontSize={11} fill={s.proc > 0 ? pal.fg : pal.muted}>
                 {s.proc > 0 ? "working" : "waiting…"}
               </text>
             </g>
+            <text x={2} y={H - 4} fontSize={11} fill={pal.muted}>
+              {bound === "memory" ? "the processor is idle between boxes" : "boxes pile up at the processor's door"}
+            </text>
           </svg>
         )}
       </div>
@@ -133,14 +141,14 @@ function Factory() {
         <div className="lr-bar lr-busy">
           <span className="tk">memory busy</span>
           <span className="b">
-            <i style={{ width: `${truckBusy * 100}%`, background: pal.cool }} />
+            <i style={{ width: `${truckBusy * 100}%`, background: cc.c2 }} />
           </span>
           <span className="pc">{(truckBusy * 100).toFixed(0)}%</span>
         </div>
         <div className="lr-bar lr-busy">
           <span className="tk">maths busy</span>
           <span className="b">
-            <i style={{ width: `${factoryBusy * 100}%`, background: pal.accent }} />
+            <i style={{ width: `${factoryBusy * 100}%`, background: cc.c1 }} />
           </span>
           <span className="pc">{(factoryBusy * 100).toFixed(0)}%</span>
         </div>
@@ -294,7 +302,9 @@ export default function BytesFlops() {
       <p>
         Now apply it to decode. Each weight is 4 bytes. It's fetched, used for exactly one multiply and one add, and not
         needed again until the next token. That's <span className="k">0.5 operations per byte</span>, and the crossover in a
-        browser tab is 1.6. Decode is <G k="memory-bound" />: the factory spends most of its time waiting for the truck.
+        browser tab is 1.6. Decode is <G k="memory-bound" />: the factory spends most of its time waiting for the truck. (Chapter
+        0.2 said ~1 per byte: that was for 2-byte weights. Halve the bytes and the work per byte doubles; it's still far
+        below any chip's crossover.)
       </p>
       <p>
         Prefill is different. With a 64-token prompt, each weight is fetched once and used 64 times, once per token. Same
