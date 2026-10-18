@@ -14,3 +14,6 @@ nanoinfer-core = { path = "../core" }
 serde_json.workspace = true
 memmap2 = "0.9"
 clap = { version = "4", features = ["derive"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nanoinfer-metal = { path = "../metal" }

@@ -11,6 +11,8 @@
 
 mod bench;
 mod membw;
+#[cfg(target_os = "macos")]
+mod metal_bench;
 mod ppl;
 mod report;
 
@@ -92,6 +94,11 @@ pub fn load_model(dir: &Path) -> Result<Model, Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // `bench --stage metal-*` runs on the GPU (crates/metal).
+    #[cfg(target_os = "macos")]
+    if let Some(result) = metal_bench::intercept() {
+        return result;
+    }
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Tokenize { text } => {

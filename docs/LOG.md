@@ -255,3 +255,154 @@ Per-op decode profile (`generate --profile`, 64 tokens):
   2.3%: things that were invisible at 19 tok/s start to show at 100.
 - Prefill went 7.5× (25 → 185) and decode 5.8×. Prefill at 31.6 GFLOP/s is still
   compute-bound (`fmul`+`fadd`, no FMA, one weight row in flight at a time).
+
+---
+
+## GPU (Metal)
+
+The GPU path lives in `crates/metal` (`nanoinfer-metal`, macOS only; an empty
+crate elsewhere). It reuses core's loader (`Model`, already `[out, in]`),
+tokenizer and config, and runs its own forward pass
+(`crates/metal/src/forward.rs`). Each stage is a `MetalStage` → `Recipe`
+(sync mode, dtype, matvec/matmul kernel, norm/attention style, fusion, GPU
+argmax). Kernels are only added, never edited, so every stage stays runnable:
+`nanoinfer bench --stage metal-<name>` (the CLI routes `metal-*` stages to
+`crates/cli/src/metal_bench.rs`). Tests (`crates/metal/tests/reference.rs`)
+check every Metal stage against the HF fixtures, both as one prefill and fed
+token by token, plus greedy equality for f32/f16 stages.
+
+Bindings: `objc2-metal` 0.3 (the `metal` crate is deprecated). Shaders are MSL
+source compiled at startup (`newLibraryWithSource`, `MTLMathMode::Safe`, i.e.
+no fast-math). All buffers are `StorageModeShared`: on unified memory the CPU
+writes tokens straight into a GPU buffer and reads logits straight out of one.
+
+Bench extras for GPU stages: wall ms/token, **GPU-busy ms/token** (sum of
+`GPUEndTime − GPUStartTime` over the token's command buffers), dispatches and
+command buffers per token, GB/s on wall time and while the GPU is busy.
+
+**Machine note.** During these runs a desktop app (Backdrop, a video-wallpaper
+renderer) was using ~200% CPU and some GPU, and the CPU hillclimb agent was
+benchmarking at the same time. Numbers are medians of 5 runs but carry that
+noise floor (a few %).
+
+### The rules of the game: dispatch overhead and GPU bandwidth (`examples/probe.rs`)
+
+`cargo run --release -p nanoinfer-metal --example probe`
+
+**Dispatch overhead** (empty kernel, 32 threads):
+
+| what | cost |
+|---|---|
+| encode one dispatch (CPU side, setPipeline + setBuffer×k + dispatch) | 0.075 µs + ~0.013 µs per buffer bound |
+| one dispatch on the GPU, inside a serial encoder (back-to-back) | **0.72 µs** (flat from 100 to 10k dispatches) |
+| a command buffer with 1 dispatch: commit → waitUntilCompleted, wall | **~150 µs** (136–160) |
+| 135 dispatches (one GPT-2 token's worth) in one command buffer: GPU | 99 µs |
+
+So there are two very different overheads. Inside one command buffer a
+dispatch costs ~0.7 µs of GPU time (the serial encoder drains the pipe between
+dependent dispatches). But every CPU↔GPU round trip (commit + wait) costs
+~150 µs. GPT-2 has 135 ops per token: one round trip per op is ~20 ms per token
+of pure synchronisation, a hard cap of ~50 tok/s before any maths happens.
+
+**Bandwidth** (float4 grid-stride read / copy kernels over 32–512 MB shared
+buffers, GPU timestamps): **~77 GB/s median, ~80–85 GB/s best** for reads,
+similar for copies (counting read+write). Thread count (16k–262k) and 4-way
+unrolling made no difference. That is ~68% of the 120 GB/s spec and below the
+98 GB/s the CPU's 10 threads measured (`membw`). Possibly contention from the
+wallpaper app's GPU work; to re-check on a quiet machine. Practical f32 GPU
+ceiling: 82 GB/s ÷ 494.6 MB ≈ **165 tok/s** (vs 243 at spec).
+
+### Metal stage 1: metal-naive (one kernel per op, commit + wait per op)
+
+**Hypothesis.** A literal port of the CPU reference kernels (one thread per
+output element, serial loops) with a command buffer + wait per op will be
+correct immediately and *slower than the CPU* at decode: 135 round trips ×
+~150 µs ≈ 20 ms/token of sync alone, plus kernels that don't use the GPU's
+parallelism (layernorm is one thread per row; attention is one thread per
+(query, head) = 12 threads for a decode step). Prefill should be much better
+than CPU, since it has n × d_out independent dot products.
+
+**What it is.** `shaders/naive.metal`: `embed`, `layernorm_naive` (1 thread per
+row, two-pass), `matmul_naive` (1 thread per output; neighbouring threads read
+neighbouring *rows* of W, i.e. 3–12 KB apart: uncoalesced), `gelu_naive`,
+`residual_add`, `kv_write`, `attention_naive` (1 thread per (query, head),
+scores in a scratch buffer, two-pass softmax). Weights are copied once into
+shared `MTLBuffer`s at load (0.13 s); the LM head reuses the wte buffer.
+
+**Correctness.** Max |Δlogit| vs HF 6.1e-5 … 2.3e-4 on the 4 fixture prompts
+(same as CPU), top-1 equal, token-by-token decode equal, greedy 24-token
+continuations equal.
+
+**Numbers** (prompt 64, 64 decode steps, 5 runs):
+
+| | value |
+|---|---|
+| prefill | 286 ± 26 tok/s (49 GFLOP/s), **10.6× the CPU's 27** |
+| decode | **14.6 ± 0.5 tok/s**, 6.0% of 243: *slower than CPU stage 1 (19)* |
+| wall / GPU-busy per token | 68.3 ms / 41.1 ms (GPU idle 40% of the time) |
+| dispatches / command buffers per token | 135 / 135 |
+
+GPU time per op for one decode step (`--profile`, context 65):
+
+| op | GPU µs (12 layers) | share |
+|---|---|---|
+| attn (12 threads per layer!) | 8818 | 34% |
+| fc_proj | 3888 | 15% |
+| lm_head | 2483 | 10% |
+| qkv | 2211 | 9% |
+| ln_1 / ln_2 (1 thread) | 2004 / 1937 | 8% / 8% |
+| fc | 1952 | 8% |
+| kv_write | 1108 | 4% |
+| attn_proj | 1019 | 4% |
+| gelu, residuals, embed | ~30 each | <0.5% |
+
+**What surprised me.**
+- **The GPU lost to one CPU core at decode**, as predicted, but *not mainly*
+  because of sync: the kernels themselves take 41 ms of GPU time. A single
+  GPU thread is slow (~1 GHz, in-order-ish, long memory latency): one thread
+  doing a 768-wide layernorm takes ~165 µs; one thread per (query, head)
+  attention takes 735 µs per layer. The CPU-shaped kernels use 12 of the GPU's
+  ~10×128 lanes.
+- **The uncoalesced matvec is fine on the biggest matrix**: lm_head reads
+  154 MB in 2.48 ms = 62 GB/s. Each thread walks its own row, so a SIMD-group
+  touches 32 different cache lines per step, but with 50k rows there are
+  enough threads in flight to hide the latency, and each line is fully used by
+  its thread over the next 16 iterations. The small matrices (768 rows for attn_proj / fc_proj) are
+  latency-bound: fc_proj has only 768 threads each doing a 3072-long serial dot
+  product → 324 µs per layer for 9.4 MB (29 GB/s).
+- `kv_write` takes 92 µs per layer for copying 2 × 3 KB. Probably per-command-
+  buffer fixed cost on the GPU when it touches the big KV buffers (37 MB each);
+  gelu/residual dispatches that touch small buffers take 2.5 µs. To confirm.
+- Prefill is 10× the CPU *with the same naive kernels*, because 64 × 2304
+  independent dot products finally fill the GPU.
+
+### Metal stage 2: metal-onecb (one command buffer per forward)
+
+**Hypothesis.** Same kernels, but encode all 135 dispatches into one command
+buffer and commit + wait once per token. Removes ~134 × 150 µs ≈ 20 ms of round
+trips, so wall time should drop to about the 41 ms of GPU-busy time: ~24 tok/s.
+
+**What changed.** `Recipe.sync = PerForward` (the `Runner` only commits in
+`flush`). Serial compute encoders order dependent dispatches, so no explicit
+barriers are needed.
+
+**Numbers** (prompt 64, 64 decode steps, 5 runs):
+
+| | metal-naive | **metal-onecb** |
+|---|---|---|
+| prefill tok/s | 286 ± 26 | **403 ± 9** |
+| decode tok/s | 14.6 ± 0.5 | **41.3 ± 0.2** (17.0% of 243) |
+| wall ms/token | 68.3 | 24.2 |
+| GPU-busy ms/token | 41.1 | **23.5** |
+| command buffers / token | 135 | 1 |
+
+**2.8× decode, better than predicted.** The surprise: **the GPU's own busy time
+fell 43%** (41 → 23.5 ms) though the kernels are byte-for-byte identical. With
+a wait after every op the GPU idles between tiny command buffers and pays a
+per-command-buffer start cost (and likely clocks down); fed one long command
+buffer it stays busy (97% of wall). The `kv_write` anomaly above is consistent
+with that: per-cb fixed cost, not the copy.
+
+Now 97% of the wall time is GPU kernel time, so the next lever is the kernels:
+the attention and layernorm kernels that use a dozen threads, and a matvec
+that coalesces.

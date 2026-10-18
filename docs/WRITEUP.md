@@ -111,4 +111,48 @@ chart in this post is the real engine, running in your browser.
 - **Line:** "Sixteen variables instead of one made it 5.8× faster, and turned the
   bottleneck from the CPU into the memory."
 
+### GPU probe: what a dispatch costs (Metal, M4)
+
+- **Hypothesis:** "GPU kernel launches are expensive" is folklore; measure it before
+  designing around it.
+- **Change:** an empty kernel, dispatched N times in one command buffer vs one command
+  buffer per dispatch; float4 read/copy kernels for bandwidth.
+- **Result:** inside one command buffer a dispatch costs **0.72 µs** of GPU time. A
+  command buffer round trip (commit, wait) costs **~150 µs**, 200× more. The GPU reads
+  **~80 GB/s** at best here (CPU's 10 threads: 98).
+- **Aha:** the expensive thing isn't the kernel launch, it's the CPU waiting for the GPU.
+  GPT-2 has 135 ops per token; one wait per op is 20 ms/token of nothing.
+- **Viz:** two bars per token: "135 waits" (20 ms) vs "1 wait" (0.15 ms) vs the GPU's
+  actual kernel time.
+- **Line:** "Asking the GPU to do nothing costs less than a microsecond. Asking it whether
+  it's finished costs 150."
+
+### GPU stage 1: metal-naive
+
+- **Hypothesis:** port the CPU kernels one-to-one (one GPU thread per output, a
+  command buffer + wait per op). Correct immediately, slower than the CPU at decode.
+- **Change:** 7 Metal kernels mirroring `kernels/reference.rs`, weights copied once into
+  shared GPU buffers (0.13 s; unified memory, so it's a memcpy).
+- **Result:** decode **14.6 tok/s** (6% of ceiling), *slower than one CPU core* (19).
+  Prefill **286 tok/s**, 10× the CPU, with the same naive kernels.
+- **Aha 1:** it's not just the waits. A GPU thread is a slow CPU: a 768-wide layernorm on
+  one GPU thread takes 165 µs; attention as 12 threads (one per head) is 34% of the
+  token. CPU-shaped code uses 12 of the GPU's ~1,280 lanes.
+- **Aha 2:** prefill wins anyway, because 64 tokens × 2304 outputs is enough
+  independent work to fill the GPU even with dumb kernels.
+- **Viz:** per-op GPU-time bar for one decode token (attn 34%, fc_proj 15%, lm_head 10%,
+  layernorms 16%); the same chart for CPU stage 1 beside it, where matmuls are 99%.
+- **Line:** "My first GPU version was slower than one CPU core."
+
+### GPU stage 2: one command buffer per token
+
+- **Hypothesis:** encode all 135 ops, commit once, wait once. Saves ~20 ms of round trips.
+- **Change:** one flag (`Sync::PerForward`). Same kernels.
+- **Result:** decode **41.3 tok/s** (2.8×, 17% of ceiling), prefill 403 tok/s.
+- **Aha:** the GPU's *own* busy time dropped 43% (41 → 23.5 ms) with identical kernels.
+  Fed tiny command buffers with gaps, the GPU pays a start-up cost per buffer and idles;
+  fed one long one, it stays busy 97% of the time.
+- **Viz:** timeline strip: 135 short GPU bursts with gaps vs one solid block.
+- **Line:** "Same kernels, one fewer question per op: 2.8× faster."
+
 ## Open questions / things to verify before publishing
