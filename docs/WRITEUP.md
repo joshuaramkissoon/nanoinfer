@@ -750,7 +750,7 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
 ## The learner path (web: /, /learn, /lab)
 
 The demo page was a wall of expert figures. It's now a course with the engine as its evidence (plan in `web/IA.md`):
-a landing page asking *what happens when a model writes the next word, and how fast can one computer do it?*, then 18
+a landing page asking *what happens when a model writes the next word, and how fast can one computer do it?*, then 19
 one-idea chapters in three parts, then the Lab (the old page, curated).
 
 - **Part 1, how a model writes text** (8 chapters): next-token guessing on a real run, a live GPT-2 BPE tokenizer in
@@ -763,9 +763,37 @@ one-idea chapters in three parts, then the Lab (the old page, curated).
   the limit, because naive recomputes the whole text: 26 tok/s prefill ÷ 72 tokens ≈ 0.36).
 - **Part 3, making it fast**: the hillclimb regrouped into six milestones, each "bottleneck → idea → result", with one
   climb chart gaining a bar per chapter: KV cache 19 → faster arithmetic 100 → many cores 146 → smaller numbers 497 →
-  the GPU 641 tok/s → batching 6,453 tok/s total (256 users, 25 each). Ending on a ring all-reduce teaser.
+  the GPU 817 tok/s (quiet machine; 641 under load) → batching 6,453 tok/s total (256 users, 25 each). Ending on a ring all-reduce teaser.
 - Every figure says what you're looking at and what to try, carries a provenance tag (toy / diagram / real weights /
   recorded engine run / measured / live), and the chart colours are a validated 3-hue palette.
 - Select any text to ask about it: a Tangent-style tooltip and streamed side panel, proxied server-side (Together,
   DeepSeek V4.1 Flash; the `-1017` release is preferred automatically once Together serves it).
 - **Line:** "One idea per page, and every number on it is one we measured."
+
+### New in the course: batching, serving, and guessing ahead (18 Oct)
+
+- **Numbers come from the bench files now, not from the prose.** `web/scripts/learn-data.py` reads
+  `bench/results.jsonl`, `batching.json`, `serving.json`, `specdec.json` and `webgpu.json` into
+  `public/learn/data.json`; the climb chart, the GPU chapter, the speed-limit calculator, batching and the landing
+  claim all read that. The quiet re-measurements moved three headlines: single-stream GPU decode 641 → **817 tok/s**,
+  GPU read speed 80 → **105 GB/s**, and the landing claim 1,700× → **2,200× faster for one user** (817 / 0.37; the
+  batching total is a different measure and never enters it).
+- **Chapter 17, Batching**, is now three figures, one idea each: total vs per-user speed as the batch grows (4-bit:
+  788 → 6,453 tok/s total at 256 users, while each user drops to 25); the same 24 requests served by static and by
+  continuous batching on one time axis (median first word **3.5 s → 40 ms** at 16 requests a second, 1.7× the
+  throughput); and, folded, the paged KV cache's real block tables (request 0's 18 pages scattered across the pool by
+  step 250; 3.3% of handed-out memory unused; peak 493 pages vs static's 799).
+- **Chapter 18, Guess ahead** (speculative decoding): intuition first (decode is memory-bound, so checking 5 tokens
+  costs about what writing 1 does; a model 10× smaller guesses the easy ones), then a playback of a real recorded run
+  showing which guesses the big model kept, how many it threw away, and its own token per check, then speed-up by kind
+  of text. GPT-2 large with a 4-bit GPT-2 small drafter: **63 → 268 tok/s (4.25×)** on licence text, faster than GPT-2
+  medium alone; acceptance ~1.0 for licences and lists, 0.80–0.93 for prose, 0.65–0.88 for code. A fold says plainly
+  that greedy GPT-2 loops, which flatters every acceptance rate.
+- **Lab picker**: the new WebGPU stages have plain names (folded LayerNorm, 4-wide attention, 16-bit KV cache, wider
+  loads; flash decoding tagged "tried, slower, kept for honesty"), the column headers stay pinned while the list scrolls,
+  and "this browser" is filled from `public/recorded/webgpu.json`: the page's own benchmark run in Chrome 155 on the
+  M4 (load ~3, nothing else benchmarking). In the tab: best decode **558 tok/s** (webgpu-kv16), prefill up to **5,463
+  tok/s** (webgpu-vec), on a par with native wgpu (556 / 4,413) and ~90% of hand-written Metal's matching rung (600).
+- **Line:** "A small model can do much of a big model's typing, without changing a word, as long as the text is
+  predictable."
+

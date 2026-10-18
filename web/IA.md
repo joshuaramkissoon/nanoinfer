@@ -22,7 +22,7 @@ Rules for every page:
 ```
 /                     Landing: the question, one live demo, the map of the journey
 /learn                Contents (same map, with progress)
-/learn/<chapter>      18 chapters in 3 parts (below), prev/next, progress rail
+/learn/<chapter>      19 chapters in 3 parts (below), prev/next, progress rail
 /lab                  The engine room: the full live demo, curated and simplified
 ```
 
@@ -65,14 +65,26 @@ scale, with the speed limit) gains one bar. Details of individual stages are fol
 | 13 | Faster arithmetic | one long chain of adds → 16 independent accumulators, SIMD | 19 → 100 tok/s; now memory-bound | Checkout lanes: 1 lane vs 16; climb |
 | 14 | Many cores | one core can't drain memory → threads (and stop them sleeping) | 100 → 146 tok/s decode, prefill 2,415 tok/s | Threads slider over measured bandwidth per thread count |
 | 15 | Smaller numbers | bytes are the limit → f16, 8-bit and 4-bit weights | 146 → 497 tok/s (q4) / 425 (q8, near-lossless) | Quantize a real block of 32 weights at 8/4/2 bits; climb |
-| 16 | The GPU | CPU-shaped code and waiting → GPU-shaped kernels, stop waiting | 14.6 → 641 tok/s decode, 8,900 tok/s prefill | "Wait after every op" vs "wait once" timeline; climb |
-| 17 | Batching | one user leaves the GPU idle → serve many per weight read | 788 → 6,453 tok/s total (B=256), first token 4.4 s → 62 ms with continuous batching | Batch-size slider: total vs per-user speed |
-| 18 | Many GPUs (teaser) | the model doesn't fit → split it, and pay for talking | (later post) | Ring all-reduce toy |
+| 16 | The GPU | CPU-shaped code and waiting → GPU-shaped kernels, stop waiting | 20 → 817 tok/s decode, 6,800 tok/s prefill (quiet machine) | "Wait after every op" vs "wait once" timeline; climb |
+| 17 | Batching | one user leaves the GPU idle → serve many per weight read | 788 → 6,453 tok/s total (B=256, 25 each); median first token 3.5 s → 40 ms with continuous batching | Total vs per-user speed as the batch grows (the trade-off); static vs continuous timeline (requests as bars); paged-KV block table folded |
+| 18 | Guess ahead (speculative decoding) | one user, big model, memory-bound → a small drafter guesses k tokens, the big model checks them in one pass | GPT-2 large 63 → 268 tok/s (4.25×) on licence text; prose 0.8–0.93 acceptance, code 0.65–0.88 | Playback of a real run (kept guesses, thrown-away guesses, the big model's own token); speed-up and acceptance by kind of text |
+| 19 | Many GPUs (teaser) | the model doesn't fit → split it, and pay for talking | (later post) | Ring all-reduce toy |
+
+Numbers in part 3 are not typed into the pages: the GPU, batching, serving and speculative-decoding figures and prose
+read `public/learn/data.json`, which `scripts/learn-data.py` builds from `bench/results.jsonl`, `batching.json`,
+`serving.json`, `specdec.json` and `webgpu.json`. The landing page's "N× faster" is the best single-user decode over
+the first version (817 / 0.37 ≈ 2,200×), computed from the same file. Batching's total is a different measure and is
+never used for that claim. Chapter 18 has no climb bar: its target model is GPT-2 large, not the 124M model on the climb.
 
 ## Part 4: The Lab (/lab)
 
 The original demo page, re-framed as "the engine room". Engine card + the figures that earn their place, each with a
 plain intro that links back to the chapter it extends, a "what you're looking at" caption and sensible defaults:
 Run it · Inside one token · Logit lens · Attention (144 heads) · Speed of light · Roofline · KV race · The ladder.
+The engine picker in "Run it" lists every stage by family with a plain name and one line on what changed, and two
+speed columns with sticky headers: **Mac** (native on the M4; for WebGPU stages, the same WebGPU code run natively on
+wgpu-Metal) and **this browser** (your benchmark, else what generating here measured, else the recording in
+`public/recorded/webgpu.json`, shown grey and italic with browser, date and conditions in its tooltip). Dead ends that are
+kept runnable (webgpu-flashdec) carry a "tried, slower" tag.
 Dropped from the page: time strip and byte budget (covered by chapters 4 and 10), stage race (the ladder says it more
 simply).
