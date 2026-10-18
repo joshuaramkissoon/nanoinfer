@@ -27,6 +27,7 @@
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 pub mod reference;
+pub mod tiled;
 pub mod unrolled;
 
 /// Where queries, keys and values live in memory. Attention doesn't care whether
@@ -116,5 +117,16 @@ impl Kernels for Neon {
         neon::matmul(out, x, w, bias, n, d_in, d_out);
         #[cfg(not(target_arch = "aarch64"))]
         unrolled::matmul(out, x, w, bias, n, d_in, d_out);
+    }
+}
+
+/// Stage 4: 4×4 register-blocked matmul for prefill (decode uses [`Neon`]'s kernel).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Tiled;
+
+impl Kernels for Tiled {
+    const NAME: &'static str = "tiled";
+    fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: usize, d_in: usize, d_out: usize) {
+        tiled::matmul(out, x, w, bias, n, d_in, d_out)
     }
 }

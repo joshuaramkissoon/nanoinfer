@@ -57,6 +57,7 @@ of the weights).
 | 1 kv-cache | 27.06 ± 0.43 | 18.95 ± 0.16 | 7.8% | 51× decode |
 | 2 unrolled (16 accumulators) | 184.8 ± 3.4 | 100.5 ± 2.1 | 41.4% | 5.8× decode, 7.5× prefill |
 | 3 neon (explicit `fmla`) | 182.6 ± 1.8 | 100.3 ± 1.4 | 41.4% | 1.00× (null result) |
+| 4 tiled (4×4 register blocking) | 469 ± 119 (noisy; ~450 in quiet runs) | 101.1 ± 16 | 41.7% | 2.5× prefill |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -464,3 +465,55 @@ Identical within noise. Correctness: within 1e-3 of HF (FMA rounding only).
   is reuse (stage 4), not faster arithmetic.
 - The compiler had already done the SIMD part. Writing intrinsics by hand only
   pays when you know something the compiler can't (here: nothing yet).
+
+---
+
+## Stage 4: tiled (register-blocked prefill)
+
+**Hypothesis.** Stage 3 showed prefill re-streams each weight matrix once per
+prompt row (from L2). Computing a 4×4 output tile at a time (4 prompt rows × 4
+weight rows, 16 NEON accumulators) uses every loaded weight 4 times from a
+register (0.5 loads per FMA, was 2). With weight-block-outer loop order, a 4-row
+weight panel (≤ 48 KB) stays in L1 while all prompt rows pass over it. Expect
+prefill to become FMA-bound, at a few × stage 3. Decode unchanged.
+
+**What changed.** `kernels/tiled.rs`: `tile_4x4` micro-kernel (`vfmaq_f32`, 4 `x`
+loads + 4 `w` loads + 16 FMAs per 4 columns), `matmul_cols(.., o_begin, o_end)`
+computing a column range for all rows (written so threads can take disjoint
+column ranges next), ragged edges (n % 4, d_out % 4 = the LM head's 50257, k tail)
+via the stage 2 dot. n < 4 (decode) calls stage 3's `matvec`. Unit test vs the
+reference kernel on a 7 × 13 × 10 problem with all three ragged edges (exact match
+on integer data).
+
+**Numbers** (prompt 64, 64 decode, 7 runs; neon in the same session: prefill
+183 ± 24, decode 100.2 ± 3.0). The machine was busy (other agents' builds and GPU
+benches plus Backdrop), so stddevs are large and medians are what to read:
+
+| | prefill tok/s | prefill GFLOP/s | decode tok/s |
+|---|---|---|---|
+| tiled, P=64 | **469 ± 119** (quiet runs: 441, 451) | 80 | 101.1 ± 16 |
+| tiled, P=512 | 355 ± 74 | 60 | |
+| neon, P=512 | 139 ± 17 | 24 | |
+
+Prefill profile (`generate --profile`, 109-token prompt):
+
+| op | share | GFLOP/s |
+|---|---|---|
+| fc | 26% | 98 |
+| fc_proj | 25% | 101 |
+| qkv | 19% | 102 |
+| **gelu** | **12%** | 2.1 |
+| attn | 7% | 13.6 |
+| attn_proj | 7% | 96 |
+| lm_head (1 row) | 2.5% | 12.7 |
+
+**What surprised me.**
+- **Matmuls hit ~100 GFLOP/s, 71% of one P-core's NEON peak** (4 FMA pipes × 4
+  lanes × 2 FLOP × 4.4 GHz ≈ 141 GFLOP/s). Prefill is compute-bound now, as the
+  textbook says. Same arithmetic as stage 3, 3.2× the matmul throughput, purely
+  from reuse.
+- **GELU became 12% of prefill.** Scalar `tanhf` on 3072 × n values per layer is
+  now slower than a 768×768 matmul. Attention (scalar, O(n²)) is 7% at n = 109 and
+  the reason P=512 prefill drops to 355 tok/s. The "<1% elementwise" picture from
+  stage 1 is gone once the matmuls are fast.
+- Decode is untouched (same kernel), still ~100 tok/s at the 1-thread memory wall.

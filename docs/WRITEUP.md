@@ -173,5 +173,23 @@ chart in this post is the real engine, running in your browser.
   stage 3 bars side by side, equal heights, captioned "the compiler had already done this".
 - **Line:** "I wrote the assembly-level version by hand, and it was exactly as fast as the
   version the compiler wrote for me."
+### Stage 4: tiled (register blocking for prefill)
+
+- **Hypothesis:** prefill multiplies 64 prompt rows by the *same* weights, but our loop
+  fetches each weight once per row. Compute a 4×4 block of outputs at once, and each
+  fetched weight gets used 4 times straight from a register.
+- **Change:** a 4×4 NEON micro-kernel (16 accumulators, 8 loads per 16 FMAs). Weight
+  blocks in the outer loop, so a 48 KB weight panel stays in L1 while every prompt row
+  visits it. Decode path unchanged.
+- **Result:** prefill **~450–470 tok/s** (2.5×), with matmuls at ~100 GFLOP/s = 71% of one
+  core's NEON peak. Decode unchanged at ~100 tok/s.
+- **Aha:** same instructions as stage 3, 3× the matmul speed, purely from reuse. Prefill
+  is compute-bound now, as the textbook says.
+- **Aha 2:** fast matmuls expose the "free" ops. GELU (scalar `tanh`) is now 12% of prefill
+  time, more than the attention output projection.
+- **Viz:** tile animation: a 4×4 block of outputs lighting up while a 4-row weight panel
+  stays highlighted ("in L1") and prompt rows stream past. Prefill flame strip with GELU
+  suddenly visible.
+- **Line:** "The arithmetic was never the problem. Fetching the same number 64 times was."
 
 ## Open questions / things to verify before publishing
