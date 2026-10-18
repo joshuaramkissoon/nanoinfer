@@ -282,6 +282,21 @@ chart in this post is the real engine, running in your browser.
   faster maths. Decode ends at ~45% of the spec ceiling (Q4) / ~59% (f16); most of the
   gap is the GPU's ~80 GB/s practical read bandwidth on this machine plus small-matrix
   latency.
+### GPU stage 8a: metal-lanes (more loads in flight per lane)
+
+- **Hypothesis:** the Q4 matvec on 768-wide rows waits on memory latency, not
+  bandwidth: each busy lane has one 16-byte load in flight, and 8 of 32 lanes idle.
+- **Change:** 8 lanes per row, 4 rows per SIMD-group at once; each lane walks 3
+  blocks of its row with independent loads, then a 3-step shuffle reduction.
+- **Result:** narrow Q4 matrices **38 → 58 GB/s** in isolation; whole-token decode
+  **+5–8%** (576–592 → 599–640 tok/s, Q4, interleaved on a loaded machine).
+- **Aha:** "memory-bound" has two flavours. Bandwidth-bound means the pipe is full;
+  latency-bound means the pipe is empty because nobody asked for enough at once.
+  The fix for the second is more requests in flight, not fewer bytes.
+- **Viz:** per-matrix GB/s bars (old vs new layout), with the 80 GB/s practical line.
+- **Line:** "Same bytes, same maths, 50% faster: the lanes just asked for more data
+  before waiting."
+
 ### Stage 3: neon (hand-written SIMD), a null result
 
 - **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per

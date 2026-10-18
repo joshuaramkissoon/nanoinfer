@@ -834,6 +834,66 @@ CPU's 4×4-tiled single core.
 - Re-measure on a quiet machine: GPU read bandwidth (80 GB/s here) and the
   run-to-run spread were both affected by a desktop video app and Spotlight.
 
+## GPU round 2: single-stream leftovers, batching, serving, speculative decoding
+
+**Machine note (round 2).** Load average 18–30 for most of this round:
+Spotlight's `mds_stores` at ~340% CPU indexing the 4.7 GB of new weights
+(gpt2-medium/large; `weights/` and `target/` now carry `.metadata_never_index`),
+Backdrop ~190%, a headless Chromium (web agent) ~100%, and the CPU agent's
+10-thread runs at times. Every bench waits until no other nanoinfer/cargo
+process is running (`ps` check) and records the load average in its note.
+Comparisons are interleaved A/B in one session.
+
+### Metal stage 8a: metal-lanes (8 lanes per row in the decode matvecs)
+
+**Hypothesis.** Round 1 found the Q4 matvec on 768-wide rows latency-bound: a
+row is 24 blocks of 16 B, `matvec_epi` gives it a whole SIMD-group and walks
+the SIMD-group's rows one after another, so 8 lanes idle and each busy lane
+has one 16 B load in flight before a `simd_sum`. Give each row 8 lanes and run
+4 rows per SIMD-group at once: every lane walks 3 blocks of its row (12 for
+fc_proj), all loads independent, then a 3-step `simd_shuffle_xor` reduction
+inside the 8-lane group. Expect the narrow Q4 matrices to approach the wide
+ones (~60–70 GB/s).
+
+**What changed.** `shaders/lanes.metal`: `matvec_lanes<W, R, EPI>` with
+unit functors (Q4_0 block, Q8_0 half-block, f16 8-wide), the same epilogues as
+`matvec_epi` (QKV + f16 KV write, GELU, residual, plain). `Recipe.lanes`;
+stage `metal-lanes` = metal-kv16 + lanes for every decode matvec including
+the Q8 head. Shape sweep: `examples/lanes_sweep.rs` (cache defeated, median
+of 7):
+
+| GB/s | qkv | attn_proj | fc | fc_proj | lm_head |
+|---|---|---|---|---|---|
+| mve_q4_0 (round 1) | 38.1 | 39.2 | 53.1 | 61.2 | 68.1 |
+| **mvl_q4_0 R=1, 4 SGs** | **57.5** | **49.5** | **61.1** | 61.7 | 75.2 |
+| mvl_q4_0 R=2, 4 SGs | 61.0 | 47.7 | 60.7 | 57.2 | 71.7 |
+| mve_q8_0 | 70.5 | 58.5 | 67.8 | 69.0 | 73.7 |
+| mvl_q8_0 R=1, 4 SGs | 61.5 | 59.5 | 74.9 | 75.3 | 82.5 |
+| mve_f16 | 76.1 | 68.9 | 72.5 | 76.6 | 75.7 |
+| mvl_f16 R=1, 4 SGs | 82.4 | 75.9 | 74.6 | 85.3 | 89.6 |
+
+Q4 on 768-wide rows: **+50% (38 → 58 GB/s)**; Q8/f16 move within ±10% (noise
+on this machine). R=2 (8 rows per SIMD-group, 6 loads in flight per lane) is
+no better than R=1: 3 loads in flight is enough to cover the latency, and
+fewer SIMD-groups per matrix hurts the small ones. Kept R=1, 4 SIMD-groups
+(`NANOINFER_LANES=R,NSG` overrides it for sweeps).
+
+**Numbers** (prompt 64 + 64, 5 runs, interleaved, load 25):
+
+| | kv16 | lanes |
+|---|---|---|
+| pair 1 | 576 | 614 |
+| pair 2 | 584 | 640 |
+| pair 3 | 592 | 599 |
+| recorded (7 runs, load 30) | | 592 ± 47 (P=64), 584 ± 21 (P=512, kv16 was 549) |
+
+**+5–8% decode.** Less than the kernel sweep promises because the narrow
+Q4 matrices (qkv + attn_proj) were only ~25% of the token, and the Q4 kernel
+is still at ~58 GB/s on them: per 16 B of weights a lane also loads 128 B of
+x (from L1), dequantises 32 nibbles and does 32 FMAs, so it is no longer
+waiting on DRAM alone. Q4 decode now sits at ~45% of the 120 GB/s spec
+ceiling, ~67% of the 80 GB/s practical one.
+
 ---
 
 ## Stage 3: neon (explicit SIMD), a null result

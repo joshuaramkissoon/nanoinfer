@@ -668,6 +668,14 @@ impl<'e> MetalSession<'e> {
             Arg::U32(has_bias),
             Arg::U32(self.pos as u32),
         ];
+        if self.e.recipe.lanes && w.dtype != DType::F32 {
+            // matvec_lanes: 8 lanes per row, a SIMD-group owns R * 4 rows.
+            let (rr, nsg) = lanes_shape();
+            let kernel = format!("{}_{}_r{rr}", kernel.replace("mve", "mvl"), w.dtype.name());
+            let rows_per_tg = rr * 4 * nsg;
+            r.dispatch_tg(label, &kernel, &args, (w.rows.div_ceil(rows_per_tg), 1, 1), (32 * nsg, 1, 1), 0);
+            return;
+        }
         let rows_per_sg = match w.dtype {
             DType::F32 | DType::F16 => 4,
             DType::Q8_0 | DType::Q4_0 => 2,
@@ -733,6 +741,22 @@ impl<'e> MetalSession<'e> {
         r.dispatch(label, "residual_add", &[Arg::Buf(&self.x), Arg::Buf(&self.proj), Arg::U32(len as u32)], len, 256);
     }
 }
+
+/// matvec_lanes shape: (row-sets per SIMD-group, SIMD-groups per threadgroup).
+/// `NANOINFER_LANES=R,NSG` overrides it for sweeps.
+fn lanes_shape() -> (usize, usize) {
+    static S: std::sync::OnceLock<(usize, usize)> = std::sync::OnceLock::new();
+    *S.get_or_init(|| {
+        std::env::var("NANOINFER_LANES")
+            .ok()
+            .and_then(|v| {
+                let (a, b) = v.split_once(',')?;
+                Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+            })
+            .unwrap_or(LANES_DEFAULT)
+    })
+}
+const LANES_DEFAULT: (usize, usize) = (1, 4);
 
 /// The SIMD-group matvec kernel for a weight dtype: (name, rows per
 /// SIMD-group, SIMD-groups per threadgroup).
