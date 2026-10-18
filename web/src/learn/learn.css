@@ -1253,3 +1253,41 @@ button.lr-bar:hover {
 .ld-note {
   font-size: 0.72rem;
 }
+
+/* ---- fig 12.1: the KV cache as a strip of pages, one per token ---------------------------------- */
+.lr-kvstrip {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.4rem 0.8rem;
+  margin: 0.2rem 0 0.9rem;
+  font-size: 0.74rem;
+  color: var(--m-sub);
+}
+.lr-kvstrip .k {
+  color: var(--m-fg);
+  font-weight: 700;
+}
+.lr-kvstrip .pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.lr-kvstrip .pages i {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 2px;
+  border: 1px solid;
+  transition: background 200ms var(--lr-ease, ease);
+}
+.lr-kvstrip .v {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 520px) {
+  .lr-kvstrip {
+    grid-template-columns: auto 1fr;
+  }
+  .lr-kvstrip .v {
+    grid-column: 1 / -1;
+  }
+}

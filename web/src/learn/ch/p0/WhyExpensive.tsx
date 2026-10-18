@@ -18,7 +18,7 @@ function BytesPerToken() {
   const pal = usePalette();
   const cc = chartColors(pal.dark);
   const d = useLearnData();
-  const [mk, setMk] = useState("70b");
+  const [mk, setMk] = useState("7b");
   const [fk, setFk] = useState("bf16");
   const m = MODELS.find((x) => x.key === mk)!;
   const f = FORMATS.find((x) => x.key === fk)!;
@@ -44,8 +44,8 @@ function BytesPerToken() {
       }
       tryit={
         <>
-          Pick the 70B model: one H100 can't hold it in bf16. Switch to int4 and it fits, at 4× the speed limit. Then pick
-          GPT-2 and compare our measured ticks to the ceilings.
+          A 7B model in bf16 is 14 GB per token: even an H100 tops out near 240 tokens a second. Now pick 70B: one H100 can't
+          hold it at all. Switch to int4 and it fits, at 4× the speed limit. Then pick GPT-2 and compare our measured ticks.
         </>
       }
       source={SOURCES + " Ceilings ignore the KV cache and quantisation scales (≈ +6–12% bytes)."}
@@ -247,13 +247,16 @@ function CostCurve() {
       source={`H100 spec numbers as in fig 0.2.1; ${PRICE.toFixed(2)} $/GPU-hour is a typical 2025–26 on-demand rental (estimate). KV cache: Llama-2-7B shape (32 layers × 4096 × K and V × 2 bytes = 0.5 MB per token). Ideal kernels; real servers reach maybe half of this.`}
     >
       <div className="lr-controls">
-        <span className="lr-small">context</span>
-        <Seg
-          options={[256, 1000, 4000].map((v) => ({ v, label: `${v >= 1000 ? `${v / 1000}k` : v} tokens` }))}
-          value={ctx}
-          onChange={setCtx}
-          label="context"
-        />
+        <span className="p0-ctl">
+          <span className="lr-small">context, tokens</span>
+          <Seg
+            options={[256, 1000, 4000].map((v) => ({ v, label: `${v >= 1000 ? `${v / 1000}k` : v}` }))}
+            value={ctx}
+            onChange={setCtx}
+            label="context, tokens"
+          />
+        </span>
+        <span className="p0-ctl">
         <span className="lr-small">KV cache</span>
         <Seg
           options={[
@@ -264,6 +267,7 @@ function CostCurve() {
           onChange={(v) => setGqa(!!v)}
           label="KV cache size"
         />
+        </span>
       </div>
       <div className="lr-controls">
         <Slider label="users per step" value={e} min={0} max={9} onChange={(v) => (setE(v), setHover(null))} fmt={() => nf(B)} />
@@ -345,6 +349,11 @@ export default function WhyExpensive() {
         So the cost of a token is roughly: <b>bytes = weights × bytes per weight</b>, and{" "}
         <b>arithmetic = 2 × weights</b>. Neither depends on how clever the question is.
       </p>
+      <p>
+        Two words you'll see everywhere: <G k="prefill" /> is the first pass, which reads your whole prompt at once;{" "}
+        <G k="decode" /> is every pass after it, each writing exactly one new token. Decode is what you watch streaming in,
+        and it's where this chapter's cost bites (chapter 08 replays both on a real run).
+      </p>
       <BytesPerToken />
       <p>
         That ceiling is a back-of-envelope SLO you can compute before writing a line of code (chapter 10 does it properly).
@@ -364,11 +373,24 @@ export default function WhyExpensive() {
         decoding), or fewer bytes per weight (<G k="quantization">quantisation</G>).
       </p>
 
+      <h2>The one piece of state: the KV cache</h2>
+      <p>
+        To write the next token, the model has to look back at every token before it (that's <G k="attention" />, chapter
+        05). From each earlier token it needs two small vectors per layer, a <b>key</b> and a <b>value</b>, and those never
+        change once computed. So every engine memoises them in an append-only, per-request log: the <G k="KV cache" />.
+      </p>
+      <p>
+        You know this shape: it's per-session state that grows. One entry per token, per layer. For a 7B model (32 layers,
+        4,096 numbers each for K and V, 2 bytes) that's <b>0.5 MB per token</b>, so a 4,000-token conversation holds 2 GB, and
+        unlike the weights it can't be shared between users. It's read in full on every step, so it costs bandwidth as well
+        as space. Chapter 12 shows it being built.
+      </p>
+
       <h2>Latency, throughput, and the bill</h2>
       <p>
         Batching trades a little latency per user for a lot of <G k="throughput" />. The operator pays per GPU-hour, so cost
-        per token is GPU price ÷ total tokens per second. The catch is that every user brings their own KV cache, which is
-        read every step and takes memory that doesn't shrink with batching.
+        per token is GPU price ÷ total tokens per second. The catch is that every user brings their own KV cache, which
+        takes memory that doesn't shrink with batching.
       </p>
       <CostCurve />
       <p>
@@ -387,11 +409,12 @@ export default function WhyExpensive() {
         caption={
           <>
             Colour is the kind of limit: blue for memory, ember for compute, olive for talking between chips, grey for time.
-            Each chip opens the chapter (<b>ch</b>) or field-guide entry (<b>guide</b>) that explains it.
+            Open one limit at a time; each chip opens the chapter (<b>ch</b>) or field-guide entry (<b>guide</b>) that
+            explains it. Don't try to learn the names yet: the rest of the course meets them one by one.
           </>
         }
       >
-        <ConstraintMap />
+        <ConstraintMap collapsible />
       </Fig>
       <Idea>
         Each token reads every weight once and does almost no arithmetic with it, so decode is limited by memory bandwidth,

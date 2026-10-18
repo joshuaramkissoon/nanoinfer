@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useWidth } from "../ui/Figure";
 import { usePalette } from "../ui/theme";
 import { log } from "../lib/fmt";
-import { chartColors, Fig, Seg, useFrame, useOnScreen, useLearnData, type LearnData } from "./kit";
+import { chartColors, Fig, Seg, Stat, Swatch, useFrame, useOnScreen, useLearnData, type LearnData } from "./kit";
 
 export interface Milestone {
   key: string;
@@ -151,48 +151,68 @@ export function Climb({ upto, n }: { upto: number; n: string }) {
   );
 }
 
-/** Work per token: which rows of the text get pushed through the model at each step. */
+/** Work per token: which rows of the text get pushed through the model at each step, and (with a cache) which are
+ *  read back from the KV cache instead. Shared by chapter 11 (no cache) and chapter 12 (toggle). */
 export function WorkGrid({ n, mode: fixed }: { n: string; mode?: "naive" | "cache" }) {
   const pal = usePalette();
   const cc = chartColors(pal.dark);
-  const [mode, setMode] = useState<"naive" | "cache">(fixed ?? "naive");
+  const [mode, setMode] = useState<"naive" | "cache">(fixed ?? "cache");
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(true);
-  const P = 6, N = 18; // prompt rows, generated tokens
+  const P = 6, N = 14; // prompt rows, generated tokens
   const [onScreen, vis] = useOnScreen<HTMLElement>();
-  useFrame(vis && playing, (dt) => setT((v) => (v + dt * 2.2) % (N + 4)));
-  const step = Math.min(N, Math.floor(t)); // steps done
+  useFrame(vis && playing, (dt) => setT((v) => (v + dt * 1.6) % (N + 4)));
+  const step = Math.min(N + 1, Math.floor(t) + 1); // passes shown (1 = the prefill pass)
   const [ref, w] = useWidth<HTMLDivElement>();
   const W = Math.max(300, w);
   const cols = N + 1; // prefill + N decode steps
-  const cs = Math.min(18, Math.floor((W - 70) / cols) - 2);
+  const left = W < 480 ? 58 : 76;
+  const cs = Math.max(8, Math.min(26, Math.floor((W - left - 8) / cols) - 3));
   const rows = P + N;
-  const rs = Math.min(10, cs * 0.6);
-  let rowsDone = 0;
-  for (let s = 0; s < step; s++) rowsDone += s === 0 ? P : mode === "naive" ? P + s : 1;
-  let cacheRows = 0, naiveRows = 0;
+  const rh = Math.max(7, Math.min(11, Math.round(cs * 0.5)));
+  const gy = 4;
+  const H = gy + rows * (rh + 2) + 22;
+  const cache = mode === "cache";
+  // per pass s: rows that exist = P + s; computed = all of them (no cache) or just the new one(s)
+  const computed = (s: number) => (s === 0 ? P : cache ? 1 : P + s);
+  let total = 0, naiveTotal = 0;
   for (let s = 0; s < step; s++) {
-    cacheRows += s === 0 ? P : 1;
-    naiveRows += s === 0 ? P : P + s;
+    total += computed(s);
+    naiveTotal += s === 0 ? P : P + s;
   }
-  const H = rows * (rs + 2) + 34;
+  const last = step - 1;
+  const cached = cache ? P + last : 0; // tokens whose keys and values are in the cache after this pass
+  const perTok = 2 * 12 * 768 * 4; // K and V, 12 layers, 768 numbers, f32 = 73.7 KB
+  const kb = (cached * perTok) / 1000;
+  const xOf = (s: number) => left + s * (cs + 3);
+  const yOf = (r: number) => gy + r * (rh + 2);
   return (
     <Fig
       figRef={onScreen}
       n={n}
-      title={mode === "naive" ? "Work per token, without a cache" : "Work per token, with a KV cache"}
+      title={cache ? "With a KV cache, each pass computes one new token" : "Without a cache, every pass redoes the whole text"}
       prov="toy"
       caption={
         <>
-          Each column is one pass through the model, left to right in time; the first column is the prompt ({P} tokens). Each
-          row is one token of the text. A filled cell means that token was pushed through all 12 layers in that pass. The
-          number underneath is how many rows that pass computed.{" "}
-          {mode === "naive"
-            ? "Without a cache every pass recomputes every token, so each column is taller than the last."
-            : "With a cache, each pass computes only the newest token: the old tokens' keys and values are already saved."}
+          Columns are passes through the model, left to right in time; rows are the tokens of the text, the first {P} typed by a
+          person. <Swatch c={cc.c1}>Ember</Swatch>: pushed through all 12 layers in that pass.{" "}
+          {cache ? (
+            <>
+              <Swatch c={cc.c2}>Blue</Swatch>: read back from the KV cache instead (each token's saved keys and values). The
+              strip underneath is the cache itself: one page per token, growing by one every pass.
+            </>
+          ) : (
+            <>Nothing is remembered between passes, so every column is taller than the last.</>
+          )}
         </>
       }
-      tryit={fixed ? <>Watch the total. Every new token costs more than the one before it.</> : <>Switch between the two and compare the totals.</>}
+      tryit={
+        fixed ? (
+          <>Watch the total under the grid: the work grows with the square of the text.</>
+        ) : (
+          <>Switch to no cache and compare the totals; switch back and watch the cache grow by one page per pass.</>
+        )
+      }
     >
       <div className="lr-controls">
         {!fixed && (
@@ -209,55 +229,65 @@ export function WorkGrid({ n, mode: fixed }: { n: string; mode?: "naive" | "cach
         <button className="lr-btn" onClick={() => setPlaying((p) => !p)}>
           {playing ? "❚❚ pause" : "▶ play"}
         </button>
-        <span className="lr-small">
-          rows computed: <b style={{ color: pal.fg }}>{rowsDone}</b>
-          {!fixed && <> (no cache: {naiveRows} · cache: {cacheRows})</>}
+      </div>
+      <div className="p0-legend lr-small">
+        <span>
+          <i style={{ background: cc.c1 }} />
+          computed this pass
         </span>
+        {cache && (
+          <span>
+            <i style={{ background: cc.c2, opacity: 0.55 }} />
+            read from the KV cache
+          </span>
+        )}
       </div>
       <div ref={ref}>
         {w > 0 && (
-          <svg width={W} height={H}>
-            {Array.from({ length: cols }, (_, s) => {
-              const n = s === 0 ? P : mode === "naive" ? P + s : 1;
-              const first = s === 0 ? 0 : mode === "naive" ? 0 : P + s - 1;
-              const done = s < step;
-              const xx = 40 + s * (cs + 2);
+          <svg width={W} height={H} role="img" aria-label={cache ? "each pass computes one token and reads the rest from the cache" : "each pass recomputes every token"}>
+            {/* row labels: a bracket for the prompt, then the generated tokens */}
+            <path d={`M${left - 10},${yOf(0)} H${left - 6} M${left - 10},${yOf(0)} V${yOf(P) - 2} H${left - 6}`} stroke={pal.muted} fill="none" />
+            <text x={left - 14} y={(yOf(0) + yOf(P)) / 2 + 3} textAnchor="end" fontSize={11} fill={pal.sub}>
+              prompt
+            </text>
+            <text x={left - 14} y={(yOf(P) + yOf(P + Math.min(last, N) + 1)) / 2 + 3} textAnchor="end" fontSize={11} fill={pal.sub} opacity={last > 1 ? 1 : 0}>
+              new
+            </text>
+            {Array.from({ length: step }, (_, s) => {
+              const first = s === 0 || !cache ? 0 : P + s - 1;
+              const now = s === last;
               return (
-                <g key={s} opacity={done ? 1 : 0.18}>
+                <g key={s} opacity={now ? 1 : 0.62}>
                   {Array.from({ length: P + s }, (_, r) => {
-                    const lit = r >= first && r < first + n;
-                    return (
-                      <rect
-                        key={r}
-                        x={xx}
-                        y={4 + r * (rs + 2)}
-                        width={cs}
-                        height={rs}
-                        rx={2}
-                        fill={lit ? cc.c1 : pal.rule}
-                        opacity={lit ? (r === P + s - 1 || s === 0 ? 1 : 0.55) : 0.6}
-                      />
-                    );
+                    const lit = r >= first;
+                    return <rect key={r} x={xOf(s)} y={yOf(r)} width={cs} height={rh} rx={2} fill={lit ? cc.c1 : cc.c2} fillOpacity={lit ? 1 : 0.42} />;
                   })}
-                  {done && (
-                    <text x={xx + cs / 2} y={H - 14} textAnchor="middle" fontSize={9} fill={pal.muted}>
-                      {n}
-                    </text>
-                  )}
                 </g>
               );
             })}
-            <text x={34} y={10} textAnchor="end" fontSize={9.5} fill={pal.muted}>
-              text
-            </text>
-            <text x={34} y={4 + P * (rs + 2) - 2} textAnchor="end" fontSize={9} fill={pal.muted}>
-              prompt
-            </text>
-            <text x={W - 2} y={H - 1} textAnchor="end" fontSize={9.5} fill={pal.muted}>
+            <text x={xOf(0)} y={H - 6} fontSize={11} fill={pal.muted}>
               passes, in time →
             </text>
           </svg>
         )}
+      </div>
+      {cache && (
+        <div className="lr-kvstrip" aria-label={`KV cache: ${cached} tokens`}>
+          <span className="k">KV cache</span>
+          <span className="pages">
+            {Array.from({ length: P + N }, (_, i) => (
+              <i key={i} style={{ background: i < cached ? cc.c2 : "transparent", borderColor: i < cached ? cc.c2 : pal.rule }} />
+            ))}
+          </span>
+          <span className="v">
+            {cached} tokens · {kb >= 1000 ? `${(kb / 1000).toFixed(2)} MB` : `${Math.round(kb)} KB`}
+          </span>
+        </div>
+      )}
+      <div className="lr-stats">
+        <Stat k="this pass computed" v={computed(last)} unit={computed(last) === 1 ? "token" : "tokens"} accent />
+        <Stat k="total so far" v={total} unit={cache ? `(no cache: ${naiveTotal})` : "tokens"} />
+        <Stat k={cache ? "each token adds" : "growth"} v={cache ? "73.7" : "n²"} unit={cache ? "KB to the cache" : "work for n tokens"} />
       </div>
     </Fig>
   );

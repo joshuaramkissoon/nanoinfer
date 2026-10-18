@@ -306,6 +306,11 @@ export default function Attention() {
         In the real model the vectors are learned, not hand-made, and there isn't one attention but 144 of them running
         side by side, each free to learn its own habit.
       </p>
+      <p>
+        Now look at what “it” needed from the words before it: only their keys and values. Those don't change when a new
+        word arrives, so there's no reason to compute them twice. Keeping them is the <b>KV cache</b>: per-request state that
+        grows by one entry per token, and the first big speed-up in part three (chapter 12).
+      </p>
       <Deeper title="See GPT-2's real attention heads">
         <RealAttention />
       </Deeper>
