@@ -335,51 +335,77 @@ chart in this post is the real engine, running in your browser.
   suddenly visible.
 - **Line:** "The arithmetic was never the problem. Fetching the same number 64 times was."
 
-### Browser (wasm simd128, 1 thread, Chrome on the M4)
+### Browser (wasm in a tab, Chrome and V8 on the M4)
 
-Same Rust, compiled to `wasm32-unknown-unknown` with `+simd128`, running in a Web Worker on the demo page (`web/`).
-Measured with the page's Ladder benchmark: 64-token prompt (same text as `nanoinfer bench`), greedy, median of 8 decode
-steps, `performance.now()` at 5 µs resolution (the page is cross-origin isolated). Engine wasm is 270 KB (100 KB gzipped).
+Same Rust, compiled to `wasm32-unknown-unknown`, running in a Web Worker on the demo page (`web/`). Three builds of
+`crates/wasm`, picked at runtime by `WebAssembly.validate` on the real binaries: **simd128** (every browser with wasm
+SIMD), **relaxed** (+ relaxed-SIMD, Chrome 114+ / Firefox 145+), **threads** (+ atomics and a shared heap, needs
+cross-origin isolation, built with nightly). Measured with the page's Ladder benchmark or the same loop in Node
+(`web/scripts/record.mjs`, same wasm, same V8): 64-token prompt, greedy, median of the decode steps.
 
-| stage | browser decode tok/s | native decode | browser prefill tok/s (P=64) | native prefill |
+| stage | where | decode tok/s | prefill tok/s (P=64) | native decode / prefill |
 |---|---|---|---|---|
-| naive | 0.29 | 0.37 | n/a | 26 |
-| kv-cache | 13.8–14.0 | 18.9 | 20 | 27 |
-| unrolled | 83–101 | 100.5 | 171 | 185 |
-| neon (runs `unrolled` in wasm) | 85 | 100.3 | n/a | 183 |
-| tiled (scalar tiles in wasm) | 93 | 101.1 | 175 | 469 |
+| naive | core | 0.3 | 19 | 0.37 / 26 |
+| kv-cache | core | 13.9 | 20 | 19.0 / 27 |
+| unrolled | core | 96–101 | 169 | 100.5 / 185 |
+| neon (runs unrolled) | core | 97 | 171 | 100.3 / 183 |
+| tiled (scalar tile) | core | 96 | 164 | 101.1 / 469 |
+| wasm-simd v1 (4 rows per pass) | browser | 72 | 259 | n/a |
+| **wasm-simd** (1 row per pass) | browser | 97–101 | 255–260 | n/a |
+| **wasm-fma** (relaxed-SIMD FMA) | browser | 98–101 | **354–370** | n/a |
+| **wasm-threads** (10 workers) | browser | 87–89 | **809–818** | (threads: 118 / 1021) |
+| wasm-threads (4 workers) | browser | 91 | 661 | |
+| q4 (core, scalar dequant) | core | 106–125* | 150–198* | n/a yet |
+| q8 (core, scalar dequant) | core | 36–39* | 168–199* | |
+| f16 (core, scalar convert) | core | 12–14* | 125–158* | |
 
-Browser ranges are two sessions. The low end was measured while the native hillclimb was benchmarking on the same Mac,
-so treat the spread as contention.
+V8 numbers from Node on a lightly loaded machine; the threads and quantised rows (*) are Chrome while the native
+hillclimb agents had the machine at load average ~25, so treat them as lower bounds and their ratios as the signal.
 
-- **The wasm build gets most of the native speed.** Decode lands at 73–100% of native: `unrolled` reached 101 tok/s
-  in a quiet run, level with native. The 16-accumulator kernel vectorises to simd128 just as it does to NEON, so the
-  hillclimb's biggest step so far carries straight into the browser (6–7× over kv-cache in both).
-- **Aha: tiling needs registers.** `tiled` prefill is 2.5× faster natively (469 vs 185) but flat in wasm (175 vs 171).
-  Without NEON the 4×4 tile falls back to scalar code, and the reuse it buys is eaten by the loss of SIMD. Not every
-  rung transfers to every platform, and the Ladder shows which ones do.
-- **The roofs in a tab.** Streaming read from one wasm thread: 48–62 GB/s (the page takes the best of two probes; the
-  first probe right after the 1 GB weight load reads ~35 GB/s). simd128 multiply-add peak: 15–19 GFLOP/s (no FMA in
-  baseline wasm). So the browser's f32 speed of light is ~100–120 tok/s, and `unrolled` reaches ~75–85% of it.
-- **Aha: in the browser, decode is compute-bound.** Without FMA a single wasm core tops out near 19 GFLOP/s, which puts
-  the ridge at ~0.35 FLOP/byte, *below* decode's 0.5. On the roofline the `unrolled` matmul dots sit on the flat roof,
-  not the slanted one. Natively the ridge is far to the right and decode is memory-bound. The next browser rung is
-  relaxed-SIMD FMA (`f32x4_relaxed_madd`), which should double the roof. That's a nice "same code, different
-  bottleneck" moment for the post.
-- **Aha: the long pole moves.** Under `unrolled`, matmuls each move ~47 GB/s, and `gelu` (a scalar `tanh` per element)
-  has grown from noise to 4% of decode time. The LM head stays ~28–30% of time and 31% of bytes on every stage.
-- **The KV race, live.** naive vs kv-cache under a fair scheduler (whichever lane has used less engine time goes
-  next): after ~23 s of engine time naive had written 25 tokens and kv-cache 96 (in 7 s), a 12.6× gap that keeps widening.
-  Naive's per-token cost climbs linearly to 1.5 s at context 30. kv-cache stays flat at ~70 ms. Greedy outputs are
-  identical token for token.
-- **Main thread vs worker.** The same wasm on the main thread ran `unrolled` at 96 tok/s against ~84 in the worker, with
-  kv-cache equal (14.0 vs 13.8). Partly probe noise, and the native hillclimb was benchmarking on the same machine at the
-  time. Worth re-measuring on a quiet machine before quoting.
-- **Loading:** 548 MB f32 safetensors streamed into wasm memory, parsed and transposed by core in ~1.5 s from localhost.
-  Peak wasm heap ~1.05 GB. Production wants pre-packed f16/Q8 shards (`web/NEEDS_FROM_CORE.md`).
-- **Viz:** fig. 2 speed-of-light gauge, fig. 5 roofline (matmul dots on the compute roof), fig. 6 KV race, fig. 8 ladder
-  (native and browser bars side by side under their ceilings).
-- **Line:** "The same Rust, in a browser tab, matches the native decode speed, and hits a different wall."
+- **Explicit SIMD: prefill yes, decode no.** The simd128 4×4 register tile lifts prefill from 169 to 255–260 tok/s
+  (1.5×): each weight vector loaded feeds four rows. Natively `tiled` gets 2.5× from the same idea, but core's tile is
+  scalar in wasm (no NEON to lower to), which is why `tiled` was flat here. Decode is unchanged: it's the
+  autovectorised `unrolled` loop in different clothes.
+- **Failure, then fix: don't interleave weight rows.** The first decode kernel walked four weight rows at once to
+  reuse each load of `x`. It was 25–30% *slower* than `unrolled` (72 vs 100 tok/s). Four interleaved streams 3 KB apart
+  is the pattern stage 3's NEON null result already warned about; one row at a time with four accumulators matches
+  `unrolled` exactly.
+- **Relaxed-SIMD FMA: +40% prefill, 0% decode.** `f32x4_relaxed_madd` lowers to `fmla` on arm64. Prefill goes
+  255 → 370 tok/s; decode doesn't move. That is the roofline talking: decode is memory-bound, prefill compute-bound.
+- **Correction: in the browser, decode is memory-bound after all.** Round 1 reported a 15–19 GFLOP/s compute roof
+  and concluded decode was compute-bound in a tab. The probe was wrong twice: its first call ran in V8's baseline
+  compiler (Liftoff, before tier-up to TurboFan), and a `black_box(&acc)` per iteration forced the accumulators
+  through memory. Warmed up and without the spill, one core does **52 GFLOP/s** with simd128 mul+add and **~96
+  GFLOP/s** with relaxed FMA. Ridge points: 0.9 and 1.6 FLOP/byte, both right of decode's 0.5. Decode at ~100 tok/s
+  moves ~50 GB/s against a measured ~57–64 GB/s single-thread stream: 80–85% of this tab's speed of light.
+- **Threads: 4.8× prefill, nothing for decode.** `wasm-threads` splits wasm-fma's matmuls over a wasm-bindgen-rayon
+  pool of Web Workers sharing the heap. Prefill: 818 tok/s, 2.2× wasm-fma and 4.8× `unrolled`, near native rayon
+  `threads` (1021). Decode: 87–91, no gain at 4 or 10 workers. Each token is 49 matmuls of ~0.2 ms; a rayon
+  fork/join through `Atomics.wait` wake-ups costs a visible fraction of that, and one wasm thread already pulls most
+  of the bandwidth the worker pool can get. Same lesson as native stage 5/6 (overhead dominates small matmuls), harsher.
+- **Core's threaded stages can't thread in wasm.** Stage 6+ start OS threads (`std::thread::spawn`), which
+  `wasm32-unknown-unknown` doesn't have, so the wasm builds never enable core's `threads` feature. Those stages run
+  single-threaded and the page labels them "wasm: 1 thread"; the browser gets its own threaded rung instead.
+- **Quantised stages, unexpected order.** In wasm, q4 (106–125 tok/s) beats every f32 rung even with scalar
+  dequant, q8 is slow (36) and f16 is slowest (12): f16→f32 is a bit-twiddling scalar conversion per weight (native
+  uses NEON `fcvt`), while q4's nibble unpack is cheap integer work on a third of the bytes. Natively all three
+  should be ordered by bytes; in a tab the decode cost of the format matters as much as its size. (q4 also changes
+  the greedy output: "to read the right, the right, ...". Fewer bytes, worse model.)
+- **f16 download.** The page now fetches a pre-converted f16 safetensors (`web/scripts/to-f16.mjs`): **274 MB instead
+  of 548**, widened to f32 inside wasm while it streams (`Bytes::from_f16`), so the heap peak is unchanged (~1.05 GB)
+  and every kernel still sees f32. Cost: max |Δlogit| 0.03–0.05 against the f32 checkpoint; greedy output identical
+  for 32/32 tokens on three prompts. Load from localhost: 1.6 s.
+- **The roofs in a tab:** stream read 50–64 GB/s single thread (noisy, contention-sensitive); compute 52 (mul+add) /
+  96 (FMA) GFLOP/s after warm-up. f32 speed of light ≈ 100–125 tok/s.
+- **The KV race, live** (unchanged from round 1): naive vs kv-cache under a fair scheduler; naive's per-token cost
+  climbs linearly, kv-cache stays flat at ~70 ms; greedy outputs identical.
+- **Loading:** f16 274 MB (or f32 548 MB with `?weights=f32`) streamed into wasm memory, parsed and transposed by core
+  in ~1.5 s from localhost, cached in OPFS. Engine wasm 400–510 KB per build (140–175 KB gzipped).
+- **Viz:** fig. 2 inside one token (scroll-driven, real per-op timings, residual stream, re-sampleable logits), fig. 3
+  logit lens, fig. 7 roofline (decode matmuls now on the slanted roof), fig. 10 every stage racing, fig. 11 ladder
+  (decode/prefill toggle, per-build browser bars, recorded bars dashed).
+- **Line:** "The same Rust, in a browser tab, matches the native decode speed. Then FMA and threads make prefill 5×
+  faster and decode not at all, because decode was never waiting on the arithmetic."
 
 ### Stage 5: threads (rayon)
 

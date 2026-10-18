@@ -1227,3 +1227,97 @@ GELU 1.9% (was 12%).
 - The lesson stays the same at every level: whatever you didn't optimise
   becomes the bottleneck. At stage 1 GELU was 0.1% of decode, at stage 4 it was
   12% of prefill, now it's 1.9%.
+
+## Browser (WASM)
+
+Everything here runs `crates/wasm` (a facade over core) in a Web Worker on the demo page, or the same wasm in Node
+(V8) via `web/scripts/record.mjs`. Ladder shape: 64-token prompt, greedy, median of the decode steps; prefill = 64
+tokens / prompt forward time. Machine note: most Chrome runs below happened while the native agents were
+benchmarking (load average 20–26 on 10 cores), so treat absolute numbers as lower bounds; the V8/Node numbers were
+taken when it was quieter.
+
+### Browser stage 0 (round 1 recap): simd128, one thread
+
+`unrolled` ≈ native decode (83–101 vs 100.5 tok/s); `tiled` prefill flat (175 vs native 469) because core's 4×4 tile
+has no NEON to lower to and becomes scalar.
+
+### Probe fix: the compute roof was wrong
+
+**Symptom.** Decode at ~100 tok/s does ~25 GFLOP/s, *above* the 15–23 GFLOP/s "peak" the page measured.
+**Cause.** (1) The probe's first call runs in Liftoff, V8's baseline compiler; TurboFan tier-up happens during or
+after it. (2) `black_box(&a)` inside the loop forced the 8 accumulators to memory every iteration.
+**Fix.** 12 register chains, `black_box` only on the constants, one warm-up call before measuring.
+**Result.** simd128 mul+add: 22 → **52 GFLOP/s**; relaxed FMA (new): 34 → **~96 GFLOP/s** (first call vs warmed).
+Round 1's "decode is compute-bound in the browser" is retracted: ridge 0.9 (mul+add) / 1.6 (FMA) FLOP/B, decode is
+0.5, so it's memory-bound, at ~80–85% of a ~57–64 GB/s single-thread stream.
+
+### Browser stage 1: wasm-simd (explicit simd128, browser-only rung)
+
+**Hypothesis.** A 4×4 register tile with real simd128 (16 vector accumulators, 8 loads feed 16 mul+adds) gets
+prefill the reuse core's scalar tile can't in wasm. For decode, interleaving four weight rows should reuse each load
+of `x` four times.
+**Change.** `crates/wasm/src/simd.rs`, `Simd<Plain>` kernel set plugged into core's `kv_cache::forward` (core's
+`Kernels` trait; no core change).
+**Result (V8).**
+
+| kernel | decode tok/s | prefill tok/s |
+|---|---|---|
+| unrolled (reference point) | 100.6 | 169 |
+| wasm-simd v1: decode walks 4 rows at once | 71.8 | 259 |
+| wasm-simd v2: decode walks 1 row, 4 accumulators | 97–101 | 255–260 |
+
+**Failure.** v1 decode was 28% slower. Four interleaved weight streams 3 KB apart defeat the prefetcher (same lesson
+as native stage 3). v2 keeps one sequential stream and matches `unrolled`, which LLVM already vectorises to the same
+instructions.
+**Prefill:** +53% from the tile.
+
+### Browser stage 2: wasm-fma (relaxed-SIMD)
+
+**Change.** Same loops with `f32x4_relaxed_madd` (one fused instruction, `fmla` on arm64). Separate build
+(`+relaxed-simd`), since a module with relaxed opcodes doesn't validate without support; the worker validates each
+binary and picks the best.
+**Result (V8).** decode 98–101 (no change: memory-bound), **prefill 354–370** (+40% over wasm-simd, 2.2× unrolled).
+Chrome threads build under load: 95 / 381.
+
+### Browser stage 3: wasm-threads (wasm-bindgen-rayon)
+
+**Change.** Nightly build with `+atomics,+bulk-memory,+mutable-globals` and `-Z build-std`, shared memory
+(`--shared-memory --import-memory --max-memory=4GiB` and the TLS exports had to be passed explicitly: without them
+the module exported a non-shared memory and `initThreadPool` failed with "Memory could not be cloned").
+`Par<Relaxed>` splits each matmul's output columns over the rayon pool, 4 chunks per worker, 16-column multiples.
+**First attempt (failed): enable core's `threads` feature.** Core's stage 6+ (`spin-pool`, `fast-ops`, quantised)
+start OS threads with `std::thread::spawn`, which panics on wasm32. So the wasm builds never enable it; core's
+threaded stages run single-threaded and the browser gets its own threaded rung.
+**Bug on the way.** React StrictMode ran the boot effect twice in dev, so `initThreadPool` ran twice and rayon's
+`build_global()` threw (`unwrap_throw`). Boot is now once per page.
+**Result (Chrome, load ~25).**
+
+| workers | decode tok/s | prefill tok/s |
+|---|---|---|
+| 1 (wasm-fma) | 95 | 381 |
+| 4 | 91 | 661 |
+| 10 | 87–89 | 809–818 |
+
+Prefill 2.1× wasm-fma, 4.8× unrolled, near native rayon (1021). Decode: no gain. 49 matmuls per token at ~0.2 ms
+each; fork/join via `Atomics.wait` wake-ups eats the split, and one wasm thread already gets most of the bandwidth.
+
+### f16 download (no kernel change)
+
+`web/scripts/to-f16.mjs` writes `model-f16.safetensors` (274 MB, from 548). `Bytes::from_f16` rewrites the header to
+F32 and widens each half as it streams in, so core's loader is untouched and the heap peak is unchanged. Max
+|Δlogit| vs the f32 file 0.03–0.05; greedy identical 32/32 tokens on 3 prompts. The page downloads f16 by default
+(`?weights=f32` for the original).
+
+### Core's quantised stages in wasm (as they landed)
+
+Chrome, simd128 build, under load: q4 106 / 150, q8 36 / 168, f16 12.4 / 125 (decode / prefill). In wasm the
+format's decode cost dominates: f16→f32 is scalar bit-twiddling per weight (no NEON `fcvt`), q4's nibble unpack is
+cheap integer work on 0.56 bytes per weight. q4 is the fastest decode rung in the browser, and it also changes the
+greedy text ("to read the right, the right, ...").
+
+### Recorded fallback
+
+`web/scripts/record.mjs` (Node, relaxed build) records the hero run, attention maps (u8 log-quantised), logit lens,
+the walkthrough's residual stream and logits, per-stage Ladder numbers and race lanes: ~240 KB total in
+`web/public/recorded/`. Op traces are packed as interned op defs + per-forward gaps/durations in 0.1 µs, with shape
+overrides only where an op differs from its decode shape (215 KB → 116 KB for the run).

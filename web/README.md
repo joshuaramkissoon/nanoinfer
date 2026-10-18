@@ -8,17 +8,26 @@ bytes, KV length, next-token probabilities and attention maps. None of it is a m
 
 ```sh
 scripts/fetch_weights.sh          # once: HF gpt2 -> weights/gpt2 (gitignored)
+node web/scripts/to-f16.mjs       # once: weights/gpt2/model-f16.safetensors (274 MB, what the page downloads)
 cd web
 npm install
-npm run wasm                      # builds crates/wasm -> web/src/engine/pkg (needs wasm-bindgen-cli 0.2.129)
+npm run wasm                      # builds crates/wasm three ways -> src/engine/pkg, pkg-relaxed, pkg-threads
 npm run dev                       # http://localhost:5199
+node scripts/record.mjs           # optional: re-record public/recorded/ (the no-download fallback)
 ```
 
-Click **Load GPT-2**. In local dev the 548 MB f32 checkpoint is served straight from `../weights/gpt2` by a small Vite
-middleware, which also serves `../bench/results.jsonl` (the native hillclimb results) at `/bench/results.jsonl`.
+The page opens on **recorded** data (real engine output from `public/recorded/`, ~240 KB), so every figure draws
+immediately. **Run live** downloads GPT-2 once (f16, 274 MB; `?weights=f32` for the 548 MB original), caches it in
+OPFS, and from then on every figure is driven by the engine in your tab. In local dev the weights are served from
+`../weights/gpt2` by a small Vite middleware, which also serves `../bench/results.jsonl` at `/bench/results.jsonl`
+(production falls back to the snapshot in `public/recorded/native.jsonl`).
 
 Toolchain: Rust with the `wasm32-unknown-unknown` target, and `cargo install wasm-bindgen-cli --version 0.2.129` (the
-version must match the `wasm-bindgen` pin in `crates/wasm/Cargo.toml`). `wasm-opt` is used if it's on PATH.
+version must match the `wasm-bindgen` pin in `crates/wasm/Cargo.toml`). The threads build needs
+`rustup toolchain install nightly --component rust-src` and is skipped without it. `wasm-opt` is used if on PATH.
+
+URL knobs: `?build=simd128|relaxed|threads` forces a build (default: the best this browser validates), `?threads=N`
+sizes the threads build's worker pool (default: all cores), `?weights=f32`.
 
 Env overrides: `VITE_WEIGHTS_BASE` (where the page fetches `model.safetensors`, `vocab.json` and `merges.txt`),
 `VITE_BENCH_URL` (results.jsonl), and `NANOINFER_WEIGHTS` (the directory the dev server serves).
@@ -27,11 +36,24 @@ Env overrides: `VITE_WEIGHTS_BASE` (where the page fetches `model.safetensors`, 
 
 ```
 crates/wasm  (standalone crate, own [workspace]; path dep on ../core)
-  Engine      weights + tokenizer + N sessions ("slots"), each on any Stage
+  Engine      weights + tokenizer + N sessions ("slots"), each on any stage
   forward()   one real forward pass -> packed Float64Array trace
-  stages()    Stage::ALL from core (new stages appear automatically)
+  stages()    Stage::ALL from core (new stages appear automatically), each with
+              a wasmNote saying what it really runs here, + browser-only rungs
+  simd.rs     browser rungs: wasm-simd (simd128, 4x4 tile), wasm-fma
+              (relaxed-SIMD FMA), wasm-threads (wasm-bindgen-rayon), all on
+              core's kv_cache::forward via the Kernels trait
   attention_maps()  analysis pass: all 144 heads' T×T matrices, via core's blocks
+  logit_lens()      ln_f + LM head on the residual stream after every layer
+  residual_stream() the token's 768-d vector after embed and each block
+  logits()          a slot's full last logits (re-sampling in JS)
+  Bytes::from_f16   streams an f16 safetensors in, widening to f32 as it goes
   bench_bandwidth / bench_peak_gflops   the two roofs, measured in-tab
+  build.sh    pkg (simd128), pkg-relaxed, pkg-threads (nightly, shared memory)
+
+web/scripts
+  record.mjs  runs the relaxed wasm in Node, writes public/recorded/*
+  to-f16.mjs  model.safetensors -> model-f16.safetensors
 
 web/src/engine
   worker.ts   owns the wasm. Streams the checkpoint into wasm memory chunk by
@@ -40,9 +62,17 @@ web/src/engine
               that every panel reads, plus the vocab for decoding tokens
   generate.ts the generation loop (main thread: one RPC per token, so it's
               trivially cancellable) and the fixed-shape Ladder benchmark
+web/src/lib/recorded.ts  loads + unpacks the recording into the same types
+                         the live engine produces (Run, ForwardTrace, ...)
 web/src/panels   one file per figure; registry.tsx is the page order
-web/src/ui       Figure frame, theme (reads jkmr's --m-* CSS variables)
+web/src/ui       Figure frame (per-figure provenance + "run live" button), theme
 ```
+
+- **Recorded, then live.** At boot the store is filled from the recording (`source: "recorded"`); the run, config and
+  roofs are the recorded ones and token text decodes from a vocab subset. Each figure reports what it's drawing via
+  `useFigureSource()`, and its frame shows "recorded on an M4 · run live in your tab" or "live · this tab · build".
+  Once the engine loads, the hero re-runs and every shared figure switches; figures with their own data (lens,
+  attention, walkthrough, races) recompute when they're on screen.
 
 - **One engine, one run.** The hero (fig. 1) writes the shared `run` (tokens + every forward's trace). The time strip,
   byte budget, roofline and attention panels all redraw from that same run. Panels that need the engine to themselves
@@ -81,8 +111,9 @@ The panels only depend on React, `src/engine/*`, `src/ui/*` and `src/lib/*`, plu
 
 ## Weights: now and later
 
-- **Now (local dev):** the raw HF f32 `model.safetensors` (548 MB). It's streamed into wasm memory, parsed and
-  transposed by core (`Model::from_safetensors`). The wasm heap peaks at about 1.05 GB during load. Files are cached in
+- **Now (local dev):** `model-f16.safetensors` (274 MB, `scripts/to-f16.mjs`), widened to f32 inside wasm while it
+  streams (max |Δlogit| ~0.04 vs f32, greedy identical), or the raw f32 file with `?weights=f32`. Either way core
+  parses and transposes f32 (`Model::from_safetensors`). The wasm heap peaks at about 1.05 GB during load. Files are cached in
   OPFS and written while they download. A ".ok" marker means a file was written completely. On the next visit the page
   loads from the cache automatically (it never auto-downloads).
 - **Later (production):** pre-transposed f16 or Q8_0 shards of 16–32 MB with a `manifest.json` (sha256, offsets), hosted
@@ -91,11 +122,15 @@ The panels only depend on React, `src/engine/*`, `src/ui/*` and `src/lib/*`, plu
 
 ## Known issues
 
-- Single-threaded, simd128 only. No relaxed-SIMD (FMA) build, threads or WebGPU yet.
+- No WebGPU yet. Core's own multithreaded stages (threads, spin-pool, fast-ops, quantised) run single-threaded in
+  wasm (they start OS threads); the browser's threaded rung is `wasm-threads`.
+- `wasm-threads` speeds up prefill ~2× over wasm-fma but not decode (fork/join cost per small matmul).
+- The live stage race time-slices one engine thread, so its clock runs slower than real time until the slow lanes
+  finish (the page says so); the recorded race plays at true speed.
+- The recording was made on a busy machine (native agents benchmarking); re-run `node scripts/record.mjs` on a quiet
+  one before publishing.
 - Some browsers' storage quota is too small to cache 548 MB (incognito-like profiles cap OPFS at about 64 MB). The page
   still works there; it just downloads again next time.
 - The first bandwidth probe right after loading reads about 40% low, so the page takes the best of two probes. It's still
   noisy (48–62 GB/s on an M4) and can move when other processes compete for memory bandwidth.
-- No recorded-trace fallback yet: figures show a placeholder until the engine loads. Native `trace_out` JSONL from the
-  CLI could be replayed here.
-- `neon` doesn't exist on wasm: core quietly falls back to the `unrolled` kernels, and the page marks that stage with *.
+- `neon` and `tiled` have no NEON on wasm; the engine reports that per stage (`wasmNote`) and the page marks them *.

@@ -3,10 +3,15 @@
 Written by the web/wasm side instead of editing core. Nothing here blocks the page today; each item lists the
 workaround in use.
 
-1. **Stage metadata: description and platform fallback.** `neon` silently runs the `unrolled` kernels on wasm32. The page
-   hardcodes this in `web/src/lib/stages.ts`. Something like `Stage::description() -> &'static str` and
-   `Stage::kernels_on_this_target() -> &'static str` (the kernel set actually compiled in) would let the UI label any
-   fallback automatically.
+1. **Stage metadata: description and platform fallback.** `neon` silently runs the `unrolled` kernels on wasm32, and
+   the threaded stages run on one thread. `crates/wasm` now derives a `wasmNote` per stage (`wasm_note()`, from
+   `Stage::multithreaded()` / `weight_format()` plus two hard-coded names). A core `Stage::description()` and
+   `Stage::kernels_on_this_target()` would make that automatic for future stages.
+
+1b. **Threads on wasm.** Stage 6+ start OS threads via `crate::pool` (`std::thread::spawn` panics on
+   wasm32-unknown-unknown), so wasm never enables core's `threads` feature. If the pool had a rayon (or injectable
+   spawner) backend, `crates/wasm` could run core's own threaded stages on its wasm-bindgen-rayon pool instead of the
+   separate `wasm-threads` rung.
 
 2. **An attention capture for every head.** `Trace::wants_attention` returns a single `(layer, head)`. The attention
    small multiples need all 144 heads' full causal matrices, so `crates/wasm::Engine::attention_maps` re-implements the
@@ -22,6 +27,9 @@ workaround in use.
 4. **Per-stage bytes per token.** `Stage::weight_format().decode_bytes(cfg)` already exists and the page uses
    `bits_per_weight` for its ceilings. Once quantised stages arrive, please keep `Op::bytes` for matmuls honest for the
    packed format (it currently assumes 4 bytes per weight in `Op::matmul`). The byte treemap and roofline read it directly.
+
+4b. **A logit-lens / residual hook.** `Engine::logit_lens` and `residual_stream` re-run the forward from `blocks`
+   (same as attention maps). A `Trace::residual(layer, rows)` callback would let any stage report it.
 
 5. **(Nice to have) a reusable `Sampler::sample_with(logits, temperature, top_k)`** that leaves the RNG alone, so the hero
    can re-sample cached logits for different temperatures without reseeding. The workaround mutates the public
