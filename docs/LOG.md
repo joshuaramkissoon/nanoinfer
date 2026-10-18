@@ -1907,3 +1907,41 @@ activations in prefill add very little on top of the rescored head's tail error.
 **vs Apple Accelerate:** prefill **2415 vs 1480 tok/s at P=64 (1.6×)** and 2143 vs
 891 at P=512 (2.4×). Accelerate's AMX/SME does f32 GEMM; we do int8 on NEON
 and every other op in parallel.
+
+---
+
+## CPU climb: where it ended (one interleaved sweep, same session)
+
+Every stage benchmarked back to back (6 threads for the multithreaded ones,
+prompt 64, 48 decode tokens, 2 interleaved rounds, per-token decode median;
+membw at the time ≈ 51 / 82 / 86 GB/s at 1 / 4 / 10 threads). Ceiling = 120 GB/s
+spec ÷ the stage's bytes per token.
+
+| stage | decode tok/s | prefill tok/s | bytes/token | spec ceiling | % |
+|---|---|---|---|---|---|
+| 1 kv-cache | 17.3 | 24.5 | 495 MB | 243 | 7% |
+| 2 unrolled | 101.6 | 186 | 495 MB | 243 | 42% |
+| 4 tiled | 95.5 | 438 | 495 MB | 243 | 39% |
+| 5 threads (rayon) | 121.8 | 914 | 495 MB | 243 | 50% |
+| 6 spin-pool | 138.6 | 914 | 495 MB | 243 | 57% |
+| 7 fast-ops | 146.2 | 1456 | 495 MB | 243 | 60% |
+| 8 f16 | 248.7 | 1408 | 247 MB | 485 | 51% |
+| 9 q8 (f16 head) | 315.1 | 1386 | 173 MB | 693 | 45% |
+| 10 q4 (f16 head) | 355.9 | 1417 | 131 MB | 918 | 39% |
+| 11 q8-fast / q4-fast | 355.7 / 432.9 | 1443 / 1407 | | | 51% / 47% |
+| 12 q8-rescore / q4-rescore | 405.0 / 495.2 | 1441 / 1387 | 139 / 97 MB | 860 / 1237 | 47% / 40% |
+| 13 q8-attn | 411.4 | 1464 | 139 MB | 860 | 48% |
+| 14 q8-kv16 / q4-kv16 | 425.5 / **497.4** | 1457 / 1389 | | | 49% / 40% |
+| 15 q8-prefill | 405.8 | 2045 (6t); **2415 at 10t** | 139 MB | 860 | 47% |
+| Apple Accelerate (ref.) | 111 | 1480 | 495 MB | 243 | 46% |
+
+Best decode: **q4-kv16 ~497 tok/s** (29× stage 1; quality +8% ppl). Best decode
+at Q8 quality (+0.2% ppl, 98% top-1): **q8-kv16 ~425 tok/s** (25×). Best
+prefill: **q8-prefill 2415 tok/s at 10 threads** (99× stage 1, 1.6× Accelerate).
+At ~900 tokens of context the f16 KV cache matters most (stage 14: +60%).
+
+Achieved bandwidth tops out around 50–60 GB/s for the quantised stages, against
+~82–90 GB/s that 4–10 threads can read. The remaining gap is per-token fixed
+cost (~49 parallel sections + attention + LM-head bookkeeping at ~2.4 ms/token),
+E-core stragglers (best decode thread count is 4–6, not 10), and a measured
+decline in single-core bandwidth when four streams interleave.
