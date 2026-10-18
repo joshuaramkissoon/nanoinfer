@@ -6,6 +6,7 @@ import { LiveButton, Tip, useFigureSource, useWidth } from "../ui/Figure";
 import { usePalette } from "../ui/theme";
 import { log, logTicks, pct, sig } from "../lib/fmt";
 import { M4_GBS, latestByStage, useNative } from "../lib/native";
+import { decodeBytes, gpuBandwidthOf } from "../lib/roofs";
 import { fallback } from "./RunIt";
 
 const BUILD_LABEL: Record<string, string> = { simd128: "simd128", relaxed: "relaxed-SIMD", threads: "threads" };
@@ -23,6 +24,7 @@ export default function Ladder() {
   const bench = useEngine((s) => s.bench);
   const cfg = useEngine((s) => s.config);
   const bw = useEngine((s) => s.bandwidthGBs);
+  const gpuBwLive = useEngine((s) => s.gpuBandwidthGBs);
   const build = useEngine((s) => s.build);
   const rec = useEngine((s) => s.recorded);
   const live = status === "ready";
@@ -63,9 +65,19 @@ export default function Ladder() {
     return b ? (metric === "decode" ? b.tokS : b.prefillTokS) : 0;
   };
 
+  // M4 speed limit for a stage in its own weight and LM-head formats
+  const fmtCeil = (st: (typeof stages)[number]) =>
+    cfg ? (M4_GBS * 1e9) / decodeBytes(cfg, st, 0).total : (nativeCeil * 32) / st.bitsPerWeight;
   const rungCeil = (n: string) => {
     const st = stages.find((s) => s.name === n);
-    return metric === "decode" && st && st.bitsPerWeight && st.bitsPerWeight < 32 ? (nativeCeil * 32) / st.bitsPerWeight : 0;
+    return metric === "decode" && st && st.bitsPerWeight && st.bitsPerWeight < 32 ? fmtCeil(st) : 0;
+  };
+  // this tab's limit for one browser bar: its backend's bandwidth over its own bytes per token
+  const gpuBw = gpuBwLive ?? gpuBandwidthOf(rec?.webgpu?.probe);
+  const tabCeil = (st: (typeof stages)[number] | undefined, promptLen: number) => {
+    const b = st?.backend === "webgpu" ? gpuBw : bw;
+    if (!b || !cfg || !st) return null;
+    return (b * 1e9) / decodeBytes(cfg, st, promptLen).total;
   };
   const values = [...names.flatMap((n) => [nv(n), mv(n), rv(n), rungCeil(n)]), ...(metric === "decode" ? [nativeCeil, browserCeil ?? 1] : [])].filter((v) => v > 0);
   const Y0 = Math.max(0.05, Math.min(...values, 1) / 2);
@@ -175,7 +187,11 @@ export default function Ladder() {
                   </g>
                 )}
                 {bVal > 0 && (
-                  <g onPointerEnter={() => setHover({ x: x + bar * 0.7, y: y(bVal), text: recBar ? `recorded browser ${n}: ${sig(bVal, 3)} tok/s ${metric} (${st?.backend === "webgpu" ? "WebGPU in Chrome" : `${rec?.meta.build} build, V8`} on the M4)` : `your browser ${n}: ${sig(bVal, 3)} tok/s ${metric} (${st?.backend === "webgpu" ? `WebGPU${mine(n)?.dispatches ? `, ${sig(mine(n)!.dispatches!, 3)} dispatches and ${sig(mine(n)!.submits!, 2)} submits per token` : ""}` : `${BUILD_LABEL[shownBuild ?? "simd128"]} build`})${metric === "decode" && browserCeil ? ` · ${pct(bVal / browserCeil, 1)} of this tab's ceiling` : ""}` })}>
+                  <g onPointerEnter={() => setHover({ x: x + bar * 0.7, y: y(bVal), text: recBar ? `recorded browser ${n}: ${sig(bVal, 3)} tok/s ${metric} (${st?.backend === "webgpu" ? "WebGPU in Chrome" : `${rec?.meta.build} build, V8`} on the M4)` : `your browser ${n}: ${sig(bVal, 3)} tok/s ${metric} (${st?.backend === "webgpu" ? `WebGPU${mine(n)?.dispatches ? `, ${sig(mine(n)!.dispatches!, 3)} dispatches and ${sig(mine(n)!.submits!, 2)} submits per token` : ""}` : `${BUILD_LABEL[shownBuild ?? "simd128"]} build`})${(() => {
+                    const c = metric === "decode" ? tabCeil(st, mine(n)?.promptLen ?? 64) : null;
+                    const lim = `this tab's ${st?.backend === "webgpu" ? "GPU" : "CPU"} limit`;
+                    return !c ? "" : bVal <= c ? ` · ${pct(bVal / c, 1)} of ${lim}` : ` · at ${lim} (the bandwidth probe read low)`;
+                  })()}` })}>
                     <rect x={x + bar * 0.2} width={bar} y={y(bVal)} height={H - m.b - y(bVal)}
                       fill={recBar ? "none" : pal.accent} stroke={pal.accent} strokeWidth={recBar ? 1.3 : 0} strokeDasharray={recBar ? "3 2" : undefined} />
                     {!tiny && <text x={x + bar * 0.7} y={y(bVal) - (small ? 14 : 5)} textAnchor="middle" style={{ fill: pal.accent, fontSize: small ? 8 : 10 }}>{sig(bVal, small ? 2 : 3)}</text>}
@@ -184,7 +200,7 @@ export default function Ladder() {
                 {(() => {
                   // per-rung ceiling when a stage reads fewer bytes per weight
                   if (metric !== "decode" || !st || !st.bitsPerWeight || st.bitsPerWeight >= 32) return null;
-                  const c = (nativeCeil * 32) / st.bitsPerWeight;
+                  const c = fmtCeil(st);
                   const key = sig(c, 3);
                   const last = ceilLabelled.get(key);
                   const label = last == null || i - last > 10;

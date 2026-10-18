@@ -119,6 +119,8 @@ export interface State {
   webgpuError: string | null;
   /** WebGPU dispatch / submit / round-trip probe, measured in this tab */
   gpuProbe: ProbeRow[] | null;
+  /** GPU read bandwidth from that probe, GB/s: the speed limit for WebGPU runs */
+  gpuBandwidthGBs: number | null;
 }
 
 const BENCH_KEY = "nanoinfer-browser-bench-v2";
@@ -155,6 +157,7 @@ let state: State = {
   webgpu: null,
   webgpuError: null,
   gpuProbe: null,
+  gpuBandwidthGBs: null,
 };
 const listeners = new Set<() => void>();
 
@@ -333,6 +336,25 @@ export async function measureRoofs() {
   await probe();
   await new Promise((res) => setTimeout(res, 1500));
   await probe();
+}
+
+/** Measure the GPU's read bandwidth once (the WebGPU probe), for judging
+ *  WebGPU runs against their own speed limit. Waits its turn on the engine. */
+let gpuRoofPending = false;
+export async function measureGpuRoof() {
+  if (gpuRoofPending || state.gpuBandwidthGBs != null || !state.webgpu || state.status !== "ready") return;
+  if (!claim("gpu-probe")) return;
+  gpuRoofPending = true;
+  try {
+    const rows = await r().call<ProbeRow[]>({ t: "gpuProbe", reps: 3 });
+    const best = rows.find((x) => x.unit === "GB/s" && /best/.test(x.label)) ?? rows.find((x) => x.unit === "GB/s");
+    setState({ gpuProbe: rows, gpuBandwidthGBs: best ? best.value : null });
+  } catch (e) {
+    console.warn("WebGPU bandwidth probe failed:", (e as Error).message);
+  } finally {
+    gpuRoofPending = false;
+    release("gpu-probe");
+  }
 }
 
 export const engine = {

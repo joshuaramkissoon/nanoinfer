@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
-import { decodes, useEngine, useRunSource } from "../engine/client";
+import { useEffect, useMemo, useState } from "react";
+import { decodes, measureGpuRoof, useEngine, useRunSource } from "../engine/client";
+import { useRoofs } from "../lib/roofs";
 import { NeedsEngine, Tip, useFigureSource, useWidth } from "../ui/Figure";
 import { KIND_LABEL, kindColor, usePalette } from "../ui/theme";
 import { aggregateByName, type OpAgg } from "../lib/agg";
@@ -11,8 +12,12 @@ const Y0 = 0.01, Y1 = 200; // GFLOP/s
 /** Roofline: every op as a dot at (arithmetic intensity, achieved GFLOP/s). */
 export default function Roofline() {
   const run = useEngine((s) => s.run);
-  const bw = useEngine((s) => s.bandwidthGBs);
-  const peak = useEngine((s) => s.peakGflops);
+  const roofs = useRoofs(run?.stage);
+  const gpu = roofs.backend === "gpu";
+  const bw = roofs.bw;
+  const peak = roofs.peak;
+  const busy = useEngine((s) => s.busy);
+  const status = useEngine((s) => s.status);
   const timer = useEngine((s) => s.timerResUs || 5);
   const src = useRunSource();
   useFigureSource(src);
@@ -27,15 +32,25 @@ export default function Roofline() {
   const decAgg = useMemo(() => aggregateByName(dec).rows, [dec]);
   const preAgg = useMemo(() => aggregateByName(pre).rows, [pre]);
 
-  if (!run || !dec.length || !bw || !peak)
+  // A live WebGPU run goes on the GPU's own memory roof: measure it once.
+  useEffect(() => {
+    if (gpu && src === "live" && run?.done && !busy && status === "ready") void measureGpuRoof();
+  }, [gpu, src, run?.done, busy, status]);
+
+  if (!run || !dec.length || !bw || (!gpu && !peak))
     return <NeedsEngine>Every op of a real forward pass, placed by how much math it does per byte it reads.</NeedsEngine>;
 
   const H = Math.min(420, Math.max(280, w * 0.55));
   const m = { l: 46, r: 14, t: 12, b: 34 };
   const x = log(X0, X1, m.l, w - m.r);
-  const y = log(Y0, Y1, H - m.b, m.t);
-  const ridge = peak / bw;
-  const roof = (i: number) => Math.min(peak, bw * i);
+  // GPU runs: no measured compute roof, so give the slanted roof room to climb
+  const YT = gpu ? 3000 : Y1;
+  const y = log(Y0, YT, H - m.b, m.t);
+  // The GPU has no measured compute roof here (the M4 GPU's f32 peak is far
+  // above this chart), so a WebGPU run gets the slanted memory roof only.
+  const top = peak ?? YT;
+  const ridge = top / bw;
+  const roof = (i: number) => Math.min(top, bw * i);
   const total = dec.reduce((a, f) => a + f.ms, 0);
   // ops shorter than ~3 timer ticks are too noisy to place honestly
   const minMs = (timer * 3) / 1000;
@@ -87,7 +102,9 @@ export default function Roofline() {
     <div>
       <div className="nv-controls" style={{ justifyContent: "space-between", marginBottom: "0.6rem" }}>
         <span className="nv-muted" style={{ fontSize: "0.75rem" }}>
-          dots = ops summed over all 12 layers and the last {dec.length} tokens · size = share of time
+          {gpu
+            ? `${run.stage} runs the whole token on the GPU, so it reports one op per token · last ${dec.length} tokens · roof = this ${roofs.bwFrom === "recorded" ? "recorded" : "tab's"} WebGPU bandwidth probe · no GPU compute roof is measured here (the M4 GPU's is above this chart)`
+            : `dots = ops summed over all 12 layers and the last ${dec.length} tokens · size = share of time · roofs = this ${roofs.bwFrom === "recorded" ? "recorded" : "tab's"} wasm CPU probes`}
         </span>
         {pre.length > 0 && (
           <label className="nv-field">
@@ -104,7 +121,7 @@ export default function Roofline() {
               <text x={x(t)} y={H - m.b + 14} textAnchor="middle">{sig(t, 1)}</text>
             </g>
           ))}
-          {logTicks(Y0, Y1).map((t) => (
+          {logTicks(Y0, YT).map((t) => (
             <g key={`y${t}`}>
               <line x1={m.l} x2={w - m.r} y1={y(t)} y2={y(t)} stroke={pal.rule} strokeDasharray="2 3" />
               <text x={m.l - 6} y={y(t)} textAnchor="end" dominantBaseline="middle">{sig(t, 1)}</text>
@@ -114,19 +131,27 @@ export default function Roofline() {
           <text transform={`translate(11 ${(H - m.b) / 2}) rotate(-90)`} textAnchor="middle">GFLOP/s →</text>
           {/* memory-bound region shading */}
           <path
-            d={`M${x(X0)},${y(roof(X0))} L${x(ridge)},${y(peak)} L${x(X1)},${y(peak)} L${x(X1)},${y(Y0)} L${x(X0)},${y(Y0)} Z`}
+            d={`M${x(X0)},${y(roof(X0))} L${x(ridge)},${y(top)} L${x(X1)},${y(top)} L${x(X1)},${y(Y0)} L${x(X0)},${y(Y0)} Z`}
             fill={pal.code}
             opacity={0.55}
           />
-          <path d={`M${x(X0)},${y(roof(X0))} L${x(ridge)},${y(peak)} L${x(X1)},${y(peak)}`} stroke={pal.fg} strokeWidth={1.8} fill="none" />
+          {gpu ? (
+            <path d={`M${x(X0)},${y(roof(X0))} L${x(ridge)},${y(top)}`} stroke={pal.fg} strokeWidth={1.8} fill="none" />
+          ) : (
+            <path d={`M${x(X0)},${y(roof(X0))} L${x(ridge)},${y(top)} L${x(X1)},${y(top)}`} stroke={pal.fg} strokeWidth={1.8} fill="none" />
+          )}
           <text x={x(X0 * 2.2)} y={y(roof(X0 * 2.2)) - 8} style={{ fill: pal.fg }} transform={`rotate(${-Math.atan2(y(roof(X0 * 2.2)) - y(roof(X0 * 22)), x(X0 * 22) - x(X0 * 2.2)) * 180 / Math.PI} ${x(X0 * 2.2)} ${y(roof(X0 * 2.2)) - 8})`}>
-            memory roof · {sig(bw, 3)} GB/s
+            {gpu ? "GPU" : "CPU"} memory roof · {sig(bw, 3)} GB/s
           </text>
-          <text x={w - m.r - 4} y={y(peak) - 6} textAnchor="end" style={{ fill: pal.fg }}>
-            compute roof · {sig(peak, 3)} GFLOP/s ({peakKind === "fma" ? "relaxed-SIMD FMA" : "simd128 mul+add"}, 1 core)
-          </text>
-          <line x1={x(ridge)} x2={x(ridge)} y1={y(peak)} y2={H - m.b} stroke={pal.muted} strokeDasharray="4 3" />
-          <text x={x(ridge) + 4} y={H - m.b - 6} style={{ fontSize: 9 }}>ridge {sig(ridge, 2)}</text>
+          {gpu ? null : (
+            <>
+              <text x={w - m.r - 4} y={y(top) - 6} textAnchor="end" style={{ fill: pal.fg }}>
+                CPU compute roof · {sig(top, 3)} GFLOP/s ({peakKind === "fma" ? "relaxed-SIMD FMA" : "simd128 mul+add"}, 1 core)
+              </text>
+              <line x1={x(ridge)} x2={x(ridge)} y1={y(top)} y2={H - m.b} stroke={pal.muted} strokeDasharray="4 3" />
+              <text x={x(ridge) + 4} y={H - m.b - 6} style={{ fontSize: 9 }}>ridge {sig(ridge, 2)}</text>
+            </>
+          )}
           {all.map((d) => {
             const r = 3 + Math.sqrt(d.a.ms / total) * 22;
             const c = kindColor(pal, d.a.kind);
