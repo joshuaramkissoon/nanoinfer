@@ -3,6 +3,7 @@ name = "nanoinfer-core"
 description = "A small, readable LLM inference engine (GPT-2). No filesystem, threads or clocks: runs on wasm32-unknown-unknown."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 
 [features]

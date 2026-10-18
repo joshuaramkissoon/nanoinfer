@@ -3,6 +3,7 @@ name = "nanoinfer-cli"
 description = "Command-line driver for nanoinfer: generate text and benchmark stages."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 
 [[bin]]

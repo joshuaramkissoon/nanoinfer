@@ -3,6 +3,7 @@ name = "nanoinfer-webgpu"
 description = "WebGPU backend for nanoinfer (wgpu + WGSL): the same kernels run natively (Metal) and in the browser."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
