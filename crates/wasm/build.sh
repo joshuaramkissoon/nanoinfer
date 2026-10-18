@@ -26,12 +26,12 @@ bindgen() { # <target-dir> <out-dir>
 }
 
 if [[ $ONLY == all || $ONLY == simd ]]; then
-  RUSTFLAGS="-C target-feature=+simd128" cargo build --release --target wasm32-unknown-unknown --target-dir target/simd
+  RUSTFLAGS="-C target-feature=+simd128" cargo build --release --target wasm32-unknown-unknown --target-dir target/simd --features webgpu
   bindgen target/simd $WEB/pkg
 fi
 
 if [[ $ONLY == all || $ONLY == relaxed ]]; then
-  RUSTFLAGS="-C target-feature=+simd128,+relaxed-simd" cargo build --release --target wasm32-unknown-unknown --target-dir target/relaxed
+  RUSTFLAGS="-C target-feature=+simd128,+relaxed-simd" cargo build --release --target wasm32-unknown-unknown --target-dir target/relaxed --features webgpu
   bindgen target/relaxed $WEB/pkg-relaxed
 fi
 
@@ -40,7 +40,7 @@ if [[ $ONLY == all || $ONLY == threads ]]; then
     # Shared memory needs an explicit maximum; the f32 load peaks at ~1.05 GB.
     RUSTFLAGS="-C target-feature=+simd128,+relaxed-simd,+atomics,+bulk-memory,+mutable-globals -C link-arg=--shared-memory -C link-arg=--import-memory -C link-arg=--max-memory=4294967296 -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base" \
       rustup run nightly cargo build --release --target wasm32-unknown-unknown --target-dir target/threads \
-      --features threads -Z build-std=panic_abort,std
+      --features threads,webgpu -Z build-std=panic_abort,std
     bindgen target/threads $WEB/pkg-threads
   else
     echo "skipping threads build: needs 'rustup toolchain install nightly --component rust-src'" >&2

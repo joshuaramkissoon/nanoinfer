@@ -1,0 +1,26 @@
+[package]
+name = "nanoinfer-webgpu"
+description = "WebGPU backend for nanoinfer (wgpu + WGSL): the same kernels run natively (Metal) and in the browser."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nanoinfer-core = { path = "../core" }
+wgpu = { version = "30", default-features = false, features = ["wgsl", "std"] }
+bytemuck = { version = "1", features = ["derive"] }
+half = "2"
+futures-channel = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = "0.4"
+
+[features]
+default = ["native"]
+# native backends (Metal on macOS)
+native = ["wgpu/metal"]
+# browser WebGPU (wasm32)
+web = ["wgpu/webgpu"]
+
+[dev-dependencies]
+serde_json.workspace = true

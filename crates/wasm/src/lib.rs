@@ -20,6 +20,8 @@
 //! page reports which.
 
 pub mod simd;
+#[cfg(feature = "webgpu")]
+pub mod webgpu;
 
 use nanoinfer_core::kernels::{reference, Kernels, Rows};
 use nanoinfer_core::stages::{blocks, kv_cache, Activations, KvCache};

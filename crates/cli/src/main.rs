@@ -17,6 +17,7 @@ mod metal_bench;
 mod pool;
 mod ppl;
 mod report;
+mod webgpu_bench;
 
 use clap::{Parser, Subcommand};
 use nanoinfer_core::{sampler::Sampler, Model, Stage, Tokenizer};
@@ -108,6 +109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // `bench --stage metal-*` runs on the GPU (crates/metal).
     #[cfg(target_os = "macos")]
     if let Some(result) = metal_bench::intercept() {
+        return result;
+    }
+    // `bench --stage webgpu-*` and `webgpu-probe` run on wgpu (crates/webgpu).
+    if let Some(result) = webgpu_bench::intercept() {
         return result;
     }
     let cli = Cli::parse();

@@ -19,6 +19,8 @@ crate-type = ["cdylib", "rlib"]
 # wasm-bindgen-rayon and a shared wasm heap. Core's own `threads` feature is
 # deliberately NOT enabled: its spin pool starts OS threads, which wasm lacks.
 threads = ["dep:rayon", "dep:wasm-bindgen-rayon"]
+# The WebGPU rungs (crates/webgpu on the browser's WebGPU through wgpu).
+webgpu = ["dep:nanoinfer-webgpu", "dep:wasm-bindgen-futures"]
 
 [dependencies]
 nanoinfer-core = { path = "../core" }
@@ -27,6 +29,8 @@ js-sys = "0.3"
 serde_json = "1"
 wasm-bindgen-rayon = { version = "1.3", optional = true }
 rayon = { version = "1.10", optional = true }
+nanoinfer-webgpu = { path = "../webgpu", default-features = false, features = ["web"], optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
 
 [profile.release]
 opt-level = 3
