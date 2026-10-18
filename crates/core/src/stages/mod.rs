@@ -24,6 +24,7 @@ pub mod packed;
 use crate::error::{Error, Result};
 use crate::kernels::f16::F16Matrix;
 use crate::kernels::packed::SpinPar;
+use crate::kernels::q4::Q4Matrix;
 use crate::kernels::q8::Q8Matrix;
 use crate::kernels::{FastOps, Kernels, Neon, Reference, Spin, Threaded, Tiled, Unrolled};
 use crate::trace::{ForwardInfo, Phase, Trace};
@@ -54,6 +55,8 @@ pub enum Stage {
     F16,
     /// Stage 9: stage 7 with Q8_0 weights (int8 blocks of 32) and int8 sdot decode.
     Q8,
+    /// Stage 10: stage 7 with Q4_0 weights (4-bit blocks of 32), unpacked to int8 for sdot.
+    Q4,
 }
 
 impl Stage {
@@ -68,6 +71,7 @@ impl Stage {
         Stage::FastOps,
         Stage::F16,
         Stage::Q8,
+        Stage::Q4,
     ];
 
     /// Name of the kernel set this stage runs.
@@ -82,13 +86,14 @@ impl Stage {
             Stage::FastOps => FastOps::NAME,
             Stage::F16 => "fast-ops + f16",
             Stage::Q8 => "fast-ops + q8_0 (f16 head)",
+            Stage::Q4 => "fast-ops + q4_0 (f16 head)",
         }
     }
 
     /// Whether this stage's kernels use more than one thread (with the
     /// `threads` feature; the thread count is the global rayon pool's).
     pub fn multithreaded(self) -> bool {
-        matches!(self, Stage::Threads | Stage::SpinPool | Stage::FastOps | Stage::F16 | Stage::Q8)
+        matches!(self, Stage::Threads | Stage::SpinPool | Stage::FastOps | Stage::F16 | Stage::Q8 | Stage::Q4)
     }
 
     /// How this stage stores weight matrices (sets its decode ceiling).
@@ -96,6 +101,7 @@ impl Stage {
         match self {
             Stage::F16 => WeightFormat::F16,
             Stage::Q8 => WeightFormat::Q8_0,
+            Stage::Q4 => WeightFormat::Q4_0,
             _ => WeightFormat::F32,
         }
     }
@@ -130,6 +136,7 @@ impl Stage {
             Stage::FastOps => "fast-ops",
             Stage::F16 => "f16",
             Stage::Q8 => "q8",
+            Stage::Q4 => "q4",
         }
     }
 }
@@ -269,6 +276,8 @@ enum PackedWeights {
     /// Q8_0 blocks, f16 LM head (see LOG stage 9: the tied head is the
     /// quantisation-sensitive matrix).
     Q8(Box<packed::PackedModel<Q8Matrix, packed::PlainHead<F16Matrix>>>),
+    /// Q4_0 blocks, f16 LM head.
+    Q4(Box<packed::PackedModel<Q4Matrix, packed::PlainHead<F16Matrix>>>),
 }
 
 impl PackedWeights {
@@ -277,7 +286,7 @@ impl PackedWeights {
             WeightFormat::F32 => PackedWeights::None,
             WeightFormat::F16 => PackedWeights::F16(Box::new(packed::PackedModel::new(model))),
             WeightFormat::Q8_0 => PackedWeights::Q8(Box::new(packed::PackedModel::new(model))),
-            WeightFormat::Q4_0 => unreachable!("no stage uses this format yet"),
+            WeightFormat::Q4_0 => PackedWeights::Q4(Box::new(packed::PackedModel::new(model))),
         }
     }
 }
@@ -393,6 +402,18 @@ impl Session {
             },
             Stage::Q8 => match &self.packed {
                 PackedWeights::Q8(p) => packed::forward::<FastOps, Q8Matrix, _, SpinPar, T>(
+                    model,
+                    p,
+                    new_tokens,
+                    &mut self.kv,
+                    &mut self.acts,
+                    &mut self.scratch,
+                    trace,
+                ),
+                _ => unreachable!(),
+            },
+            Stage::Q4 => match &self.packed {
+                PackedWeights::Q4(p) => packed::forward::<FastOps, Q4Matrix, _, SpinPar, T>(
                     model,
                     p,
                     new_tokens,

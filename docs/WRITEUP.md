@@ -509,4 +509,12 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
   17× spikes.
 - **Line:** "The fastest matrix to compress was the one we couldn't afford to."
 
+### Stage 10: Q4_0 (4-bit)
+
+- **Change:** 4-bit blocks, unpacked to int8 in registers, same `sdot`. LM head stays f16.
+- **Result:** decode **~240–263 tok/s**, only 5–10% over 8-bit. Perplexity +7.3%.
+- **Aha:** the f16 LM head is now 59% of the bytes, and per-token overhead (~2.5 ms of a
+  ~4 ms token) doesn't shrink with the weights. We cut the bytes 3.8× since f32 and decode
+  only doubled. The next win isn't smaller numbers, it's less waiting.
+
 ## Open questions / things to verify before publishing

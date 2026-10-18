@@ -63,6 +63,7 @@ of the weights).
 | 7 fast-ops (10 threads) | ~1400–1500 (interleaved; 1327 ± 301 recorded) | ~119 (interleaved) | ~49% | 1.75× prefill, 2.2× at P=512 |
 | 8 f16 weights (4–10 threads) | ~1240–1320 | ~180 (4t) | 37% of 485 / 74% of 243 | 1.5× decode |
 | 9 q8_0 + f16 head | ~1240–1330 | ~230–240 | 34% of 693 | 1.3× decode vs f16 |
+| 10 q4_0 + f16 head | ~1215–1230 | ~240–263 | 28% of 918 | 1.05–1.1× vs q8 |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -1441,3 +1442,43 @@ Bytes per token: 95.6 MB blocks + 77.2 MB head = 173 MB (spec ceiling 693 tok/s)
 232 ± 15, 231 ± 7, 239 ± 4; 10 threads 230 ± 36 / 203 ± 21), prefill ~1240–1330
 (the f32 tile path after dequantising). ~40 GB/s, 34% of its spec ceiling. The
 f16 head is 45% of the bytes now.
+
+---
+
+## Stage 10: Q4_0 (4-bit blocks)
+
+**Hypothesis.** Q4_0 halves the block bytes again (20 bytes per 32 weights).
+Decode unpacks nibbles in registers (`and 0x0f` / `shr 4` / `sub 8`) into int8
+and reuses stage 9's `sdot`. With the f16 head kept (stage 9's lesson), the
+quality cost should be a few % ppl.
+
+**What changed.** `kernels/q4.rs` (+ scalar fallback). Test: the integer decode
+path equals "dequantise W, quantise x, f32 dot" to 1e-3, which separates
+kernel bugs from quantisation error. LM head: f16 (a folded-gain Q8 head was
+tried and was no better here: KL 0.075 vs 0.069).
+
+**Correctness / quality** (2 × 512 tokens): **Δppl +7.3%, mean KL 0.069, top-1
+agreement 83%**. That's what 4-bit round-to-nearest with one scale per 32
+weights costs a 124M model whose qkv and fc matrices are sensitive (see the
+fake-quant table). Better 4-bit schemes (per-block min, k-quants, importance
+weighting) are where llama.cpp went next.
+
+**Numbers:** decode **~240–263 tok/s** (4t 238 ± 16, 6t 263 ± 13, 8t 241 ± 61, 10t
+220 ± 33), prefill ~1215–1230. Only 5–10% faster than Q8, at ~30–35 GB/s and 24–29%
+of its 918 tok/s spec ceiling.
+
+**Why Q4 barely beats Q8:**
+- **The f16 head is 59% of Q4's bytes** (77 of 131 MB). Halving the blocks
+  only removes 42 MB of 173.
+- **Per-token overhead dominates.** Profile at 10 threads (320 tok/s run): lm_head
+  0.93 ms/token at 83 GB/s (30%), attention 0.51 ms (16.5%: still serial at
+  short context, below the parallel threshold), and qkv/fc/fc_proj at ~35 GB/s
+  each. A 885 KB Q4 qkv matmul takes ~32 µs when its bytes need ~10 µs.
+- Microbenchmark of the spin pool (empty job): dispatch+join is 1.9 µs with 10
+  chunks on 10 threads but **8.6 µs p50 / 48 µs p99 with 40 chunks**. Every chunk
+  claim is a CAS on one cache line, and every completion an atomic add on
+  another, bouncing between the P and E clusters. × 49 matmuls ≈ 0.4 ms/token
+  before any load imbalance.
+
+So stages 8–10 cut the bytes 3.8× (495 → 131 MB) and decode only rose 2× (~120 →
+~250). The remaining gap is fixed per-token overhead.
