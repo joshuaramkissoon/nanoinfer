@@ -1,8 +1,7 @@
 import { useState, type ReactElement } from "react";
-import { useInView } from "../../../ui/Figure";
 import { usePalette } from "../../../ui/theme";
 import { log } from "../../../lib/fmt";
-import { chartColors, Deeper, Fig, G, Idea, Seg, Stat, Swatch, nf, useFrame } from "../../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, Stat, Swatch, nf, useFrame, useOnScreen } from "../../kit";
 import { linkTo } from "../../router";
 import { MACHINES, SOURCES } from "./specs";
 
@@ -21,7 +20,7 @@ function ChipPicture() {
   const [k, setK] = useState<ChipKey>("m4gpu");
   const mach = MACHINES.find((m) => m.key === k)!;
   const info = CHIP[k];
-  const [vref, seen] = useInView<HTMLDivElement>();
+  const [onScreen, seen] = useOnScreen<HTMLElement>();
   const reduce = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const [t, setT] = useState(0);
   useFrame(seen && !reduce, (dt) => setT((v) => (v + dt) % 1000));
@@ -85,6 +84,7 @@ function ChipPicture() {
   const pkts = Math.round(rate * 4);
   return (
     <Fig
+      figRef={onScreen}
       n="0.3.1"
       title="A CPU is a few clever cores; a GPU is thousands of simple lanes"
       prov="diagram"
@@ -110,7 +110,7 @@ function ChipPicture() {
           label="chip"
         />
       </div>
-      <div ref={vref}>
+      <div>
         <svg viewBox="0 0 640 240" style={{ width: "100%" }} role="img" aria-label={`${mach.name}: ${info.units}, ${mach.bw} GB/s`}>
           <rect x={14} y={120 - memH / 2} width={130} height={memH} rx={8} fill={cc.c2} fillOpacity={0.12} stroke={cc.c2} />
           {Array.from({ length: k === "h100" ? 5 : 2 }, (_, i) => (

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SpaceKey, Tk } from "../../ui/Tok";
 import { engine, useEngine } from "../../engine/client";
 import { loadTokenizer, type Tokenizer } from "../bpe";
-import { Chip, Deeper, Fig, G, Idea, Stat, useStepper } from "../kit";
+import { Chip, Deeper, Fig, G, Idea, Stat, useStepper, useOnScreen } from "../kit";
 
 function useTokenizer(): [Tokenizer | null, string | null] {
   const [t, setT] = useState<Tokenizer | null>(null);
@@ -95,7 +95,8 @@ function LiveTokenizer({ tok, onPickWord }: { tok: Tokenizer; onPickWord: (w: st
 function Merges({ tok, word, onWord }: { tok: Tokenizer; word: string; onWord: (w: string) => void }) {
   const steps = useMemo(() => tok.steps(word), [tok, word]);
   const [playing, setPlaying] = useState(true);
-  const [i, setI] = useStepper(steps.length + 2, 900, playing);
+  const [onScreen, vis] = useOnScreen<HTMLElement>();
+  const [i, setI] = useStepper(steps.length + 2, 900, vis && playing);
   useEffect(() => setI(0), [word, setI]);
   const k = Math.min(i, steps.length - 1);
   const cur = steps[k];
@@ -111,6 +112,7 @@ function Merges({ tok, word, onWord }: { tok: Tokenizer; word: string; onWord: (
   const rank = prev && merged >= 0 ? tok.rank(prev[merged], prev[merged + 1]) : undefined;
   return (
     <Fig
+      figRef={onScreen}
       n="2.2"
       title={`How “${word.trim()}” gets its tokens`}
       prov="weights"

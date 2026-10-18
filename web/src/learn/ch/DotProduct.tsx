@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { Tk } from "../../ui/Tok";
 import { useWidth } from "../../ui/Figure";
 import { KIND_LABEL, css, heatAt, kindColor, usePalette, type Palette } from "../../ui/theme";
-import { Deeper, Fig, G, Idea, Slider, nf, unpackVec, useLearnData, useRecorded, useFrame } from "../kit";
+import { Deeper, Fig, G, Idea, Slider, nf, unpackVec, useLearnData, useRecorded, useFrame, useOnScreen } from "../kit";
 
 /** fig 4.1: drag two arrows, read their dot product */
 function DotToy() {
@@ -121,8 +121,9 @@ function MatVec() {
     const i = d.emb.words.findIndex((id) => d.emb.text[id] === " dog");
     return Array.from(unpackVec(d.emb.vecs[Math.max(0, i)]).slice(0, N));
   }, [d]);
-  useFrame(playing && !!W, (dt) => setT((v) => (v + dt * speed) % (N * N + 6)));
-  if (!W || !x) return <Fig n="4.1" title="A matrix times a vector" prov="weights"><div className="lr-empty">loading…</div></Fig>;
+  const [onScreen, vis] = useOnScreen<HTMLElement>();
+  useFrame(vis && playing && !!W, (dt) => setT((v) => (v + dt * speed) % (N * N + 6)));
+  if (!W || !x) return <Fig figRef={onScreen} n="4.1" title="A matrix times a vector" prov="weights"><div className="lr-empty">loading…</div></Fig>;
   const step = Math.min(N * N, Math.floor(t));
   const row = Math.min(N - 1, Math.floor(step / N)), col = step % N;
   const y = W.map((r, i) => {
@@ -137,6 +138,7 @@ function MatVec() {
   const fin = step >= N * N;
   return (
     <Fig
+      figRef={onScreen}
       n="4.1"
       title="A matrix times a vector"
       prov="weights"

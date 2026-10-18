@@ -166,6 +166,26 @@ export function unpackVec(v: { s: number; b64: string }): Float32Array {
 
 // ---- frame --------------------------------------------------------------------------
 
+/** True while the element is within ~100px of the viewport. Unlike a one-shot "seen" latch it turns false again, so
+ *  looping figures pass it to useFrame and stop costing frames the moment they scroll away (and resume on return).
+ *  Usage: `const [onScreen, vis] = useOnScreen<HTMLElement>(); useFrame(vis && playing, …); <Fig figRef={onScreen}>` */
+export function useOnScreen<T extends Element>(): [(el: T | null) => void, boolean] {
+  const [v, setV] = useState(false);
+  const io = useRef<IntersectionObserver | null>(null);
+  const ref = (el: T | null) => {
+    io.current?.disconnect();
+    io.current = null;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") return setV(true);
+    io.current = new IntersectionObserver(([e]) => setV(e.isIntersecting), { rootMargin: "100px 0px" });
+    io.current.observe(el);
+  };
+  // a stable callback: React calls it with null on unmount, which disconnects (no effect cleanup, so StrictMode's
+  // double-invoked effects can't silently kill the observer)
+  const stable = useRef(ref);
+  return [stable.current, v];
+}
+
 export type Prov = "toy" | "diagram" | "recorded" | "live" | "measured" | "weights" | "external" | "estimate";
 const PROV: Record<Prov, string> = {
   toy: "toy example",
@@ -188,6 +208,7 @@ export function Fig({
   wide,
   aside,
   source,
+  figRef,
 }: {
   n: string;
   title: string;
@@ -202,9 +223,11 @@ export function Fig({
   aside?: ReactNode;
   /** where external numbers come from (shown under the caption) */
   source?: ReactNode;
+  /** attach a useOnScreen ref to the figure, to pause its animation while it's off screen */
+  figRef?: (el: HTMLElement | null) => void;
 }) {
   return (
-    <figure className={`lr-fig${wide ? " wide" : ""}`} data-ask-section>
+    <figure ref={figRef} className={`lr-fig${wide ? " wide" : ""}`} data-ask-section>
       <header className="lr-fig-head">
         <span className="lr-fig-title">
           <span className="n">fig {n}</span>
@@ -358,7 +381,7 @@ export function Chip({ children, tone, title, onClick, on }: { children: ReactNo
 
 // ---- motion --------------------------------------------------------------------------
 
-/** Calls fn(dtSeconds) every frame while `on`. */
+/** Calls fn(dtSeconds) every frame while `on`. Looping figures pass `onScreen && …` (see useOnScreen). */
 export function useFrame(on: boolean, fn: (dt: number) => void) {
   const ref = useRef(fn);
   ref.current = fn;

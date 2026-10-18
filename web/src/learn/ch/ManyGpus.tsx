@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { usePalette } from "../../ui/theme";
-import { chartColors, Deeper, Fig, Idea, Seg, useFrame } from "../kit";
+import { chartColors, Deeper, Fig, Idea, Seg, useFrame, useOnScreen } from "../kit";
 
 /** Ring all-reduce: N GPUs each own a vector split into N chunks; after 2(N−1) steps everyone has the sum. */
 function Ring() {
@@ -10,7 +10,8 @@ function Ring() {
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(true);
   const steps = 2 * (n - 1);
-  useFrame(playing, (dt) => setT((v) => (v + dt * 0.9) % (steps + 1.5)));
+  const [onScreen, vis] = useOnScreen<HTMLElement>();
+  useFrame(vis && playing, (dt) => setT((v) => (v + dt * 0.9) % (steps + 1.5)));
   const step = Math.min(steps, Math.floor(t));
   const frac = t - Math.floor(t);
   const R = 92, cx = 150, cy = 120;
@@ -20,6 +21,7 @@ function Ring() {
   const doneChunks = step <= n - 1 ? (step === n - 1 ? 1 : 0) : 1 + (step - (n - 1));
   return (
     <Fig
+      figRef={onScreen}
       n="19.1"
       title="Passing dishes round a table"
       prov="toy"

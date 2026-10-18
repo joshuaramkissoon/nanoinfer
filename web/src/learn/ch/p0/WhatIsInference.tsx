@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { usePalette } from "../../../ui/theme";
-import { useInView } from "../../../ui/Figure";
-import { chartColors, Deeper, Fig, G, Idea, Seg, Swatch, useFrame } from "../../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, Swatch, useFrame, useOnScreen } from "../../kit";
 import { linkTo } from "../../router";
 
 // ---- fig 0.1.1: write once, run forever ------------------------------------------------------------
@@ -10,13 +9,14 @@ function WriteOnce() {
   const pal = usePalette();
   const cc = chartColors(pal.dark);
   const [t, setT] = useState(0);
-  const [vref, seen] = useInView<HTMLDivElement>();
+  const [onScreen, seen] = useOnScreen<HTMLElement>();
   const reduce = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   useFrame(seen && !reduce, (dt) => setT((v) => (v + dt) % 1000));
   const off = reduce ? 0 : (t * 26) % 18;
   const panel = pal.dark ? "#262421" : "#ffffff";
   return (
     <Fig
+      figRef={onScreen}
       n="0.1.1"
       title="Training writes the weights once; inference reads them forever"
       prov="diagram"
@@ -28,7 +28,7 @@ function WriteOnce() {
         </>
       }
     >
-      <div ref={vref}>
+      <div>
       <svg viewBox="0 0 640 170" style={{ width: "100%" }} role="img" aria-label="training produces weights once; inference runs them repeatedly">
         {/* training */}
         <rect x={8} y={36} width={150} height={92} rx={10} fill={cc.c1} fillOpacity={0.14} stroke={cc.c1} />

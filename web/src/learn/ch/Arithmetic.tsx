@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
 import { Climb } from "../Climb";
-import { chartColors, Deeper, Fig, G, Idea, Seg, useFrame } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, useFrame, useOnScreen } from "../kit";
 
 const LAT = 4; // ticks an add takes before its result can be used
 const MEM = 3; // numbers memory delivers per tick (so 16 lanes become memory-bound)
@@ -17,7 +17,8 @@ function Lanes() {
     sim.current = { lanes: new Array(kk).fill(0), buf: 0, done: 0, ticks: 0, acc: 0, hist: [] };
   };
   if (sim.current.lanes.length !== k) reset(k);
-  useFrame(true, (dt) => {
+  const [onScreen, vis] = useOnScreen<HTMLElement>();
+  useFrame(vis, (dt) => {
     const s = sim.current;
     s.acc += dt * 5; // ticks per second
     while (s.acc >= 1) {
@@ -49,6 +50,7 @@ function Lanes() {
   const W = Math.max(280, w), rowH = k > 4 ? 9 : 18, H = k * (rowH + 3) + 4;
   return (
     <Fig
+      figRef={onScreen}
       n="13.1"
       title="One running total, or sixteen"
       prov="toy"

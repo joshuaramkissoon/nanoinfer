@@ -3,13 +3,14 @@ import { SpaceKey, Tk } from "../../ui/Tok";
 import { decodeTokens, tokenText } from "../../engine/client";
 import { fitCanvas, useWidth } from "../../ui/Figure";
 import { usePalette, type Palette } from "../../ui/theme";
-import { Deeper, Fig, G, Idea, useFrame, useRecorded } from "../kit";
+import { Deeper, Fig, G, Idea, useFrame, useOnScreen, useRecorded } from "../kit";
 
 /** fig 6.1: inside one block */
 function BlockDiagram() {
   const pal = usePalette();
   const [t, setT] = useState(0);
-  useFrame(true, (dt) => setT((v) => (v + dt * 0.35) % 1));
+  const [onScreen, vis] = useOnScreen<HTMLElement>();
+  useFrame(vis, (dt) => setT((v) => (v + dt * 0.35) % 1));
   const W = 600, H = 250, sx = 150;
   const y = (f: number) => 20 + f * (H - 40);
   const pulse = y(t);
@@ -37,6 +38,7 @@ function BlockDiagram() {
   );
   return (
     <Fig
+      figRef={onScreen}
       n="6.1"
       title="One transformer block"
       prov="diagram"
@@ -104,12 +106,13 @@ function Stream() {
   const pal = usePalette();
   const [d, setD] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [onScreen2, vis2] = useOnScreen<HTMLElement>();
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || !vis2) return;
     const t = setInterval(() => setD((x) => (x >= 12 ? (setPlaying(false), 12) : x + 1)), 700);
     return () => clearInterval(t);
-  }, [playing]);
-  if (!rec || !rec.walk.lens.length) return <Fig n="6.2" title="Watching the guess form" prov="recorded"><div className="lr-empty">loading…</div></Fig>;
+  }, [playing, vis2]);
+  if (!rec || !rec.walk.lens.length) return <Fig figRef={onScreen2} n="6.2" title="Watching the guess form" prov="recorded"><div className="lr-empty">loading…</div></Fig>;
   const { walk } = rec;
   const toks = rec.run.tokens.map((t) => t.id);
   const me = toks[walk.pos];
@@ -117,6 +120,7 @@ function Stream() {
   const label = (i: number) => (i === 0 ? "embedding" : `after layer ${i}`);
   return (
     <Fig
+      figRef={onScreen2}
       n="6.2"
       title="Watching the guess form"
       prov="recorded"

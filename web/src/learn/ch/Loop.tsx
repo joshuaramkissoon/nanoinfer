@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { decodeTokens } from "../../engine/client";
 import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
-import { Deeper, Fig, G, Idea, Seg, Stat, useFrame, useRecorded } from "../kit";
+import { Deeper, Fig, G, Idea, Seg, Stat, useFrame, useOnScreen, useRecorded } from "../kit";
 
 function Replay() {
   const rec = useRecorded();
@@ -22,13 +22,14 @@ function Replay() {
     });
     return { spans, total: acc };
   }, [rec]);
-  useFrame(playing && !!plan, (dt) =>
+  const [onScreen, vis] = useOnScreen<HTMLElement>();
+  useFrame(vis && playing && !!plan, (dt) =>
     setT((x) => {
       const n = x + (dt * 1000) / slow;
       return plan && n > plan.total + 600 / slow ? 0 : n;
     }),
   );
-  if (!rec || !plan) return <Fig n="8.1" title="The loop, replayed" prov="recorded"><div className="lr-empty">loading…</div></Fig>;
+  if (!rec || !plan) return <Fig figRef={onScreen} n="8.1" title="The loop, replayed" prov="recorded"><div className="lr-empty">loading…</div></Fig>;
   const toks = rec.run.tokens;
   const nPrompt = toks.filter((x) => x.prompt).length;
   const cur = plan.spans.findIndex((s) => t >= s.start && t < s.start + s.ms + 1.2);
@@ -54,6 +55,7 @@ function Replay() {
   );
   return (
     <Fig
+      figRef={onScreen}
       n="8.1"
       title="The loop, replayed"
       prov="recorded"

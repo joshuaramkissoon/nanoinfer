@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useWidth } from "../ui/Figure";
 import { usePalette } from "../ui/theme";
 import { log } from "../lib/fmt";
-import { chartColors, Fig, Seg, useFrame, useLearnData, type LearnData } from "./kit";
+import { chartColors, Fig, Seg, useFrame, useOnScreen, useLearnData, type LearnData } from "./kit";
 
 export interface Milestone {
   key: string;
@@ -159,7 +159,8 @@ export function WorkGrid({ n, mode: fixed }: { n: string; mode?: "naive" | "cach
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(true);
   const P = 6, N = 18; // prompt rows, generated tokens
-  useFrame(playing, (dt) => setT((v) => (v + dt * 2.2) % (N + 4)));
+  const [onScreen, vis] = useOnScreen<HTMLElement>();
+  useFrame(vis && playing, (dt) => setT((v) => (v + dt * 2.2) % (N + 4)));
   const step = Math.min(N, Math.floor(t)); // steps done
   const [ref, w] = useWidth<HTMLDivElement>();
   const W = Math.max(300, w);
@@ -177,6 +178,7 @@ export function WorkGrid({ n, mode: fixed }: { n: string; mode?: "naive" | "cach
   const H = rows * (rs + 2) + 34;
   return (
     <Fig
+      figRef={onScreen}
       n={n}
       title={mode === "naive" ? "Work per token, without a cache" : "Work per token, with a KV cache"}
       prov="toy"

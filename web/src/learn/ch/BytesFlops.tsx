@@ -3,7 +3,7 @@ import { useEngine } from "../../engine/client";
 import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
 import { log, logTicks, short } from "../../lib/fmt";
-import { Deeper, Fig, G, Idea, Seg, Slider, useFrame } from "../kit";
+import { Deeper, Fig, G, Idea, Seg, Slider, useFrame, useOnScreen } from "../kit";
 
 /** fig 9.1: a truck feeding a factory */
 function Factory() {
@@ -14,7 +14,8 @@ function Factory() {
   const sim = useRef({ boxes: [] as number[], queue: 0, proc: 0, spawn: 0, busy: 0, idle: 0, out: 0 });
   const [, tick] = useState(0);
   const truckRate = 2.2; // boxes per second, visual
-  useFrame(true, (dt) => {
+  const [onScreen, vis] = useOnScreen<HTMLElement>();
+  useFrame(vis, (dt) => {
     const s = sim.current;
     s.spawn += dt * truckRate;
     while (s.spawn >= 1 && s.queue < 9) {
@@ -50,6 +51,7 @@ function Factory() {
   const bound = I < R ? "memory" : "compute";
   return (
     <Fig
+      figRef={onScreen}
       n="9.1"
       title="The truck and the factory"
       prov="toy"

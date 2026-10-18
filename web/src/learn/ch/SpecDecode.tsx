@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Tip, useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
-import { chartColors, Deeper, Fig, G, Idea, Seg, nf, useLearnData, type SpecPair, type SpecPrompt } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, nf, useLearnData, useOnScreen, type SpecPair, type SpecPrompt } from "../kit";
 
 // Speculative decoding on the M4 GPU (bench/specdec.json via public/learn/data.json):
 // a GPT-2 small drafter (4-bit) guessing for GPT-2 medium or large (16-bit).
@@ -58,11 +58,12 @@ function Playback({ pairs }: { pairs: SpecPair[] }) {
     setN(reduced ? rs.length : 0);
     setPlaying(!reduced);
   }, [rs, reduced]);
+  const [onScreen, vis] = useOnScreen<HTMLElement>();
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || !vis) return;
     const t = setInterval(() => setN((v) => (v >= rs.length ? (setPlaying(false), v) : v + 1)), 520);
     return () => clearInterval(t);
-  }, [playing, rs.length]);
+  }, [playing, vis, rs.length]);
   const done = rs.slice(0, n);
   const toks = done.reduce((a, r) => a + r.kept.length + 1, 0);
   const cur = n > 0 ? rs[n - 1] : null;
@@ -81,6 +82,7 @@ function Playback({ pairs }: { pairs: SpecPair[] }) {
   const ownStyle = box(`color-mix(in srgb, ${cc.c1} 22%, transparent)`, cc.c1);
   return (
     <Fig
+      figRef={onScreen}
       n="18.1"
       title="Guess, then check: a real run"
       prov="measured"
