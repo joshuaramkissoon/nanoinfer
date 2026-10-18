@@ -154,7 +154,8 @@ export default function Ladder() {
             const bVal = mVal || rVal;
             const recBar = !mVal && rVal > 0;
             const tag = !st
-              ? nr?.backend === "metal" ? "GPU · native" : "native only"
+              ? nr?.backend === "metal" ? "GPU · native" : nr?.backend === "wgpu-metal" ? "WebGPU · native" : "native only"
+              : st.backend === "webgpu" ? "WebGPU"
               : st.browserOnly ? "browser only"
               : st.wasmNote?.startsWith("no OS threads") ? "wasm: 1 thread"
               : fallback(st) ? "wasm: fallback" : `stage ${i}`;
@@ -164,13 +165,13 @@ export default function Ladder() {
                   transform={small ? `rotate(-28 ${x} ${H - m.b + 16})` : undefined}>{n}</text>
                 {!small && <text x={x} y={H - m.b + 30} textAnchor="middle" style={{ fontSize: 9, fill: st?.browserOnly ? pal.accent : undefined }}>{tag}</text>}
                 {nVal > 0 && (
-                  <g onPointerEnter={() => setHover({ x: x - bar * 0.7, y: y(nVal), text: `native ${n}: ${sig(nVal, 3)} tok/s ${metric}${metric === "decode" ? ` · ${pct(nVal / nativeCeil, 1)} of ceiling` : ""}${nr?.threads && nr.threads !== 1 ? ` · ${nr.threads} threads` : ""}${nr?.note ? ` · ${nr.note}` : ""}` })}>
+                  <g onPointerEnter={() => setHover({ x: x - bar * 0.7, y: y(nVal), text: `native ${nr?.backend === "wgpu-metal" ? "(wgpu on Metal) " : ""}${n}: ${sig(nVal, 3)} tok/s ${metric}${metric === "decode" ? ` · ${pct(nVal / nativeCeil, 1)} of ceiling` : ""}${nr?.threads && nr.threads !== 1 ? ` · ${nr.threads} threads` : ""}${nr?.note ? ` · ${nr.note}` : ""}` })}>
                     <rect x={x - bar * 1.2} width={bar} y={y(nVal)} height={H - m.b - y(nVal)} fill={pal.fg} opacity={0.85} />
                     {!tiny && <text x={x - bar * 0.7} y={y(nVal) - 5} textAnchor="middle" style={{ fill: pal.fg, fontSize: small ? 8 : 10 }}>{sig(nVal, small ? 2 : 3)}</text>}
                   </g>
                 )}
                 {bVal > 0 && (
-                  <g onPointerEnter={() => setHover({ x: x + bar * 0.7, y: y(bVal), text: recBar ? `recorded browser ${n}: ${sig(bVal, 3)} tok/s ${metric} (${rec?.meta.build} build, V8 on the M4)` : `your browser ${n}: ${sig(bVal, 3)} tok/s ${metric} (${BUILD_LABEL[shownBuild ?? "simd128"]} build)${metric === "decode" && browserCeil ? ` · ${pct(bVal / browserCeil, 1)} of this tab's ceiling` : ""}` })}>
+                  <g onPointerEnter={() => setHover({ x: x + bar * 0.7, y: y(bVal), text: recBar ? `recorded browser ${n}: ${sig(bVal, 3)} tok/s ${metric} (${st?.backend === "webgpu" ? "WebGPU in Chrome" : `${rec?.meta.build} build, V8`} on the M4)` : `your browser ${n}: ${sig(bVal, 3)} tok/s ${metric} (${st?.backend === "webgpu" ? `WebGPU${mine(n)?.dispatches ? `, ${sig(mine(n)!.dispatches!, 3)} dispatches and ${sig(mine(n)!.submits!, 2)} submits per token` : ""}` : `${BUILD_LABEL[shownBuild ?? "simd128"]} build`})${metric === "decode" && browserCeil ? ` · ${pct(bVal / browserCeil, 1)} of this tab's ceiling` : ""}` })}>
                     <rect x={x + bar * 0.2} width={bar} y={y(bVal)} height={H - m.b - y(bVal)}
                       fill={recBar ? "none" : pal.accent} stroke={pal.accent} strokeWidth={recBar ? 1.3 : 0} strokeDasharray={recBar ? "3 2" : undefined} />
                     {!tiny && <text x={x + bar * 0.7} y={y(bVal) - (small ? 14 : 5)} textAnchor="middle" style={{ fill: pal.accent, fontSize: small ? 8 : 10 }}>{sig(bVal, small ? 2 : 3)}</text>}

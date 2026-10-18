@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { claim, decodeTokens, engine, getState, release, useEngine } from "../engine/client";
+import { claim, decodeTokens, engine, getState, isGpu, release, useEngine } from "../engine/client";
 import { LiveButton, NeedsEngine, useFigureSource, useInView } from "../ui/Figure";
 import { usePalette } from "../ui/theme";
 import { fmtMs, sig } from "../lib/fmt";
@@ -101,7 +101,7 @@ export default function StageRace() {
       const ls: Lane[] = getState().stages.map((s) => ({ stage: s.name, note: s.wasmNote, tokens: [], ms: [], t: [], done: false }));
       const next: number[] = [];
       for (const l of ls) {
-        const slot = await engine.open(l.stage, prompt.length + TARGET + 1);
+        const slot = await engine.open(l.stage, prompt.length + TARGET + 8);
         slots.push(slot);
         await engine.forward(slot, prompt); // prefill: same work for every lane, not raced
         next.push((await engine.sample(slot, 0, 0)).id);
@@ -118,6 +118,23 @@ export default function StageRace() {
         // fair: the lane that has used the least engine time runs next
         const i = open.reduce((p, c) => ((ls[c].t.at(-1) ?? 0) < (ls[p].t.at(-1) ?? 0) ? c : p));
         const l = ls[i];
+        if (isGpu(l.stage)) {
+          // WebGPU lanes decode on their fastest greedy path (GPU argmax,
+          // several tokens per submit where the stage has it), a few tokens
+          // per turn; each token is charged an equal share of the chunk.
+          const k = Math.min(4, TARGET - l.tokens.length);
+          const r = await engine.gpuGreedy(slots[i], next[i], k);
+          const fed = [next[i], ...r.tokens.slice(0, k - 1)];
+          for (const t of fed) {
+            l.tokens.push(t);
+            l.ms.push(r.ms / k);
+            l.t.push((l.t.at(-1) ?? 0) + r.ms / k);
+          }
+          next[i] = r.tokens[k - 1];
+          if (l.tokens.length >= TARGET || l.t.at(-1)! >= BUDGET_MS) l.done = true;
+          setLanes(ls.map((x) => ({ ...x })));
+          continue;
+        }
         const tr = await engine.forward(slots[i], [next[i]]);
         l.tokens.push(next[i]);
         l.ms.push(tr.ms);
@@ -181,7 +198,7 @@ export default function StageRace() {
                 {isFb && <span className="nv-muted">*</span>}
               </span>
               <span className="tx">
-                <span className="bar" style={{ width: `${(100 * n) / TARGET}%`, background: l.stage.startsWith("wasm-") ? pal.accent : pal.heat[3] }} />
+                <span className="bar" style={{ width: `${(100 * n) / TARGET}%`, background: l.stage.startsWith("wasm-") ? pal.accent : isGpu(l.stage) ? pal.cool : pal.heat[3] }} />
                 <bdi>
                   <span className="nv-muted">{promptText.replace(/\n/g, "⏎")}</span>
                   {n ? decodeTokens(l.tokens.slice(0, n)).replace(/\n/g, "⏎") : ""}

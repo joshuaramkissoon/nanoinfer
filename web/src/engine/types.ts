@@ -11,6 +11,44 @@ export interface StageInfo {
   browserOnly?: boolean;
   /** what this stage actually runs when compiled to wasm, if different from native */
   wasmNote?: string;
+  /** "webgpu" for the GPU rungs (crates/webgpu); absent = wasm on the CPU */
+  backend?: string;
+  /** WebGPU stages: false when this device lacks a feature the stage needs */
+  supported?: boolean;
+  /** weight format of the tied embedding / LM head, when it differs */
+  headFormat?: string;
+}
+
+/** What the WebGPU adapter offers (from wgpu, in the worker). */
+export interface GpuInfo {
+  adapter: string;
+  backend: string;
+  features: string[];
+  maxStorageBufferBindingSize: number;
+  maxBufferSize: number;
+  maxStorageBuffersPerShaderStage: number;
+}
+
+export interface GpuGreedy {
+  ms: number;
+  dispatches: number;
+  submits: number;
+  gpuMs: number | null;
+  tokens: number[];
+}
+
+export interface GpuBench {
+  prefillMs: number;
+  decodeMs: number;
+  dispatches: number;
+  submits: number;
+  gpuMs: number | null;
+}
+
+export interface ProbeRow {
+  label: string;
+  value: number;
+  unit: string;
 }
 
 /** Which wasm build is running: simd128, relaxed (relaxed-SIMD FMA) or threads. */
@@ -85,7 +123,11 @@ export type Req =
   | { t: "benchBandwidth"; mb: number; iters: number }
   | { t: "benchPeak"; millions: number }
   | { t: "seed"; seed: number }
-  | { t: "clearCache" };
+  | { t: "clearCache" }
+  | { t: "gpuGreedy"; slot: number; first: number; n: number }
+  | { t: "gpuBench"; slot: number; prompt: number[]; gen: number }
+  | { t: "gpuProfile"; slot: number; tokens: number[]; reps: number }
+  | { t: "gpuProbe"; reps: number };
 
 export interface InitResult {
   stages: StageInfo[];
@@ -98,6 +140,9 @@ export interface InitResult {
   threads: number;
   /** what the compute-roof probe measures: "mul+add" or "fma" */
   peakKind: string;
+  /** the WebGPU adapter, or null (then webgpuError says why) */
+  webgpu: GpuInfo | null;
+  webgpuError: string | null;
 }
 
 export interface LoadResult {

@@ -2,7 +2,7 @@
 // One engine, one store: the run you trigger in the hero drives every figure.
 
 import { useSyncExternalStore } from "react";
-import type { BuildName, ForwardTrace, InitResult, LoadProgress, LoadResult, ModelConfig, Req, StageInfo } from "./types";
+import type { BuildName, ForwardTrace, GpuBench, GpuGreedy, GpuInfo, InitResult, LoadProgress, LoadResult, ModelConfig, ProbeRow, Req, StageInfo } from "./types";
 import { loadRecorded, type Recorded } from "../lib/recorded";
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; onEvent?: (m: any) => void };
@@ -73,6 +73,10 @@ export interface Run {
 
 export interface BrowserBench {
   stage: string;
+  /** WebGPU rungs: per decode token */
+  dispatches?: number;
+  submits?: number;
+  adapter?: string;
   /** wasm build it was measured on */
   build?: BuildName;
   prefillTokS?: number;
@@ -110,6 +114,11 @@ export interface State {
   /** which checkpoint to download: f16 (half the bytes, widened to f32 on load) or f32 */
   dtype: "f16" | "f32";
   f16Available: boolean;
+  /** the WebGPU adapter (null: none, see webgpuError) */
+  webgpu: GpuInfo | null;
+  webgpuError: string | null;
+  /** WebGPU dispatch / submit / round-trip probe, measured in this tab */
+  gpuProbe: ProbeRow[] | null;
 }
 
 const BENCH_KEY = "nanoinfer-browser-bench-v2";
@@ -143,6 +152,9 @@ let state: State = {
   peakKind: "mul+add",
   dtype: "f16",
   f16Available: false,
+  webgpu: null,
+  webgpuError: null,
+  gpuProbe: null,
 };
 const listeners = new Set<() => void>();
 
@@ -261,6 +273,8 @@ export async function boot() {
       builds: res.builds,
       threads: res.threads,
       peakKind: res.peakKind,
+      webgpu: res.webgpu,
+      webgpuError: res.webgpuError,
     });
     // Never auto-download, but if this browser already has the weights
     // cached, loading costs nothing: go straight to live.
@@ -337,7 +351,16 @@ export const engine = {
   logits: (slot: number) => r().call<Float32Array>({ t: "logits", slot }),
   clearCache: () => r().call<boolean>({ t: "clearCache" }),
   seed: (seed: number) => r().call<null>({ t: "seed", seed }),
+  /** WebGPU sessions: greedy-decode n tokens on the stage's fastest path */
+  gpuGreedy: (slot: number, first: number, n: number) => r().call<GpuGreedy>({ t: "gpuGreedy", slot, first, n }),
+  gpuBench: (slot: number, prompt: number[], gen: number) => r().call<GpuBench>({ t: "gpuBench", slot, prompt, gen }),
+  gpuProfile: (slot: number, tokens: number[], reps = 20) =>
+    r().call<{ name: string; layer: number; ms: number }[]>({ t: "gpuProfile", slot, tokens, reps }),
+  gpuProbe: (reps = 5) => r().call<ProbeRow[]>({ t: "gpuProbe", reps }),
 };
+
+/** Is this a WebGPU rung (runs on the GPU through crates/webgpu)? */
+export const isGpu = (stage: string) => stage.startsWith("webgpu-");
 
 /** Claim the engine for a panel; returns false if another panel holds it. */
 export function claim(who: string): boolean {
@@ -366,7 +389,8 @@ export const useLive = () => useEngine((s) => s.source === "live");
 export const decodes = (run: Run | null) => (run ? run.forwards.filter((f) => f.phase === "decode") : []);
 
 // Dev-only handle for poking the live engine from the console / test harness.
-if (import.meta.env.DEV) (globalThis as any).__nanoinfer = { getState, setState, engine, measureRoofs, loadModel, bench: () => import("./generate") };
+if (import.meta.env.DEV)
+  (globalThis as any).__nanoinfer = { getState, setState, engine, measureRoofs, loadModel, bench: () => import("./generate"), webgpu: () => import("./webgpu") };
 
 /** Where the shared run currently comes from: the recording, or this tab. */
 export function useRunSource(): "live" | "recorded" | "none" {

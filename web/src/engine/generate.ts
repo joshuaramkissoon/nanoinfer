@@ -2,7 +2,7 @@
 // round trip, ~0.1 ms against 100+ ms of compute), which makes it trivially
 // cancellable and lets every step update the shared run immediately.
 
-import { engine, getState, setState, type Run, type Tok, claim, release, median, type BrowserBench, benchKey } from "./client";
+import { engine, getState, setState, type Run, type Tok, claim, release, median, type BrowserBench, benchKey, isGpu } from "./client";
 import type { ForwardTrace } from "./types";
 
 export interface GenOpts {
@@ -65,7 +65,7 @@ export async function generate(o: GenOpts): Promise<Run | null> {
 export async function benchStage(stage: string, promptLen = 64, gen = 8): Promise<BrowserBench | null> {
   const who = `bench:${stage}`;
   if (!claim(who)) return null;
-  const slot = await engine.open(stage, promptLen + gen + 1);
+  const slot = await engine.open(stage, promptLen + (isGpu(stage) ? Math.max(gen, 32) : gen) + 1);
   try {
     await engine.capture(0);
     const text =
@@ -73,6 +73,33 @@ export async function benchStage(stage: string, promptLen = 64, gen = 8): Promis
     let ids = await engine.encode(text);
     while (ids.length < promptLen) ids = ids.concat(ids);
     ids = ids.slice(0, promptLen);
+    if (isGpu(stage)) {
+      // WebGPU rungs: the whole benchmark runs in the worker on the stage's
+      // fastest greedy path (GPU argmax / resident loop where it has one),
+      // best of 3 after a warm-up run that compiles pipelines and binds buffers.
+      await engine.gpuBench(slot, ids, gen);
+      const runs = [];
+      for (let i = 0; i < 3; i++) runs.push(await engine.gpuBench(slot, ids, Math.max(gen, 32)));
+      const best = runs.reduce((a, b) => (b.decodeMs < a.decodeMs ? b : a));
+      const g = Math.max(gen, 32);
+      const build = getState().build ?? undefined;
+      const b: BrowserBench = {
+        stage,
+        build,
+        prefillTokS: (promptLen / Math.min(...runs.map((r) => r.prefillMs))) * 1000,
+        tokS: (g / best.decodeMs) * 1000,
+        msPerTok: best.decodeMs / g,
+        promptLen,
+        genTokens: g,
+        at: Date.now(),
+        ua: navigator.userAgent,
+        dispatches: best.dispatches,
+        submits: best.submits,
+        adapter: getState().webgpu?.adapter,
+      };
+      setState((s) => ({ bench: { ...s.bench, [benchKey(build ?? null, stage)]: b } }));
+      return b;
+    }
     // warm-up (wasm tier-up, first touch of buffers): a few single-token forwards
     for (let i = 0; i < 3; i++) await engine.forward(slot, [ids[i]]);
     await engine.reset(slot);

@@ -5,6 +5,7 @@
 
 import type { ForwardTrace, ModelConfig, OpRec, StageInfo } from "../engine/types";
 import type { Run, Tok } from "../engine/client";
+import type { WebgpuRecording } from "../engine/webgpu";
 
 export interface LensData {
   /** positions (indices into the token list) the lens was computed for */
@@ -66,6 +67,8 @@ export interface Recorded {
   ladder: Record<string, { tokS: number; msPerTok: number; prefillTokS: number; promptLen: number; genTokens: number }>;
   race: { prompt: number[]; text: string; lanes: RaceLane[] } | null;
   vocab: Map<number, Uint8Array>;
+  /** WebGPU rungs, recorded in headless Chrome (web/scripts/record-webgpu.sh) */
+  webgpu: WebgpuRecording | null;
 }
 
 const BASE = `${import.meta.env.BASE_URL}recorded/`;
@@ -179,12 +182,20 @@ let pending: Promise<Recorded | null> | null = null;
 export function loadRecorded(): Promise<Recorded | null> {
   pending ??= (async () => {
     try {
-      const [meta, run, bench, attBuf] = await Promise.all([
+      const [meta, run, bench, attBuf, webgpu] = await Promise.all([
         fetch(`${BASE}meta.json`).then((r) => r.json()),
         fetch(`${BASE}run.json`).then((r) => r.json()),
         fetch(`${BASE}bench.json`).then((r) => (r.ok ? r.json() : { ladder: {}, race: null })),
         fetch(`${BASE}attention.bin`).then((r) => r.arrayBuffer()),
+        fetch(`${BASE}webgpu.json`)
+          .then((r) => (r.ok && (r.headers.get("content-type") ?? "").includes("json") ? (r.json() as Promise<WebgpuRecording>) : null))
+          .catch(() => null),
       ]);
+      // WebGPU rungs come from a browser recording, not the Node one: merge them in.
+      if (webgpu) {
+        meta.stages = [...meta.stages.filter((s: StageInfo) => s.backend !== "webgpu"), ...webgpu.stages];
+        bench.ladder = { ...(bench.ladder ?? {}), ...webgpu.ladder };
+      }
       const cfg = meta.config as ModelConfig;
       const tokens: Tok[] = run.tokens.map((t: [number, number, number | null, [number, number][] | null, number | null]) => ({
         id: t[0],
@@ -238,6 +249,7 @@ export function loadRecorded(): Promise<Recorded | null> {
         ladder: bench.ladder ?? {},
         race: bench.race ?? null,
         vocab,
+        webgpu,
       };
       return r;
     } catch (e) {
