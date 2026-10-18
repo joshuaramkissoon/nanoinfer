@@ -1,0 +1,9 @@
+[package]
+name = "nanoinfer-core"
+description = "A small, readable LLM inference engine (GPT-2). No filesystem, threads or clocks: runs on wasm32-unknown-unknown."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true

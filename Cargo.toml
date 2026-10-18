@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["crates/core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/joshuaramkissoon/nanoinfer"
+
+[workspace.dependencies]
+serde_json = "1"
+
+# Release builds are what we benchmark. We deliberately keep the default
+# release profile (no LTO, no target-cpu=native) for the baseline stages so
+# that every later speed-up is attributable to a code change we can point at.
+[profile.release]
+debug = "line-tables-only" # symbols for profilers (samply / Instruments), no runtime cost
