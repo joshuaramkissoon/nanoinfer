@@ -7,13 +7,14 @@
 //! at runtime and compare them.
 //!
 //! ## Adding a stage
-//! 1. Add a variant to [`Stage`] (+ its name in `Stage::name` / `Stage::ALL`).
+//! 1. Add a variant to [`Stage`], to `Stage::ALL`, and its row in
+//!    [`Stage::spec`] (name, kernel label, threading, packing, KV cache).
 //! 2. If it's a new *kernel* (faster matmul, ...): add a kernel set in
 //!    [`crate::kernels`] and reuse an existing forward, e.g.
 //!    `kv_cache::forward::<Simd, T>`. If it's a new *strategy* (batching, a
 //!    different cache layout, ...): write `stages/<name>.rs` with a `forward`
 //!    built from [`blocks`]. Never edit an old stage's code path.
-//! 3. Add match arms in [`Session::step`] and [`Stage::kernels`].
+//! 3. Add its match arm in [`Session::step`].
 //! 4. The reference tests iterate `Stage::ALL`, so they cover it automatically.
 
 pub mod blocks;
@@ -81,6 +82,78 @@ pub enum Stage {
     Q8Prefill,
 }
 
+/// Every per-stage property in one row (see [`Stage::spec`]). Formats are not
+/// listed separately: they are derived from [`Packing`], the same thing that
+/// decides which packed matrices a [`Session`] builds, so the byte accounting
+/// can't drift from what the decode loop really streams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StageSpec {
+    /// CLI / browser name (`--stage <name>`).
+    pub name: &'static str,
+    /// Human label of the kernel set.
+    pub kernels: &'static str,
+    /// Splits work across cores (with the `threads` feature).
+    pub threaded: bool,
+    /// Which packed copy of the weights the stage reads.
+    pub packing: Packing,
+    /// Which KV cache it keeps.
+    pub kv: KvKind,
+}
+
+/// The packed weight copy a stage builds (stages 8+). Determines both the block
+/// format and the LM-head format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Packing {
+    /// Reads the f32 [`Model`] directly.
+    None,
+    /// f16 blocks and head.
+    F16,
+    /// Q8_0 blocks, f16 head.
+    Q8,
+    /// Q4_0 blocks, f16 head.
+    Q4,
+    /// Q8_0 blocks, rescored head (Q8_0 approximate, f16 exact for candidates).
+    Q8Rescored,
+    /// Q4_0 blocks, rescored head.
+    Q4Rescored,
+    /// Q8_0 blocks with the int8 sdot prefill tile, rescored head.
+    Q8GemmRescored,
+}
+
+impl Packing {
+    /// Format of the block matrices.
+    pub fn blocks(self) -> WeightFormat {
+        match self {
+            Packing::None => WeightFormat::F32,
+            Packing::F16 => WeightFormat::F16,
+            Packing::Q8 | Packing::Q8Rescored | Packing::Q8GemmRescored => WeightFormat::Q8_0,
+            Packing::Q4 | Packing::Q4Rescored => WeightFormat::Q4_0,
+        }
+    }
+
+    /// Format of the LM-head bytes streamed per token. Integer stages keep the
+    /// head at f16 (it is the most quantisation-sensitive matrix); the rescored
+    /// head streams its Q8_0 approximate copy and reads only ~CAP f16 rows.
+    pub fn head(self) -> WeightFormat {
+        match self {
+            Packing::None => WeightFormat::F32,
+            Packing::F16 | Packing::Q8 | Packing::Q4 => WeightFormat::F16,
+            Packing::Q8Rescored | Packing::Q4Rescored | Packing::Q8GemmRescored => WeightFormat::Q8_0,
+        }
+    }
+}
+
+/// The KV cache a stage keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KvKind {
+    /// No cache: recompute the whole context (stage 0).
+    None,
+    /// f32, row-major `[n_layer, max_seq, C]`.
+    F32,
+    /// f16, head-major (stage 14+).
+    F16,
+}
+
 impl Stage {
     pub const ALL: &'static [Stage] = &[
         Stage::Naive,
@@ -105,71 +178,66 @@ impl Stage {
         Stage::Q8Prefill,
     ];
 
+    /// The stage's row in the stage table: name, kernel label, threading,
+    /// packed weights and KV cache. Everything else ([`Self::weight_format`],
+    /// [`Self::head_format`], [`Self::decode_bytes`]) is derived from it.
+    ///
+    /// TODO(docs/IMPROVEMENT_PLAN.md 0.23, review 04 §1.2): the forward
+    /// dispatch in [`Session::step`] is still its own `match`; collapse it onto
+    /// this table too.
+    pub const fn spec(self) -> StageSpec {
+        use KvKind as K;
+        use Packing as P;
+        let (name, kernels, threaded, packing, kv) = match self {
+            Stage::Naive => ("naive", Reference::NAME, false, P::None, K::None),
+            Stage::KvCache => ("kv-cache", Reference::NAME, false, P::None, K::F32),
+            Stage::Unrolled => ("unrolled", Unrolled::NAME, false, P::None, K::F32),
+            Stage::Neon => ("neon", Neon::NAME, false, P::None, K::F32),
+            Stage::Tiled => ("tiled", Tiled::NAME, false, P::None, K::F32),
+            Stage::Threads => ("threads", Threaded::NAME, true, P::None, K::F32),
+            Stage::SpinPool => ("spin-pool", Spin::NAME, true, P::None, K::F32),
+            Stage::FastOps => ("fast-ops", FastOps::NAME, true, P::None, K::F32),
+            Stage::F16 => ("f16", "fast-ops + f16", true, P::F16, K::F32),
+            Stage::Q8 => ("q8", "fast-ops + q8_0 (f16 head)", true, P::Q8, K::F32),
+            Stage::Q4 => ("q4", "fast-ops + q4_0 (f16 head)", true, P::Q4, K::F32),
+            Stage::Q8Fast => ("q8-fast", "lowlat + q8_0 (f16 head)", true, P::Q8, K::F32),
+            Stage::Q4Fast => ("q4-fast", "lowlat + q4_0 (f16 head)", true, P::Q4, K::F32),
+            Stage::Q8Rescore => ("q8-rescore", "lowlat + q8_0 (rescored head)", true, P::Q8Rescored, K::F32),
+            Stage::Q4Rescore => ("q4-rescore", "lowlat + q4_0 (rescored head)", true, P::Q4Rescored, K::F32),
+            Stage::Q8Attn => ("q8-attn", "attn-neon + q8_0 (rescored head)", true, P::Q8Rescored, K::F32),
+            Stage::Q4Attn => ("q4-attn", "attn-neon + q4_0 (rescored head)", true, P::Q4Rescored, K::F32),
+            Stage::Q8Kv16 => ("q8-kv16", "attn-neon + q8_0 (rescored head) + f16 kv", true, P::Q8Rescored, K::F16),
+            Stage::Q4Kv16 => ("q4-kv16", "attn-neon + q4_0 (rescored head) + f16 kv", true, P::Q4Rescored, K::F16),
+            Stage::Q8Prefill => (
+                "q8-prefill",
+                "attn-neon + q8_0 sdot prefill (rescored head) + f16 kv",
+                true,
+                P::Q8GemmRescored,
+                K::F16,
+            ),
+        };
+        StageSpec { name, kernels, threaded, packing, kv }
+    }
+
     /// Name of the kernel set this stage runs.
     pub fn kernels(self) -> &'static str {
-        match self {
-            Stage::Naive | Stage::KvCache => Reference::NAME,
-            Stage::Unrolled => Unrolled::NAME,
-            Stage::Neon => Neon::NAME,
-            Stage::Tiled => Tiled::NAME,
-            Stage::Threads => Threaded::NAME,
-            Stage::SpinPool => Spin::NAME,
-            Stage::FastOps => FastOps::NAME,
-            Stage::F16 => "fast-ops + f16",
-            Stage::Q8 => "fast-ops + q8_0 (f16 head)",
-            Stage::Q4 => "fast-ops + q4_0 (f16 head)",
-            Stage::Q8Fast => "lowlat + q8_0 (f16 head)",
-            Stage::Q4Fast => "lowlat + q4_0 (f16 head)",
-            Stage::Q8Rescore => "lowlat + q8_0 (rescored head)",
-            Stage::Q4Rescore => "lowlat + q4_0 (rescored head)",
-            Stage::Q8Attn => "attn-neon + q8_0 (rescored head)",
-            Stage::Q4Attn => "attn-neon + q4_0 (rescored head)",
-            Stage::Q8Kv16 => "attn-neon + q8_0 (rescored head) + f16 kv",
-            Stage::Q4Kv16 => "attn-neon + q4_0 (rescored head) + f16 kv",
-            Stage::Q8Prefill => "attn-neon + q8_0 sdot prefill (rescored head) + f16 kv",
-        }
+        self.spec().kernels
     }
 
     /// Whether this stage's kernels use more than one thread (with the
     /// `threads` feature; the thread count is the global rayon pool's).
     pub fn multithreaded(self) -> bool {
-        // Stages 0–4 are single-threaded; every later stage splits work across cores.
-        !matches!(self, Stage::Naive | Stage::KvCache | Stage::Unrolled | Stage::Neon | Stage::Tiled)
+        self.spec().threaded
     }
 
     /// How this stage stores weight matrices (sets its decode ceiling).
     pub fn weight_format(self) -> WeightFormat {
-        match self {
-            Stage::F16 => WeightFormat::F16,
-            Stage::Q8 => WeightFormat::Q8_0,
-            Stage::Q4 => WeightFormat::Q4_0,
-            Stage::Q8Fast => WeightFormat::Q8_0,
-            Stage::Q4Fast => WeightFormat::Q4_0,
-            Stage::Q8Rescore => WeightFormat::Q8_0,
-            Stage::Q4Rescore => WeightFormat::Q4_0,
-            Stage::Q8Attn => WeightFormat::Q8_0,
-            Stage::Q4Attn => WeightFormat::Q4_0,
-            Stage::Q8Kv16 => WeightFormat::Q8_0,
-            Stage::Q4Kv16 => WeightFormat::Q4_0,
-            Stage::Q8Prefill => WeightFormat::Q8_0,
-            _ => WeightFormat::F32,
-        }
+        self.spec().packing.blocks()
     }
 
-    /// Format of the tied LM head. Same as the blocks, except the integer
-    /// stages, which keep it f16 (it is by far the most quantisation-sensitive matrix).
+    /// Format of the tied LM head's streamed bytes (see [`Packing::head`]).
     pub fn head_format(self) -> WeightFormat {
-        if matches!(
-            self,
-            Stage::Q8Rescore | Stage::Q4Rescore | Stage::Q8Attn | Stage::Q4Attn | Stage::Q8Kv16 | Stage::Q4Kv16
-        ) {
-            // Streamed bytes are the Q8 approximate head; rescoring reads ~256 f16 rows.
-            return WeightFormat::Q8_0;
-        }
-        match self.weight_format() {
-            WeightFormat::Q8_0 | WeightFormat::Q4_0 => WeightFormat::F16,
-            f => f,
-        }
+        self.spec().packing.head()
     }
 
     /// Bytes this stage streams from memory per decoded token (its ceiling's
@@ -182,28 +250,7 @@ impl Stage {
     }
 
     pub fn name(self) -> &'static str {
-        match self {
-            Stage::Naive => "naive",
-            Stage::KvCache => "kv-cache",
-            Stage::Unrolled => "unrolled",
-            Stage::Neon => "neon",
-            Stage::Tiled => "tiled",
-            Stage::Threads => "threads",
-            Stage::SpinPool => "spin-pool",
-            Stage::FastOps => "fast-ops",
-            Stage::F16 => "f16",
-            Stage::Q8 => "q8",
-            Stage::Q4 => "q4",
-            Stage::Q8Fast => "q8-fast",
-            Stage::Q4Fast => "q4-fast",
-            Stage::Q8Rescore => "q8-rescore",
-            Stage::Q4Rescore => "q4-rescore",
-            Stage::Q8Attn => "q8-attn",
-            Stage::Q4Attn => "q4-attn",
-            Stage::Q8Kv16 => "q8-kv16",
-            Stage::Q4Kv16 => "q4-kv16",
-            Stage::Q8Prefill => "q8-prefill",
-        }
+        self.spec().name
     }
 }
 
@@ -354,21 +401,28 @@ enum PackedWeights {
 
 impl PackedWeights {
     fn for_stage(model: &Model, stage: Stage) -> Self {
-        match stage {
-            Stage::Q8Prefill => return PackedWeights::Q8G(Box::new(packed::PackedModel::new(model))),
-            Stage::Q8Rescore | Stage::Q8Attn | Stage::Q8Kv16 => {
-                return PackedWeights::Q8R(Box::new(packed::PackedModel::new(model)))
-            }
-            Stage::Q4Rescore | Stage::Q4Attn | Stage::Q4Kv16 => {
-                return PackedWeights::Q4R(Box::new(packed::PackedModel::new(model)))
-            }
-            _ => {}
+        use packed::PackedModel as P;
+        match stage.spec().packing {
+            Packing::None => PackedWeights::None,
+            Packing::F16 => PackedWeights::F16(Box::new(P::new(model))),
+            Packing::Q8 => PackedWeights::Q8(Box::new(P::new(model))),
+            Packing::Q4 => PackedWeights::Q4(Box::new(P::new(model))),
+            Packing::Q8Rescored => PackedWeights::Q8R(Box::new(P::new(model))),
+            Packing::Q4Rescored => PackedWeights::Q4R(Box::new(P::new(model))),
+            Packing::Q8GemmRescored => PackedWeights::Q8G(Box::new(P::new(model))),
         }
-        match stage.weight_format() {
-            WeightFormat::F32 => PackedWeights::None,
-            WeightFormat::F16 => PackedWeights::F16(Box::new(packed::PackedModel::new(model))),
-            WeightFormat::Q8_0 => PackedWeights::Q8(Box::new(packed::PackedModel::new(model))),
-            WeightFormat::Q4_0 => PackedWeights::Q4(Box::new(packed::PackedModel::new(model))),
+    }
+
+    /// Bytes of the packed matrices the decode loop streams (`None` for f32 stages).
+    fn bytes(&self) -> Option<usize> {
+        match self {
+            PackedWeights::None => None,
+            PackedWeights::F16(p) => Some(p.bytes()),
+            PackedWeights::Q8(p) => Some(p.bytes()),
+            PackedWeights::Q4(p) => Some(p.bytes()),
+            PackedWeights::Q8R(p) => Some(p.bytes()),
+            PackedWeights::Q8G(p) => Some(p.bytes()),
+            PackedWeights::Q4R(p) => Some(p.bytes()),
         }
     }
 }
@@ -394,12 +448,12 @@ impl Session {
 
     pub fn with_max_seq(model: &Model, stage: Stage, max_seq: usize) -> Self {
         let max_seq = max_seq.min(model.config.n_ctx);
-        let uses_kv16 = matches!(stage, Stage::Q8Kv16 | Stage::Q4Kv16 | Stage::Q8Prefill);
-        let kv = match stage {
-            Stage::Naive => KvCache::default(),
+        let uses_kv16 = stage.spec().kv == KvKind::F16;
+        let kv = match stage.spec().kv {
+            KvKind::None => KvCache::default(),
             // f16 stages keep their cache in `kv16`; `kv` only tracks the length.
-            _ if uses_kv16 => KvCache { k: Vec::new(), v: Vec::new(), len: 0, capacity: max_seq },
-            _ => KvCache::new(model, max_seq),
+            KvKind::F16 => KvCache { k: Vec::new(), v: Vec::new(), len: 0, capacity: max_seq },
+            KvKind::F32 => KvCache::new(model, max_seq),
         };
         let kv16 = if uses_kv16 { kv16::KvCache16::new(model, max_seq) } else { kv16::KvCache16::default() };
         let packed = PackedWeights::for_stage(model, stage);
@@ -432,6 +486,12 @@ impl Session {
     }
     pub fn kv_cache(&self) -> &KvCache {
         &self.kv
+    }
+
+    /// Bytes of this session's packed weight matrices (blocks + the streamed LM
+    /// head), or `None` for f32 stages, which read the [`Model`] directly.
+    pub fn packed_bytes(&self) -> Option<usize> {
+        self.packed.bytes()
     }
 
     /// Forget the conversation (keeps allocations).
@@ -632,5 +692,79 @@ impl Session {
             trace.forward_end(&info);
         }
         Ok(&self.acts.logits)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::weights::Layer;
+    use crate::Config;
+
+    /// A tiny GPT-2-shaped model with deterministic weights (packing only needs shapes).
+    fn tiny() -> Model {
+        let cfg = Config { n_vocab: 96, n_ctx: 8, n_embd: 64, n_head: 1, n_layer: 2 };
+        let c = cfg.n_embd;
+        let mut seed = 1u32;
+        let mut v = |n: usize| -> Vec<f32> {
+            (0..n)
+                .map(|_| {
+                    seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    (seed >> 8) as f32 / (1 << 24) as f32 - 0.5
+                })
+                .collect()
+        };
+        let layers = (0..cfg.n_layer)
+            .map(|_| Layer {
+                ln_1_w: v(c),
+                ln_1_b: v(c),
+                attn_w: v(3 * c * c),
+                attn_b: v(3 * c),
+                proj_w: v(c * c),
+                proj_b: v(c),
+                ln_2_w: v(c),
+                ln_2_b: v(c),
+                fc_w: v(4 * c * c),
+                fc_b: v(4 * c),
+                fc_proj_w: v(4 * c * c),
+                fc_proj_b: v(c),
+            })
+            .collect();
+        Model { config: cfg, wte: v(cfg.n_vocab * c), wpe: v(cfg.n_ctx * c), layers, ln_f_w: v(c), ln_f_b: v(c) }
+    }
+
+    /// `decode_bytes` (the ceiling's denominator) must equal what the stage's
+    /// packed matrices really hold, plus the f32 biases / LayerNorm. This is the
+    /// check that would have caught q8-prefill reporting an f16 head.
+    #[test]
+    fn decode_bytes_match_packed_weights_for_every_stage() {
+        let model = tiny();
+        let cfg = &model.config;
+        let c = cfg.n_embd;
+        let matrices = cfg.n_layer * 12 * c * c + cfg.n_vocab * c;
+        let f32_other = ((cfg.n_params() - cfg.n_ctx * c - matrices) * 4) as f64;
+        for &stage in Stage::ALL {
+            let s = Session::new(&model, stage);
+            let packed = match s.packed_bytes() {
+                Some(b) => b as f64,
+                None => {
+                    assert_eq!(stage.weight_format(), WeightFormat::F32, "{stage}: f32 format but packed weights");
+                    (matrices * 4) as f64
+                }
+            };
+            let expected = packed + f32_other;
+            assert_eq!(stage.decode_bytes(cfg), expected, "{stage}: decode_bytes vs packed bytes");
+        }
+    }
+
+    #[test]
+    fn spec_names_round_trip_and_kv_matches_formats() {
+        for &stage in Stage::ALL {
+            assert_eq!(stage.name().parse::<Stage>().unwrap(), stage);
+            if stage.spec().kv == KvKind::F16 {
+                assert_ne!(stage.weight_format(), WeightFormat::F32, "{stage}");
+            }
+        }
+        assert_eq!(Stage::Q8Prefill.head_format(), WeightFormat::Q8_0);
     }
 }
