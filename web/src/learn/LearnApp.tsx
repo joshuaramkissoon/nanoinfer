@@ -1,4 +1,4 @@
-// The Foundations track: /learn (contents) and /learn/<chapter>.
+// The course: /learn (contents) and /learn/<chapter>.
 
 import { useEffect, useState } from "react";
 import { boot } from "../engine/client";
@@ -41,7 +41,7 @@ export default function LearnApp() {
   const guide = slug === "field-guide";
 
   useEffect(() => {
-    document.title = ch ? `${ch.title} · nanoinfer foundations` : guide ? "Field guide · nanoinfer" : "Foundations · nanoinfer";
+    document.title = ch ? `${ch.title} · nanoinfer` : guide ? "Field guide · nanoinfer" : "The course · nanoinfer";
     if (ch) markVisited(ch.slug);
   }, [ch, guide]);
 
@@ -152,7 +152,7 @@ function ChapterPage({ ch, idx }: { ch: Chapter; idx: number }) {
           ) : (
             <a href="/learn" onClick={linkTo("/learn")} className="prev">
               <span className="k">← contents</span>
-              <span className="t">Foundations</span>
+              <span className="t">The course</span>
             </a>
           )}
           {next ? (
@@ -162,10 +162,10 @@ function ChapterPage({ ch, idx }: { ch: Chapter; idx: number }) {
               <span className="q">{next.q}</span>
             </a>
           ) : (
-            <a href="/" className="next">
-              <span className="k">the end of the beginning →</span>
-              <span className="t">Now watch it all run, live</span>
-              <span className="q">The demo page: the same engine, every stage of the climb.</span>
+            <a href="/lab" className="next">
+              <span className="k">next · the lab →</span>
+              <span className="t">The lab: every stage, running in your tab</span>
+              <span className="q">The same engine with nothing simplified away.</span>
             </a>
           )}
         </nav>

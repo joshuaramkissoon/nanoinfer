@@ -15,6 +15,7 @@ const MB_PER_TOKEN = 494.6;
 
 function Demo() {
   const rec = useRecorded();
+  const data = useLearnData();
   const status = useEngine((s) => s.status);
   const progress = useEngine((s) => s.progress);
   const live = status === "ready";
@@ -153,9 +154,17 @@ function Demo() {
           <div className="ld-speed">
             {speed ? (
               <>
-                <b>{speed.toFixed(0)} tokens a second</b>, about {words!.toFixed(0)} words. For every one of those tokens, the computer
-                read all {MB_PER_TOKEN.toFixed(0)} MB of GPT-2's numbers from memory: about {((speed * MB_PER_TOKEN) / 1000).toFixed(0)} GB every
-                second. That is why it isn't faster, and the course explains how to change it.
+                <b>{speed.toFixed(0)} tokens a second</b>, about {words!.toFixed(0)} words, on one CPU core in a browser tab with
+                32-bit weights. For every one of those tokens, the computer read all {MB_PER_TOKEN.toFixed(0)} MB of GPT-2's numbers
+                from memory: about {((speed * MB_PER_TOKEN) / 1000).toFixed(0)} GB every second. That is why it isn't faster, and the
+                course explains how to change it.
+                {data && (
+                  <>
+                    {" "}
+                    The engine's first version wrote {data.headline.naive.decode} tokens a second; its fastest, on the M4's GPU with
+                    4-bit weights, writes {Math.round(data.headline.gpu.decode).toLocaleString("en-GB")}.
+                  </>
+                )}
               </>
             ) : (
               <span className="nv-muted">{running ? "writing…" : " "}</span>
