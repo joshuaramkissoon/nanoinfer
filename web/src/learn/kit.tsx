@@ -423,7 +423,7 @@ export function chartColors(dark: boolean) {
 // ---- glossary -------------------------------------------------------------------------------
 
 export const GLOSSARY: Record<string, string> = {
-  token: "A piece of text the model reads or writes: a word, part of a word, or a single character. GPT-2 knows 50,257 of them.",
+  token: "A piece of text the model reads or writes: a word, part of a word, or a single byte. GPT-2 knows 50,257 of them.",
   "language model": "A program that, given some text, gives a probability for every possible next token.",
   probability: "How likely something is, from 0% (never) to 100% (certain). All the options together add up to 100%.",
   vector: "A list of numbers. GPT-2 represents every token as a list of 768 numbers.",
@@ -448,7 +448,7 @@ export const GLOSSARY: Record<string, string> = {
   perplexity: "How surprised a model is by real text, on average: lower is better. A rise of 8% means its guesses got measurably worse.",
   SIMD: "Single instruction, multiple data: one instruction that does the same operation on 4, 8 or more numbers at once.",
   thread: "One independent stream of work. A CPU core runs one at a time; a GPU runs thousands.",
-  GPU: "A chip with thousands of small, simple cores built to do the same arithmetic on lots of numbers at once.",
+  GPU: "A chip with thousands of simple arithmetic lanes that run the same instruction on many numbers at once.",
   batch: "Several requests processed together in one forward pass, so each weight read from memory is used for all of them.",
   "speculative decoding": "A small, fast model guesses the next few tokens; the big model checks all the guesses in one pass and keeps the ones it agrees with.",
   "time to first token": "How long a user waits, after sending a request, before the first word of the answer appears.",
@@ -466,7 +466,7 @@ export const GLOSSARY: Record<string, string> = {
   throughput: "Total tokens per second across all users: what the operator pays for.",
   latency: "How long one user waits: for the first token, and between tokens.",
   bf16: "A 16-bit number format with fp32's range and less precision: the default for modern model weights.",
-  NVLink: "NVIDIA's GPU-to-GPU link inside a server: ~900 GB/s total per H100, about 7× PCIe 5.",
+  NVLink: "NVIDIA's GPU-to-GPU link inside a server: ~900 GB/s total per H100 (450 each way), about 7× PCIe 5.",
   kernel: "One function that runs on the GPU across thousands of threads, such as one matrix multiply.",
   "context window": "The most tokens a model can look at at once (its prompt plus its answer so far).",
   "tensor parallel": "Splitting every weight matrix across GPUs so each does a slice of every multiply; needs an all-reduce per layer.",

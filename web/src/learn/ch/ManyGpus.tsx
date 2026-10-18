@@ -103,8 +103,8 @@ export default function ManyGpus() {
       <p>Combining partial results so every GPU ends up with the total is called an <b>all-reduce</b>, and the classic way to do it is a ring:</p>
       <Ring />
       <p>
-        The same arithmetic from part two decides whether this is worth it. Inside a GPU, memory moves ~3,350 GB/s. Between
-        GPUs in one server, the fast links move ~450. Between servers, ~50. Every byte that has to cross a link is slow next to
+        The same arithmetic from part two decides whether this is worth it. Inside an H100, memory moves about 3.35 TB/s. Between
+        GPUs in one server, NVLink moves ~450 GB/s each way. Between servers, ~50 GB/s. Every byte that has to cross a link is slow next to
         a byte read locally.
       </p>
       <p>
@@ -122,7 +122,7 @@ export default function ManyGpus() {
         <p>
           Splitting GPT-2 within each layer would need 24 all-reduces per token, each only ~1.5 KB. Tiny messages are all
           latency (the cost of starting a conversation), no bandwidth. For a model this small, the talking would cost more than
-          the work it saves. This is the subject of a later post in the series, run on real rented GPUs.
+          the work it saves.
         </p>
       </Deeper>
     </>

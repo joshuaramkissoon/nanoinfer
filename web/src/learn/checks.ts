@@ -28,13 +28,14 @@ export const CHECKS: Record<string, Q[]> = {
       why: "Weights are an immutable, shared asset, like a read-only dataset every request reads. The KV cache is per-request state that grows with the conversation and must be stored, scheduled and evicted, like session state in any stateful service.",
     },
     {
-      q: "Is a model's forward pass deterministic?",
+      q: "You send the same prompt twice, at temperature 0, to a busy production server. Will the answers always match?",
       options: [
-        "Yes: randomness only enters at sampling",
+        "Yes: with no sampling, the maths is fixed",
+        "No: batch size changes how floats get added",
         "No: the network adds noise on every pass",
       ],
-      answer: 0,
-      why: "The forward pass is a pure function of (weights, tokens). The variety you see in chat answers comes from sampling (chapter 07), plus tiny floating-point differences when batch shapes change.",
+      answer: 1,
+      why: "On one machine with fixed shapes, the forward pass is a pure function of (weights, tokens). A server batches your request with whoever else is online, and picks kernels and reduction orders by batch size. Float addition isn't associative (chapter 13), so a logit can move in its last digit, flip a near-tie, and the text diverges from there. Bit-identical output needs batch-invariant kernels.",
     },
   ],
   "why-its-expensive": [
@@ -77,7 +78,7 @@ export const CHECKS: Record<string, Q[]> = {
       why: "Decode waits on bytes, so the memory system decides speed. GPUs pair thousands of simple lanes with HBM stacked right next to the die. The lanes matter most for prefill and batching, where work per byte is high.",
     },
     {
-      q: "You split a model across 8 GPUs. Inside each GPU memory moves at ~3,350 GB/s; between them NVLink moves ~450 GB/s each way. What does that ratio tell you?",
+      q: "You split a model across 8 GPUs. Inside each GPU memory moves at ~3.35 TB/s; between them NVLink moves ~450 GB/s each way. What does that ratio tell you?",
       options: [
         "Send small results between GPUs, never the weights",
         "Eight GPUs will decode about 8× faster",

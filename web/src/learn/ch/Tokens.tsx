@@ -174,8 +174,8 @@ export default function Tokens() {
     <>
       <p>
         The model can't read letters. It reads numbers, so the text is chopped into pieces called <G k="token">tokens</G> first, and each
-        token is replaced by its ID: a number between 0 and 50,256. A token can be a whole word, part of a word, a space plus a word, or a single
-        byte of an emoji.
+        token is replaced by its ID: a number between 0 and 50,256. A token can be a word, part of a word, or a single byte. A
+        leading space usually travels with the word after it, and a rare emoji can take several single-byte tokens.
       </p>
       <p>Common words get their own token. Rare words get built from smaller pieces. Type something and see:</p>
       {tok ? (

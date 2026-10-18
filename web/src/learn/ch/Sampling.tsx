@@ -171,7 +171,7 @@ export default function Sampling() {
       <Deeper title="Why this is free, in engine terms">
         <p>
           Producing the scores took a full forward pass: ~250 million multiply-adds and reading ~500 MB of weights. Sampling
-          from them is a few thousand operations. That's why the demo page can re-sample a token with a different temperature
+          from them is a few thousand operations. That's why the lab can re-sample a token with a different temperature
           instantly: the expensive part is already done, the scores are just kept.
         </p>
         <p>

@@ -345,7 +345,7 @@ export default function DotProduct() {
         multiplies and adds, roughly two for every weight in the model. Everything else (attention, the bits in between) is
         the last 1%.
       </p>
-      <Idea>Running a model is overwhelmingly multiply-and-add: matrices times vectors. Make that fast, and you've made the model fast.</Idea>
+      <Idea>Running a model is overwhelmingly multiply-and-add: matrices times vectors. Part 2 shows that the cost is reading those matrices, not the arithmetic.</Idea>
       <Deeper title="What does a dot product measure? (drag some arrows)">
         <DotToy />
       </Deeper>

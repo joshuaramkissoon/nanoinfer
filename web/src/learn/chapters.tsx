@@ -38,7 +38,7 @@ export interface Chapter {
 /** Part 0 is the framing for people who know systems but not ML; parts 1–3 are the original course. */
 export const PARTS = ["Inference for systems engineers", "How a model writes text", "Why it's slow", "Making it fast"];
 export const PART_BLURB = [
-  "The recommended start. What a model physically is, what an inference engine does, why every word is expensive, the hardware, and the field's jargon mapped onto distributed systems you already know.",
+  "The recommended start. What a model physically is, what an inference engine does, why every token is expensive, the hardware, and the field's jargon mapped onto distributed systems you already know.",
   "From a prompt to the next word: tokens, vectors, attention, and the loop that writes one token at a time.",
   "Where the time actually goes, and the speed limit you can work out before writing any code.",
   "The engine's climb from 0.37 to thousands of tokens per second, one bottleneck at a time.",
@@ -46,7 +46,7 @@ export const PART_BLURB = [
 
 export const CHAPTERS: Chapter[] = [
   { slug: "what-is-inference", part: 0, title: "What inference is", q: "What is a model, physically, and what does it mean to run one?", Component: WhatIsInference },
-  { slug: "why-its-expensive", part: 0, title: "Every word reads every weight", q: "Why is each word a model writes so expensive?", Component: WhyExpensive },
+  { slug: "why-its-expensive", part: 0, title: "Every token reads every weight", q: "Why is each token a model writes so expensive?", Component: WhyExpensive },
   { slug: "the-hardware", part: 0, title: "The hardware in one picture", q: "CPU or GPU, and why is memory the wall?", Component: Hardware },
   { slug: "rosetta-stone", part: 0, title: "A Rosetta stone", q: "Which of these weird terms do you already know under another name?", Component: Rosetta },
   { slug: "next-token", part: 1, title: "Guess the next word", q: "What does a language model actually do?", Component: NextToken },
