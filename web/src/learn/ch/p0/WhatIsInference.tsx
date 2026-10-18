@@ -15,6 +15,8 @@ function WriteOnce() {
   useFrame(seen && !reduce, (dt) => setT((v) => (v + dt) % 1000));
   const off = reduce ? 0 : (t * 26) % 18;
   const panel = pal.dark ? "#262421" : "#ffffff";
+  const [wref, w] = useWidth<HTMLDivElement>();
+  const narrow = w > 0 && w < 520; // phones: training → weights on one row, inference underneath
   return (
     <Fig
       figRef={onScreen}
@@ -23,14 +25,16 @@ function WriteOnce() {
       prov="diagram"
       caption={
         <>
-          Left, <Swatch c={cc.c1}>ember</Swatch>: training, a one-off job that searches for good numbers. Middle,{" "}
-          <Swatch c={cc.c2}>blue</Swatch>: the result, a file of frozen numbers. Right: inference, one small job per word per
+          {narrow ? "First" : "Left"}, <Swatch c={cc.c1}>ember</Swatch>: training, a one-off job that searches for good numbers.{" "}
+          {narrow ? "Then" : "Middle"}, <Swatch c={cc.c2}>blue</Swatch>: the result, a file of frozen numbers.{" "}
+          {narrow ? "Below" : "Right"}: inference, one small job per word per
           user, for as long as the model is in service. Each tick is one forward pass.
         </>
       }
     >
-      <div>
-      <svg viewBox="0 0 640 170" style={{ width: "100%" }} role="img" aria-label="training produces weights once; inference runs them repeatedly">
+      <div ref={wref}>
+      <svg viewBox={narrow ? "0 0 312 300" : "0 0 640 170"} style={{ width: "100%" }} role="img" aria-label="training produces weights once; inference runs them repeatedly">
+        <g transform={narrow ? "translate(2,-26)" : undefined}>
         {/* training */}
         <rect x={8} y={36} width={150} height={92} rx={10} fill={cc.c1} fillOpacity={0.14} stroke={cc.c1} />
         <text x={83} y={62} textAnchor="middle" fontSize={13} fontWeight={700} fill={pal.fg}>
@@ -61,8 +65,14 @@ function WriteOnce() {
             frozen · read-only
           </text>
         </g>
-        <path d="M304,82 H340" stroke={pal.muted} markerEnd="url(#p0a)" />
+        </g>
+        {narrow ? (
+          <path d="M254,140 V170" stroke={pal.muted} markerEnd="url(#p0a)" />
+        ) : (
+          <path d="M304,82 H340" stroke={pal.muted} markerEnd="url(#p0a)" />
+        )}
         {/* inference stream */}
+        <g transform={narrow ? "translate(-340,150) scale(1)" : undefined}>
         <text x={346} y={30} fontSize={13} fontWeight={700} fill={pal.fg}>
           inference
         </text>
@@ -83,6 +93,7 @@ function WriteOnce() {
         <text x={346} y={136} fontSize={10.5} fill={pal.sub}>
           one tick = one forward pass = one token
         </text>
+        </g>
         <defs>
           <marker id="p0a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
             <path d="M0,0 L8,4 L0,8 z" fill={pal.muted} />
