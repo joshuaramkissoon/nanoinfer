@@ -57,18 +57,18 @@ function Factory() {
         <>
           Left, the warehouse: memory, where the model's weights live. The road: memory <G k="bandwidth" />, delivering boxes
           of bytes at a steady rate. Right, the factory: the processor, doing arithmetic on what arrives. Each box needs some
-          amount of work. The two bars say how busy each side is. The crossover is set to this browser tab's measured
+          amount of work. The two bars say how busy each side is: the truck (memory) and the factory (maths). The crossover is set to this browser tab's measured
           numbers: ~97 billion operations per second against ~59 GB/s, so <b>1.6 operations per byte</b>.
         </>
       }
       tryit={
         <>
-          Press <b>decode (0.5)</b>: the factory mostly waits. Press <b>prefill</b>: now boxes pile up at the factory door. Slide
+          Press <b>decode</b>: the factory mostly waits. Press <b>prefill</b>: now boxes pile up at the factory door. Slide
           slowly from one to the other and find the crossover.
         </>
       }
     >
-      <div className="lr-controls">
+      <div className="lr-controls lr-truck-controls">
         <Slider
           label="work per byte"
           value={Math.log2(I)}
@@ -80,14 +80,17 @@ function Factory() {
             sim.current.queue = Math.min(sim.current.queue, 3);
           }}
           fmt={() => `${I < 1 ? I.toFixed(2) : I.toFixed(1)} FLOP/B`}
-          width="11rem"
+          width="10rem"
         />
-        <button className="lr-btn" onClick={() => setI(0.5)}>
-          decode (0.5)
-        </button>
-        <button className="lr-btn" onClick={() => setI(32)}>
-          prefill, 64 tokens (32)
-        </button>
+        <Seg
+          label="presets"
+          value={I === 0.5 ? "decode" : I === 32 ? "prefill" : ""}
+          onChange={(v) => setI(v === "decode" ? 0.5 : 32)}
+          options={[
+            { v: "decode", label: "decode · 0.5" },
+            { v: "prefill", label: "prefill · 32" },
+          ]}
+        />
       </div>
       <div ref={ref}>
         {w > 0 && (
@@ -125,15 +128,15 @@ function Factory() {
         )}
       </div>
       <div className="lr-bars" style={{ marginTop: "0.4rem" }}>
-        <div className="lr-bar" style={{ gridTemplateColumns: "11.5rem 1fr 3.4rem" }}>
-          <span className="tk">truck (memory) busy</span>
+        <div className="lr-bar lr-busy">
+          <span className="tk">memory busy</span>
           <span className="b">
             <i style={{ width: `${truckBusy * 100}%`, background: pal.cool }} />
           </span>
           <span className="pc">{(truckBusy * 100).toFixed(0)}%</span>
         </div>
-        <div className="lr-bar" style={{ gridTemplateColumns: "11.5rem 1fr 3.4rem" }}>
-          <span className="tk">factory (maths) busy</span>
+        <div className="lr-bar lr-busy">
+          <span className="tk">maths busy</span>
           <span className="b">
             <i style={{ width: `${factoryBusy * 100}%`, background: pal.accent }} />
           </span>

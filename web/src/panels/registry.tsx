@@ -36,8 +36,9 @@ export const PANELS: PanelDef[] = [
       <>
         <h2>Generate, on any rung of the climb</h2>
         <p>
-          The generation loop from <a href="/learn/the-loop">chapter 8</a>, with every stage of the engine selectable. Pick
-          a stage, press run, and the figures below redraw from that run.
+          The generation loop from <a href="/learn/the-loop">chapter 8</a>, with every version of the engine selectable,
+          from the first correct one to the fastest GPU rung. Pick a version, press Generate: that engine writes the text,
+          you see how fast it went in this tab, and the figures below redraw from that run.
         </p>
       </>
     ),
@@ -45,7 +46,7 @@ export const PANELS: PanelDef[] = [
       <>
         <b>What you're looking at:</b> the prompt (grey) and what GPT-2 wrote, each token underlined by how confident the
         model was. On the right, the probabilities behind the selected token. Below, speed and the time each token took.{" "}
-        <b>Try:</b> run stage 0 (naive) and then 1 (kv-cache) and compare the ms-per-token bars; click any token, then a rival,
+        <b>Try:</b> generate with <i>Starting point</i>, then <i>KV cache</i>, and compare the ms-per-token bars; click any token, then a rival,
         to branch the story.
       </>
     ),

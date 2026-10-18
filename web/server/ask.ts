@@ -56,7 +56,7 @@ const SYSTEM = `You are a patient tutor beside "nanoinfer", an interactive cours
 (inference): tokens, embeddings, matrix multiplies, attention, sampling, memory bandwidth, KV caches, quantization,
 CPUs vs GPUs, batching. The reader is learning from scratch and has selected some text on the page.
 
-Rules:
+Rules (unless the request below asks for a different shape):
 - Start with one plain sentence that directly answers. Then at most 3 short sentences of useful context.
 - Everyday words, short sentences. Define any technical term you use. No headings.
 - Prefer the page's own numbers and analogies (they come from real measurements on an Apple M4 Mac mini) and refer to
@@ -69,13 +69,20 @@ PAGE: {title}
 SECTION THE READER IS LOOKING AT:
 {context}`;
 
+// The selection toolbar's actions, worded like Tangent's (server.py KIND_PROMPTS), adapted
+// from "¶n of an article" to "this part of the course".
 const KINDS: Record<string, string> = {
   ask: 'About "{sel}": {q}',
-  simpler: 'Explain "{sel}" more simply, as if to a curious 14-year-old. Use a concrete everyday analogy.',
-  why: 'Why is "{sel}" true, or why does it matter here? Give the reason, not a restatement.',
-  example: 'Give one small, concrete worked example of "{sel}", with actual numbers.',
+  explain: 'Explain "{sel}" as used on this page. What does it mean here, and why does the page say it?',
+  define: 'Define "{sel}" in plain words, as used on this page. One sentence definition, then one sentence on how it is used here.',
+  simplify:
+    "Rewrite this paragraph in plain, simple English for a reader who finds dense text hard. Keep every idea; shorter sentences. Output only the rewrite.\n\nPARAGRAPH:\n{sel}",
+  deeper:
+    'Go deeper on "{sel}": a short reading for a curious learner, like a good magazine explainer. 3 to 5 short paragraphs (about 300 words): what it is, how it actually works, and why it matters for how a model runs or how fast. Concrete facts and numbers; prefer the page\'s own. No headings, no bullet lists.',
   followup: "{q}",
 };
+/** answer length per action: the reading and the rewrite need more room */
+const MAX_TOKENS: Record<string, number> = { deeper: 1100, simplify: 900 };
 
 interface Body {
   kind?: string;
@@ -132,7 +139,7 @@ export async function handleAsk(req: Request, env: AskEnv, ip: string): Promise<
     const r = await fetch(`${env.baseUrl}/chat/completions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${env.key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: m, messages, stream: true, max_tokens: think ? 2000 : 700, temperature: 0.4, reasoning: { enabled: think } }),
+      body: JSON.stringify({ model: m, messages, stream: true, max_tokens: (think ? 1300 : 0) + (MAX_TOKENS[kind] ?? 700), temperature: 0.4, reasoning: { enabled: think } }),
     }).catch((e: Error) => {
       lastErr = e.message;
       return null;

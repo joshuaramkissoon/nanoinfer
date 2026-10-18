@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { PlusIcon } from "./learn/kit";
 import { boot, loadModel, useEngine, engine, setState, WEIGHTS_BASE, weightLabel } from "./engine/client";
 import { Figure } from "./ui/Figure";
 import { TopBar } from "./site/TopBar";
@@ -83,7 +84,10 @@ function EngineCard() {
         </div>
       )}
       <details className="nv-engine-more">
-        <summary className="nv-muted">engine details</summary>
+        <summary className="nv-muted">
+          <PlusIcon />
+          engine details
+        </summary>
       <div className="nv-engine-row nv-muted" style={{ fontSize: "0.72rem" }}>
         <span>stages: {s.stages.map((x) => x.name).join(" → ") || "…"}</span>
         <span>

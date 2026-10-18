@@ -172,14 +172,23 @@ export function Idea({ children, label = "the idea" }: { children: ReactNode; la
   );
 }
 
+/** The disclosure mark: a + drawn on a 12px grid, centred in its circle, that turns to × when open. */
+export function PlusIcon() {
+  return (
+    <span className="plus" aria-hidden>
+      <svg viewBox="0 0 12 12" width="10" height="10">
+        <path d="M6 1.5v9M1.5 6h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+      </svg>
+    </span>
+  );
+}
+
 /** Progressive disclosure: the extra depth, folded. */
 export function Deeper({ title, children, id }: { title: string; children: ReactNode; id?: string }) {
   return (
     <details className="lr-deeper" id={id}>
       <summary>
-        <span className="plus" aria-hidden>
-          +
-        </span>
+        <PlusIcon />
         {title}
       </summary>
       <div className="lr-deeper-body">{children}</div>

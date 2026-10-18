@@ -406,18 +406,28 @@ select {
   text-align: center;
   padding: 1.5rem;
 }
+/* Chart tooltip (dataviz spec): the chart's own surface, a hairline and a soft shadow;
+   text in text colours (value strong, label secondary), so it reads in both themes. */
 .nv-tip {
   position: absolute;
   pointer-events: none;
-  background: var(--m-fg);
-  color: var(--m-bg);
+  background: var(--m-bg);
+  color: var(--m-fg);
+  border: 1px solid var(--m-rule);
+  box-shadow: 0 6px 22px rgb(0 0 0 / 0.14);
   font-size: 0.72rem;
   line-height: 1.5;
-  padding: 0.45rem 0.6rem;
-  border-radius: 5px;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
   white-space: nowrap;
   z-index: 5;
   transform: translate(-50%, calc(-100% - 10px));
+}
+.nv-tip b {
+  font-weight: 700;
+}
+.nv-tip .nv-muted {
+  color: var(--m-sub);
 }
 .nv-legend {
   display: flex;
@@ -1072,4 +1082,268 @@ canvas.nv-canvas {
   height: 100%;
   background: var(--m-sub);
   transition: width 0.25s;
+}
+
+/* ---- token whitespace (src/ui/Tok.tsx) -------------------------------------------- */
+/* A leading space is drawn as a small open bracket, like ␣: muted, baseline-aligned,
+   half a character wide, so " the" reads as "space + the" and never as "·the". */
+.tk-sp {
+  display: inline-block;
+  width: 0.56em;
+  height: 0.36em;
+  margin: 0 0.1em 0 0.04em;
+  border: 1.5px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 2px 2px;
+  opacity: 0.5;
+  vertical-align: baseline;
+}
+.tk-ws {
+  opacity: 0.45;
+  font-size: 0.85em;
+}
+.tk-key {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3em;
+  font-size: 0.7rem;
+  color: var(--m-muted);
+  white-space: nowrap;
+}
+
+/* ---- engine version picker (src/panels/StagePicker.tsx) ----------------------------- */
+.nv-sp {
+  border: 1px solid var(--m-rule);
+  border-radius: 10px;
+  background: var(--nv-panel);
+}
+.nv-sp-current {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 0.2rem 0.9rem;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 0.7rem 0.9rem;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 10px;
+}
+.nv-sp-current:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.nv-sp-current:hover:not(:disabled) .nv-sp-caret {
+  color: var(--m-accent);
+}
+.minimal .nv-sp-current:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--m-accent);
+}
+.nv-sp-k {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--m-muted);
+}
+.nv-sp-v {
+  font-size: 0.86rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nv-sp-speed {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--m-accent);
+  white-space: nowrap;
+}
+.nv-sp-speed small {
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--m-muted);
+}
+.nv-sp-caret {
+  align-self: center;
+  color: var(--m-muted);
+  display: grid;
+  transition: transform 0.2s;
+}
+.nv-sp.open .nv-sp-caret {
+  transform: rotate(180deg);
+}
+.nv-sp-list {
+  border-top: 1px solid var(--m-rule);
+  padding: 0.4rem 0.4rem 0.6rem;
+  max-height: min(34rem, 70vh);
+  overflow-y: auto;
+}
+.nv-sp-cols,
+.nv-sp-opt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3.6rem 4.2rem;
+  gap: 0.8rem;
+  align-items: baseline;
+}
+.nv-sp-cols {
+  padding: 0.35rem 0.6rem 0.2rem 1.9rem;
+  font-size: 0.68rem;
+  color: var(--m-muted);
+  line-height: 1.5;
+}
+.nv-sp-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.nv-sp-group h4 {
+  margin: 0.9rem 0 0.25rem;
+  padding: 0 0.6rem 0 1.9rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--m-fg);
+}
+.nv-sp-group h4 span {
+  display: block;
+  font-weight: 400;
+  font-size: 0.68rem;
+  color: var(--m-muted);
+  line-height: 1.5;
+  margin-top: 0.1rem;
+  max-width: 34rem;
+}
+.nv-sp-opt {
+  position: relative;
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 0.42rem 0.6rem 0.42rem 1.9rem;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--m-fg);
+}
+.nv-sp-opt:hover {
+  background: color-mix(in srgb, var(--m-accent) 6%, transparent);
+}
+.minimal .nv-sp-opt:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--m-accent) 60%, transparent);
+}
+.nv-sp-opt.on {
+  background: var(--m-code-bg);
+}
+.nv-sp-dot {
+  position: absolute;
+  left: 0.7rem;
+  top: 0.78rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--m-muted);
+}
+.nv-sp-opt.on .nv-sp-dot {
+  border-color: var(--m-accent);
+  background: var(--m-accent);
+}
+.nv-sp-name {
+  min-width: 0;
+}
+.nv-sp-name code {
+  font-size: 0.66rem;
+  color: var(--m-muted);
+  margin-left: 0.5rem;
+}
+.nv-sp-what {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--m-sub);
+  line-height: 1.5;
+}
+.nv-sp-opt.fb b {
+  font-weight: 400;
+  color: var(--m-sub);
+}
+.nv-sp-fb {
+  color: var(--m-accent);
+  font-weight: 700;
+}
+.nv-sp-rec {
+  margin-left: 0.5rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--m-accent);
+  border: 1px solid color-mix(in srgb, var(--m-accent) 45%, transparent);
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  vertical-align: 1px;
+}
+.nv-sp-opt .nv-sp-num {
+  font-size: 0.76rem;
+  color: var(--m-sub);
+}
+.nv-sp-opt .nv-sp-num.rec {
+  color: var(--m-muted);
+  font-style: italic;
+}
+.nv-sp-foot {
+  margin: 0.9rem 0.6rem 0.2rem 1.9rem;
+  font-size: 0.68rem;
+  line-height: 1.6;
+  color: var(--m-muted);
+}
+.nv-sp-foot b {
+  color: var(--m-sub);
+}
+@media (max-width: 640px) {
+  .nv-sp-current {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .nv-sp-k {
+    grid-column: 1 / -1;
+  }
+  .nv-sp-speed {
+    grid-column: 1;
+  }
+  .nv-sp-caret {
+    grid-row: 2 / 4;
+    grid-column: 2;
+  }
+  .nv-sp-cols,
+  .nv-sp-opt {
+    grid-template-columns: minmax(0, 1fr) 2.8rem 3.2rem;
+    gap: 0.5rem;
+  }
+  .nv-sp-name code {
+    display: none;
+  }
+}
+.nv-stat .v.nv-accent {
+  font-size: 1.55rem;
+  line-height: 1.2;
+}
+.nv-sp-more {
+  margin: 0.15rem 0 0 1.9rem;
+  border: 1px solid var(--m-rule);
+  background: none;
+  border-radius: 6px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.7rem;
+  color: var(--m-sub);
+  cursor: pointer;
+}
+.nv-sp-more:hover {
+  color: var(--m-accent);
+  border-color: var(--m-accent);
+}
+.nv-probs-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.8rem;
+  font-size: 0.72rem;
+  margin-bottom: 0.5rem;
 }

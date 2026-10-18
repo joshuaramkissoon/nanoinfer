@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { Tk } from "../../ui/Tok";
 import { useWidth } from "../../ui/Figure";
 import { KIND_LABEL, css, heatAt, kindColor, usePalette, type Palette } from "../../ui/theme";
 import { Deeper, Fig, G, Idea, Slider, nf, unpackVec, useLearnData, useRecorded, useFrame } from "../kit";
@@ -141,7 +142,7 @@ function MatVec() {
       prov="weights"
       caption={
         <>
-          Top row: a vector, the first 8 of the 768 numbers for “·dog”. The grid: the top-left 8 × 8 corner of GPT-2's first
+          Top row: a vector, the first 8 of the 768 numbers for “<Tk s=" dog" />”. The grid: the top-left 8 × 8 corner of GPT-2's first
           weight matrix. Ember cells are positive, blue negative, faint ones near zero. The highlighted row is being dot-producted
           with the vector, one multiply-add at a time, and the result lands in the output column on the right. All real
           numbers from GPT-2.
@@ -167,7 +168,7 @@ function MatVec() {
         <svg width={ox + N * (C + G) + 130} height={oy + N * (C + G) + 6} style={{ maxWidth: "100%" }} viewBox={`0 0 ${ox + N * (C + G) + 130} ${oy + N * (C + G) + 6}`}>
           {/* x on top */}
           <text x={ox} y={10} fontSize={10} fill={pal.muted}>
-            vector x (“·dog”, first 8 of 768)
+            vector x (“␣dog”, first 8 of 768)
           </text>
           {x.map((v, j) => (
             <g key={j}>

@@ -1,35 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { decodes, engine, loadModel, median, showToken, tokenText, useEngine, useRunSource, weightLabel, type Tok } from "../engine/client";
+import { SpaceKey, Tk } from "../ui/Tok";
+import { decodes, engine, loadModel, median, tokenText, useEngine, useRunSource, weightLabel, type Tok } from "../engine/client";
 import { generate } from "../engine/generate";
 import { NeedsEngine, useFigureSource, useWidth } from "../ui/Figure";
 import { css, heatAt, usePalette, useReducedMotion } from "../ui/theme";
 import { fmtBytes, fmtMs, linear, sig } from "../lib/fmt";
-import { STAGE_NOTES } from "../lib/stages";
+import { stageLabel } from "../lib/stages";
+import { StagePicker, noteSpeed, recommendedStage } from "./StagePicker";
 
 const DEFAULT_PROMPT = "In a shocking finding, scientists discovered a herd of unicorns living in";
 
-/** A core stage whose wasm build runs some other stage's code. */
-export const fallback = (s: { wasmNote?: string; browserOnly?: boolean }) => !!s.wasmNote && !s.browserOnly && !/threads \(/.test(s.wasmNote);
-
-export function StagePicker({ value, onChange, disabled }: { value: string; onChange: (s: string) => void; disabled?: boolean }) {
-  const stages = useEngine((s) => s.stages);
-  return (
-    <div className="nv-seg" role="group" aria-label="stage">
-      {stages.map((s, i) => (
-        <button
-          key={s.name}
-          aria-pressed={s.name === value}
-          disabled={disabled}
-          onClick={() => onChange(s.name)}
-          title={`stage ${i} · kernels: ${s.kernels}${STAGE_NOTES[s.name] ? ` · ${STAGE_NOTES[s.name].what}` : ""}${s.wasmNote ? ` · ${s.wasmNote}` : ""}`}
-        >
-          <span className="nv-muted">{i}</span> {s.name}
-          {fallback(s) && <span className="nv-muted">*</span>}
-        </button>
-      ))}
-    </div>
-  );
-}
+export { fallback } from "../lib/stages";
+export { StagePicker } from "./StagePicker";
 
 export default function RunIt() {
   const status = useEngine((s) => s.status);
@@ -51,15 +33,24 @@ export default function RunIt() {
   const recorded = source === "recorded";
   useFigureSource(source);
 
+  // default: the fastest version that really runs in this browser, re-picked when the
+  // live stage list arrives (with the GPU rungs), until the reader picks one themselves
+  const picked = useRef(false);
+  const stageRef = useRef(stage);
+  stageRef.current = stage;
   useEffect(() => {
-    if (stages.length && !stages.some((s) => s.name === stage)) {
-      // default: the fastest browser rung if there is one, else the newest
-      // stage that really runs its own kernels in wasm
-      const own = stages.filter((s) => !fallback(s));
-      const pick = own.find((s) => s.name === "wasm-fma") ?? own.find((s) => s.name === "wasm-simd") ?? own.filter((s) => !s.browserOnly).at(-1) ?? stages.at(-1)!;
-      setStage(pick.name);
+    if (!stages.length) return;
+    if (!picked.current || !stages.some((s) => s.name === stageRef.current)) {
+      const rec = recommendedStage(stages) ?? stages.at(-1)!.name;
+      stageRef.current = rec;
+      setStage(rec);
     }
-  }, [stages, stage]);
+  }, [stages]);
+  const pick = (s: string) => {
+    picked.current = true;
+    stageRef.current = s;
+    setStage(s);
+  };
 
   const go = async (prefix?: Tok[], forced?: Parameters<typeof generate>[0]["forced"]) => {
     abort.current = { aborted: false };
@@ -70,7 +61,7 @@ export default function RunIt() {
       pre = ids.map((id) => ({ id, prompt: true, p: null, top: null, entropy: null }));
     }
     if (!pre.length && !forced) return;
-    await generate({ stage, prefix: pre, n: forced ? n - 1 : n, temperature: temp, topK: 40, forced, signal: abort.current });
+    await generate({ stage: stageRef.current, prefix: pre, n: forced ? n - 1 : n, temperature: temp, topK: 40, forced, signal: abort.current });
   };
 
   // Auto-run once when the engine first becomes ready: the reader should see
@@ -101,6 +92,12 @@ export default function RunIt() {
   const chosen = shown ? shown.id : null;
   const kvBytes = last && last.kvLen >= 0 && cfg ? 2 * cfg.nLayer * last.kvLen * cfg.nEmbd * 4 : null;
 
+  // Remember how fast each engine version ran here, for the picker.
+  useEffect(() => {
+    if (run?.done && !recorded && dec.length >= 4) noteSpeed(run.stage, tokS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run?.done, recorded]);
+
   // While showing the recording, put its prompt in the box.
   useEffect(() => {
     if (recorded && run) setPrompt(decodeRecordedPrompt(run.tokens));
@@ -118,6 +115,9 @@ export default function RunIt() {
         aria-label="prompt"
         spellCheck={false}
       />
+      <div style={{ marginTop: "0.9rem" }}>
+        <StagePicker value={stage} onChange={pick} disabled={running} />
+      </div>
       <div className="nv-controls" style={{ marginTop: "0.9rem" }}>
         {running ? (
           <button className="nv-btn" onClick={() => (abort.current.aborted = true)}>
@@ -133,7 +133,6 @@ export default function RunIt() {
             ▶ Generate
           </button>
         )}
-        <StagePicker value={stage} onChange={setStage} disabled={running} />
         <label className="nv-field">
           tokens
           <input type="range" min={8} max={160} step={8} value={n} onChange={(e) => setN(+e.target.value)} disabled={running} />
@@ -171,7 +170,7 @@ export default function RunIt() {
             {running && <span className="nv-caret" />}
           </div>
           <div className="nv-stats" style={{ marginTop: "1.2rem" }}>
-            <Stat k="decode speed" v={isFinite(tokS) ? sig(tokS, 3) : "–"} u="tok/s" accent />
+            <Stat k={run && !recorded ? `speed · ${stageLabel(run.stage)}` : "decode speed"} v={isFinite(tokS) ? sig(tokS, 3) : "–"} u="tok/s" accent />
             <Stat k="last token" v={last ? fmtMs(last.ms) : "–"} />
             <Stat k="context" v={run ? String(run.tokens.length) : "–"} u="tokens" />
             <Stat k="rows computed" v={last ? String(last.nComputed) : "–"} u={last?.nComputed === 1 ? "row" : "rows"} />
@@ -181,7 +180,8 @@ export default function RunIt() {
           <MsSpark ms={dec.map((f) => f.ms)} />
         </div>
         <div>
-          <div className="nv-muted" style={{ fontSize: "0.72rem", marginBottom: "0.5rem" }}>
+          <div className="nv-muted nv-probs-head">
+            <span>
             {shown
               ? recorded
                 ? `what it could have said at position ${sel}`
@@ -189,6 +189,8 @@ export default function RunIt() {
               : running
                 ? "next token, as it is being chosen"
                 : "the last choice · click any token to inspect it"}
+            </span>
+            <SpaceKey />
           </div>
           <div className="nv-probs">
             {dist ? (
@@ -200,7 +202,7 @@ export default function RunIt() {
                   disabled={!shown || running || chosen === d.id || !ready}
                   title={shown && chosen !== d.id ? `branch: continue with "${tokenText(d.id)}"` : undefined}
                 >
-                  <span className="tk">{showToken(d.id)}</span>
+                  <span className="tk"><Tk id={d.id} /></span>
                   <span className="b">
                     <i style={{ width: `${Math.max(1, d.p * 100)}%` }} />
                   </span>

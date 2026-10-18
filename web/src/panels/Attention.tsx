@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Tk } from "../ui/Tok";
 import { claim, engine, release, showToken, tokenText, useEngine } from "../engine/client";
 import { NeedsEngine, Tip, fitCanvas, useFigureSource, useInView, useWidth } from "../ui/Figure";
 import { css, heatAt, heatLut, rgb, usePalette, type Palette } from "../ui/theme";
@@ -207,10 +208,10 @@ export default function Attention() {
           <div>
             <div style={{ fontSize: "0.78rem", marginBottom: "0.5rem" }}>
               <b>layer {sel[0]}, head {sel[1]}</b>
-              <span className="nv-muted"> · query “{showToken(shown.tokens[qi])}” at {qi} looks most at </span>
+              <span className="nv-muted"> · query “<Tk id={shown.tokens[qi]} />” at {qi} looks most at </span>
               {topOf(qi).map((t, k) => (
                 <span key={k} className="nv-chip" style={{ marginRight: 4 }}>
-                  {showToken(shown.tokens[t.j])} <span className="nv-muted">{(t.p * 100).toFixed(0)}%</span>
+                  <Tk id={shown.tokens[t.j]} /> <span className="nv-muted">{(t.p * 100).toFixed(0)}%</span>
                 </span>
               ))}
             </div>
@@ -231,7 +232,7 @@ export default function Attention() {
               />
               {cell && (
                 <Tip x={Math.min(Math.max(cell.x, 120), bw - 120)} y={cell.y - 14}>
-                  “{showToken(shown.tokens[cell.i])}” → “{showToken(shown.tokens[cell.j])}” ·{" "}
+                  “<Tk id={shown.tokens[cell.i]} />” → “<Tk id={shown.tokens[cell.j]} />” ·{" "}
                   <b>{((rowOf(cell.i)?.[cell.j] ?? 0) * 100).toFixed(1)}%</b> of its attention
                 </Tip>
               )}

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { SpaceKey, Tk } from "../../ui/Tok";
 import { decodeTokens, tokenText } from "../../engine/client";
 import { fitCanvas, useWidth } from "../../ui/Figure";
 import { usePalette, type Palette } from "../../ui/theme";
-import { visible } from "../bpe";
 import { Deeper, Fig, G, Idea, useFrame, useRecorded } from "../kit";
 
 /** fig 6.1: inside one block */
@@ -122,12 +122,12 @@ function Stream() {
       prov="recorded"
       caption={
         <>
-          One real token, “·group”, travelling down GPT-2. Each stripe is the actual residual stream (768 numbers, ember
+          One real token, “<Tk s=" group" />”, travelling down GPT-2. Each stripe is the actual residual stream (768 numbers, ember
           positive, blue negative) at that depth: after the embedding, then after each of the 12 layers. Below: if the model
           stopped right there and turned the stream into a guess, these are the guesses it would make.
         </>
       }
-      tryit={<>Press <b>send it down</b>. Early on it mostly guesses words that look like “group”; watch where “·of” takes over.</>}
+      tryit={<>Press <b>send it down</b>. Early on it mostly guesses words that look like “group”; watch where “<Tk s=" of" />” takes over.</>}
     >
       <div className="lr-text" style={{ fontSize: "0.9rem", marginBottom: "0.8rem" }}>
         <span className="ctx">…{decodeTokens(toks.slice(Math.max(0, walk.pos - 12), walk.pos))}</span>
@@ -153,13 +153,14 @@ function Stream() {
           ))}
         </div>
         <div style={{ marginTop: "1.2rem" }}>
-          <div className="lr-small" style={{ marginBottom: "0.4rem" }}>
-            if the model stopped {d === 0 ? "before any layer" : `after layer ${d}`}, it would say:
+          <div className="lr-small lr-guess-head">
+            <span>if the model stopped {d === 0 ? "before any layer" : `after layer ${d}`}, it would say:</span>
+            <SpaceKey />
           </div>
           <div className="lr-bars">
             {cell.top.map((t, i) => (
               <div key={t.id} className={`lr-bar${i === 0 && d === 12 ? " hi" : ""}`} style={{ gridTemplateColumns: "minmax(4rem,8rem) 1fr 3.4rem" }}>
-                <span className="tk">{visible(tokenText(t.id))}</span>
+                <span className="tk"><Tk s={tokenText(t.id)} /></span>
                 <span className="b">
                   <i style={{ width: `${Math.max(1, t.p * 100)}%` }} />
                 </span>
@@ -168,7 +169,7 @@ function Stream() {
             ))}
           </div>
           <div className="lr-note">
-            chance of the final answer “{visible(tokenText(walk.lens[12].top[0].id))}”: <b>{(cell.pFinal * 100).toFixed(1)}%</b>
+            chance of the final answer “<Tk s={tokenText(walk.lens[12].top[0].id)} />”: <b>{(cell.pFinal * 100).toFixed(1)}%</b>
           </div>
         </div>
       </div>

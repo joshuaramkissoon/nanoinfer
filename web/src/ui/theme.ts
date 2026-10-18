@@ -53,6 +53,12 @@ export function usePalette(): Palette {
   useEffect(() => {
     const mo = new MutationObserver(() => setP(readPalette()));
     mo.observe(host(), { attributes: true, attributeFilter: ["data-theme", "class"] });
+    // the theme may have been applied between this component's first render and now
+    // (a sibling's effect sets data-theme), which the observer can't see: re-read once
+    setP((old) => {
+      const now = readPalette();
+      return now.bg === old.bg && now.fg === old.fg ? old : now;
+    });
     return () => mo.disconnect();
   }, []);
   return p;

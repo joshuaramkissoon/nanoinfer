@@ -33,8 +33,57 @@
 .ask-bar button:hover {
   background: color-mix(in srgb, var(--m-bg) 16%, transparent);
 }
-.ask-bar button.primary {
+.ask-bar .ask-primary {
   font-weight: 700;
+  color: color-mix(in srgb, var(--m-accent) 70%, var(--m-bg));
+}
+.ask-bar .ask-deeper {
+  color: color-mix(in srgb, var(--m-accent) 70%, var(--m-bg));
+}
+.ask-bar .mic {
+  display: inline-grid;
+  place-items: center;
+  padding: 0.38rem 0.5rem;
+}
+.ask-bar .mic svg {
+  display: block;
+}
+.ask-bar .mic.held {
+  background: var(--m-accent);
+  color: var(--m-bg);
+}
+.ask-bar button:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--m-bg) 55%, transparent);
+}
+.ask-listening {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding-left: 0.6rem;
+  max-width: min(320px, calc(100vw - 32px));
+  min-height: 2rem;
+}
+.ask-listening > span:not(.ask-rec) {
+  flex: 1;
+  min-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ask-hint {
+  color: color-mix(in srgb, var(--m-bg) 60%, transparent);
+}
+.ask-listening .ask-hint:only-child {
+  padding-right: 0.6rem;
+}
+.ask-rec {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--m-accent);
+  animation: nv-pulse 1.1s ease-in-out infinite;
 }
 .ask-bar form {
   display: flex;
@@ -48,6 +97,17 @@
   color: inherit;
   font: inherit;
   padding: 0.38rem 0.5rem;
+}
+.minimal .ask-bar input:focus-visible,
+.minimal .ask-follow input:focus-visible {
+  outline: none;
+}
+.ask-bar .ask-send {
+  color: color-mix(in srgb, var(--m-bg) 70%, transparent);
+}
+.ask-bar .ask-send:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .ask-bar input::placeholder {
   color: color-mix(in srgb, var(--m-bg) 55%, transparent);
@@ -232,7 +292,7 @@
   outline: none;
 }
 .ask-follow input:focus {
-  border-color: var(--m-accent);
+  border-color: color-mix(in srgb, var(--m-accent) 60%, var(--m-rule));
 }
 .ask-reopen {
   position: fixed;
@@ -261,5 +321,20 @@
     border-top: 1px solid var(--m-rule);
     border-radius: 14px 14px 0 0;
     transform: translateY(105%);
+  }
+}
+@media (max-width: 520px) {
+  .ask-bar {
+    left: 8px !important;
+    right: 8px;
+    justify-content: space-between;
+  }
+  .ask-bar button {
+    padding: 0.4rem 0.42rem;
+  }
+  .ask-bar form,
+  .ask-bar form input {
+    flex: 1;
+    width: auto;
   }
 }

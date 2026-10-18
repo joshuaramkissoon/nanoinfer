@@ -8,6 +8,13 @@
     <link rel="preload" href="/fonts/jetbrains-mono-400.woff2" as="font" type="font/woff2" crossorigin />
   </head>
   <body class="minimal">
+    <script>
+      // apply the remembered theme before first paint (and before any figure reads its colours)
+      try {
+        var t = localStorage.getItem("minimal-theme");
+        document.body.dataset.theme = t === "light" || t === "dark" ? t : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      } catch (e) {}
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

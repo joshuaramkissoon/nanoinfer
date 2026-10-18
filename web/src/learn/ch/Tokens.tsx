@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { SpaceKey, Tk } from "../../ui/Tok";
 import { engine, useEngine } from "../../engine/client";
-import { loadTokenizer, visible, type Tokenizer } from "../bpe";
+import { loadTokenizer, type Tokenizer } from "../bpe";
 import { Chip, Deeper, Fig, G, Idea, Stat, useStepper } from "../kit";
 
 function useTokenizer(): [Tokenizer | null, string | null] {
@@ -47,7 +48,7 @@ function LiveTokenizer({ tok, onPickWord }: { tok: Tokenizer; onPickWord: (w: st
       caption={
         <>
           Your text, cut into GPT-2's tokens: each coloured chip is one token (colours just separate neighbours), with its ID
-          number underneath. A dot means a space. This is GPT-2's real tokenizer (its own vocabulary files), running in your
+          number underneath. A small <Tk s=" " /> bracket means a space: most words carry the space in front of them. This is GPT-2's real tokenizer (its own vocabulary files), running in your
           browser.
           {agree != null && (
             <span className="nv-accent">
@@ -69,13 +70,16 @@ function LiveTokenizer({ tok, onPickWord }: { tok: Tokenizer; onPickWord: (w: st
         {pieces.map((p, i) => (
           <span key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", verticalAlign: "top" }}>
             <Chip tone={i} on={hover === i} onClick={() => onPickWord(words.get(p.word) ?? p.text)} title={`token ${p.id}`}>
-              {visible(p.text)}
+              <Tk s={p.text} />
             </Chip>
             <span className="lr-small" style={{ fontSize: "0.62rem", lineHeight: 1 }}>
               {p.id}
             </span>
           </span>
         ))}
+      </div>
+      <div className="lr-keyrow">
+        <SpaceKey />
       </div>
       <div className="lr-stats">
         <Stat k="characters" v={text.length} />
@@ -126,7 +130,7 @@ function Merges({ tok, word, onWord }: { tok: Tokenizer; word: string; onWord: (
           {rank != null && (
             <>
               {" "}
-              · merged “{visible(prev![merged])}” + “{visible(prev![merged + 1])}” <span className="nv-accent">(merge #{rank.toLocaleString()})</span>
+              · merged “<Tk s={prev![merged]} />” + “<Tk s={prev![merged + 1]} />” <span className="nv-accent">(merge #{rank.toLocaleString()})</span>
             </>
           )}
           {k === 0 && " · one piece per byte"}
@@ -135,7 +139,7 @@ function Merges({ tok, word, onWord }: { tok: Tokenizer; word: string; onWord: (
         <div style={{ lineHeight: 2.2 }}>
           {cur.map((p, j) => (
             <Chip key={`${k}-${j}`} tone={j === merged ? 0 : 5} on={j === merged}>
-              {visible(p)}
+              <Tk s={p} />
             </Chip>
           ))}
         </div>
@@ -188,7 +192,7 @@ export default function Tokens() {
         </Fig>
       )}
       <p>
-        Notice the leading spaces: <code>·dog</code> (with its space) and <code>dog</code> are different tokens. Notice the
+        Notice the leading spaces: <code><Tk s=" dog" /></code> (with its space) and <code>dog</code> are different tokens. Notice the
         numbers, which split in odd places. And notice that the count of tokens, not characters or words, is what matters
         from here on.
       </p>

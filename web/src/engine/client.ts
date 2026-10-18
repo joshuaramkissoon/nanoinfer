@@ -215,7 +215,7 @@ export function decodeTokens(ids: number[]): string {
 }
 /** Make whitespace visible for token chips. */
 export function showToken(id: number): string {
-  return tokenText(id).replace(/ /g, "·").replace(/\n/g, "⏎").replace(/\t/g, "⇥");
+  return tokenText(id).replace(/ /g, "␣").replace(/\n/g, "⏎").replace(/\t/g, "⇥");
 }
 
 // ---- engine API ---------------------------------------------------------------------

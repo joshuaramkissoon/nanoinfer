@@ -112,11 +112,15 @@
 }
 
 /* ---- rail ------------------------------------------------------------------------ */
+/* Collapsed: one dot per chapter, parts separated by a gap, and the current chapter's
+   title beside its dot. Hover or keyboard focus opens the full contents, part labels
+   included; the dots never move. */
 .lr-rail {
   display: none;
 }
 @media (min-width: 1200px) {
   .lr-rail {
+    --lr-rail-room: calc((100vw - var(--lr-fig)) / 2 - 5.2rem);
     display: flex;
     flex-direction: column;
     position: fixed;
@@ -124,9 +128,26 @@
     top: 50%;
     transform: translateY(-50%);
     z-index: 20;
-    padding: 0.6rem 0.5rem;
+    padding: 0.2rem 0.75rem 0.6rem 0.5rem;
     border-radius: 10px;
     transition: background 0.2s, box-shadow 0.2s;
+  }
+  .lr-rail-first {
+    position: relative;
+    padding-top: 1.35rem;
+  }
+  .lr-rail-part {
+    position: absolute;
+    top: 0.3rem;
+    left: 0;
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--m-muted);
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.15s;
+    pointer-events: none;
   }
   .lr-rail a {
     display: flex;
@@ -136,9 +157,6 @@
     color: var(--m-sub);
     text-decoration: none;
     font-size: 0.75rem;
-  }
-  .lr-rail a.gap {
-    margin-top: 0.55rem;
   }
   .lr-rail .d {
     flex: none;
@@ -163,21 +181,44 @@
     transition: opacity 0.15s, transform 0.2s var(--lr-ease);
     pointer-events: none;
   }
-  .lr-rail:hover {
+  /* the current chapter is always labelled, clipped to the free margin */
+  .lr-rail a.on .t {
+    opacity: 1;
+    transform: none;
+    max-width: var(--lr-rail-room);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--m-fg);
+    font-weight: 700;
+  }
+  .lr-rail:hover,
+  .lr-rail:focus-within {
     background: var(--m-bg);
     box-shadow: 0 0 0 1px var(--m-rule), 0 10px 40px rgb(0 0 0 / 0.08);
   }
-  .lr-rail:hover .t {
+  .lr-rail:hover .t,
+  .lr-rail:focus-within .t,
+  .lr-rail:hover .lr-rail-part,
+  .lr-rail:focus-within .lr-rail-part {
     opacity: 1;
     transform: none;
     pointer-events: auto;
   }
-  .lr-rail a:hover .t,
-  .lr-rail a.on .t {
+  .lr-rail:hover a.on .t,
+  .lr-rail:focus-within a.on .t {
+    max-width: none;
+  }
+  .lr-rail a:hover .t {
     color: var(--m-fg);
   }
-  .lr-rail a.on .t {
-    font-weight: 700;
+  .lr-rail a:hover .d {
+    border-color: var(--m-fg);
+  }
+  .minimal .lr-rail a:focus-visible {
+    outline: none;
+  }
+  .lr-rail a:focus-visible .t {
+    color: var(--m-accent);
   }
 }
 
@@ -306,19 +347,36 @@
 .lr-deeper summary:hover {
   color: var(--m-fg);
 }
-.lr-deeper .plus {
+.lr-deeper + .lr-deeper {
+  margin-top: 0;
+  border-top: 0;
+}
+.plus {
+  flex: none;
   display: inline-grid;
   place-items: center;
-  width: 1.2rem;
-  height: 1.2rem;
+  width: 1.25rem;
+  height: 1.25rem;
   border: 1px solid var(--m-rule);
   border-radius: 50%;
-  font-size: 0.8rem;
   color: var(--m-accent);
-  transition: transform 0.25s var(--lr-ease);
+  transition: transform 0.25s var(--lr-ease), border-color 0.2s;
 }
-.lr-deeper[open] .plus {
+.plus svg {
+  display: block;
+}
+.lr-deeper summary:hover .plus {
+  border-color: color-mix(in srgb, var(--m-accent) 45%, var(--m-rule));
+}
+.lr-deeper[open] > summary .plus {
   transform: rotate(45deg);
+}
+.lr-deeper summary:focus-visible {
+  outline: none;
+}
+.lr-deeper summary:focus-visible .plus {
+  border-color: var(--m-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--m-accent) 22%, transparent);
 }
 .lr-deeper-body {
   padding: 0 0 1rem 1.9rem;
@@ -1107,7 +1165,74 @@ button.lr-bar:hover {
 .nv-engine-more summary {
   cursor: pointer;
   font-size: 0.72rem;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.nv-engine-more summary::-webkit-details-marker {
+  display: none;
+}
+.nv-engine-more summary .plus {
+  width: 1rem;
+  height: 1rem;
+}
+.nv-engine-more summary .plus svg {
+  width: 8px;
+  height: 8px;
+}
+.nv-engine-more[open] summary .plus {
+  transform: rotate(45deg);
+}
+.nv-engine-more summary:hover {
+  color: var(--m-fg);
 }
 .nv-engine-more[open] summary {
   margin-bottom: 0.5rem;
+}
+
+/* ---- fig 1.1: recorded example vs your prompt --------------------------------------------- */
+.lr-guess-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.9rem;
+}
+.lr-guess-input {
+  flex-wrap: nowrap;
+  gap: 0.6rem;
+}
+.lr-guess-input .lr-btn {
+  flex: none;
+  min-height: 2.6rem;
+}
+.lr-guess-text {
+  min-height: 4rem;
+}
+.lr-guess-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.4rem;
+}
+.lr-guess-load {
+  gap: 0.8rem;
+  align-content: center;
+  padding: 1rem;
+  line-height: 1.6;
+}
+
+/* ---- fig 9.1 ------------------------------------------------------------------------------ */
+.lr-truck-controls {
+  gap: 0.6rem 1rem;
+}
+.lr-bar.lr-busy {
+  grid-template-columns: 6.5rem 1fr 3rem;
+}
+.lr-keyrow {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0.2rem 0 0.4rem;
 }

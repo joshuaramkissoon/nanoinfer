@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Tk } from "../ui/Tok";
 import { claim, engine, release, showToken, tokenText, useEngine, useRunSource } from "../engine/client";
 import { NeedsEngine, Tip, useFigureSource, useInView, useWidth } from "../ui/Figure";
 import { css, heatAt, usePalette } from "../ui/theme";
@@ -130,7 +131,7 @@ export default function LogitLens() {
           ))}
           {hover && (
             <Tip x={Math.min(Math.max(hover.x, 110), (gw || 400) - 110)} y={hover.y}>
-              <b>{hover.s === 0 ? "after the embedding" : `after layer ${hover.s}`}</b> · reading “{showToken(data.tokens[data.positions[hover.p]])}”
+              <b>{hover.s === 0 ? "after the embedding" : `after layer ${hover.s}`}</b> · reading “<Tk id={data.tokens[data.positions[hover.p]]} />”
               <br />
               {cellOf(hover.s, hover.p).top.map((t) => `${showToken(t.id)} ${(t.p * 100).toFixed(1)}%`).join(" · ")}
             </Tip>
@@ -141,11 +142,11 @@ export default function LogitLens() {
       <div className="nv-lens-detail">
         <div>
           <div style={{ fontSize: "0.78rem", marginBottom: "0.6rem" }}>
-            <b>reading “{showToken(data.tokens[selPos])}”</b>
+            <b>reading “<Tk id={data.tokens[selPos]} />”</b>
             <span className="nv-muted">
               {" "}
               at position {selPos}
-              {next != null ? <> · the next token was “{showToken(next)}”</> : null}
+              {next != null ? <> · the next token was “<Tk id={next} />”</> : null}
             </span>
           </div>
           <div className="nv-lens-rows">
@@ -157,7 +158,7 @@ export default function LogitLens() {
                   <span className="chips">
                     {c.top.slice(0, 3).map((t, j) => (
                       <span key={j} className={`nv-chip${next === t.id ? " next" : ""}`} style={{ opacity: 0.45 + 0.55 * Math.min(1, t.p * 2.5) }}>
-                        {showToken(t.id)} <span className="nv-muted">{(t.p * 100).toFixed(t.p < 0.1 ? 1 : 0)}%</span>
+                        <Tk id={t.id} /> <span className="nv-muted">{(t.p * 100).toFixed(t.p < 0.1 ? 1 : 0)}%</span>
                       </span>
                     ))}
                   </span>
@@ -220,7 +221,7 @@ function DepthChart({ data, p, lock }: { data: LensData; p: number; lock: number
         </svg>
       )}
       <div className="nv-legend" style={{ marginTop: "0.3rem" }}>
-        <span><i style={{ background: pal.accent }} />p(final answer “{showToken(cells[depth - 1].top[0].id)}”)</span>
+        <span><i style={{ background: pal.accent }} />p(final answer “<Tk id={cells[depth - 1].top[0].id} />”)</span>
         {hasNext && <span><i style={{ background: pal.cool }} />p(the token that came next)</span>}
         <span><i style={{ background: pal.code }} />size of the residual stream (‖x‖ {sig(cells[0].norm, 2)} → {sig(cells[depth - 1].norm, 3)})</span>
       </div>

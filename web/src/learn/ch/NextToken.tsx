@@ -1,22 +1,24 @@
 import { useMemo, useState } from "react";
+import { SpaceKey, Tk } from "../../ui/Tok";
 import { decodeTokens, engine, tokenText, useEngine } from "../../engine/client";
 import { LiveButton } from "../../ui/Figure";
 import { softmaxAt } from "../../lib/recorded";
 import { usePalette } from "../../ui/theme";
 import { log } from "../../lib/fmt";
-import { useWidth } from "../../ui/Figure";
-import { Deeper, Fig, G, Idea, liveForward, useRecorded } from "../kit";
-import { visible } from "../bpe";
+import { Tip, useWidth } from "../../ui/Figure";
+import { Deeper, Fig, G, Idea, Seg, liveForward, useRecorded } from "../kit";
 
 type Dist = { id: number; p: number }[];
 
-/** fig 1.1: the model's real guesses; click one to keep writing. */
+/** fig 1.1: the model's real guesses; click one to keep writing. Two sources, never mixed:
+ *  the recorded example (step through a real run) or your own prompt (live, in this tab). */
 function Guesser() {
   const rec = useRecorded();
   const status = useEngine((s) => s.status);
   const live = status === "ready";
+  const [mode, setMode] = useState<"example" | "mine">("example");
   const [step, setStep] = useState(0);
-  // live mode: your own prompt
+  // your own prompt (live)
   const [prompt, setPrompt] = useState("The best way to learn something is to");
   const [ctx, setCtx] = useState<number[] | null>(null);
   const [nPrompt, setNPrompt] = useState(0);
@@ -40,93 +42,135 @@ function Guesser() {
     }
   };
   const start = async () => {
+    if (!prompt.trim()) return;
     const ids = await engine.encode(prompt);
-    setNPrompt(ids.length);
+    setNPrompt(Math.min(ids.length, 200));
     await guess(ids.slice(-200));
   };
+  const reset = () => {
+    setMode("example");
+    setCtx(null);
+    setDist(null);
+    setStep(0);
+  };
 
-  // what to show
+  const mine = mode === "mine";
+  const showingMine = mine && !!ctx && !!dist;
   let shownCtx: number[] = [], shownDist: Dist | null = null, chosen: number | null = null, nCtxPrompt = 0;
-  if (live && ctx && dist) {
-    shownCtx = ctx;
+  if (showingMine) {
+    shownCtx = ctx!;
     shownDist = dist;
     nCtxPrompt = nPrompt;
-  } else if (rec && firstGen >= 0) {
+  } else if (!mine && rec && firstGen >= 0) {
     const i = firstGen + Math.min(step, genCount - 1);
     shownCtx = recTokens.slice(0, i).map((t) => t.id);
     shownDist = recTokens[i].top;
     chosen = recTokens[i].id;
     nCtxPrompt = firstGen;
   }
+  const picked = shownCtx.length - nCtxPrompt;
 
   return (
     <Fig
       n="1.1"
       title="Guess the next word"
-      prov={live && ctx ? "live" : "recorded"}
-      aside={!live ? <LiveButton label="type your own" /> : undefined}
+      prov={mine ? "live" : "recorded"}
       caption={
-        live ? (
+        mine ? (
           <>
-            Your text, and below it GPT-2's ten most likely next tokens with their probabilities (out of all 50,257). Each
-            guess was computed just now, in this tab.
+            Your prompt (grey), any tokens you've picked (black), and below it GPT-2's ten most likely next tokens with their
+            probabilities (out of all 50,257). Each guess is computed when you ask, in this tab.
           </>
         ) : (
           <>
-            A sentence being written by GPT-2, one token at a time. Grey is the prompt a person typed; black is what the model
-            added. The bars are the model's ten best guesses for the next token, and the highlighted bar is the one that was
-            picked.
+            A real sentence GPT-2 wrote, replayed one token at a time. Grey is the prompt a person typed; black is what the model
+            has added so far. The bars are the model's ten best guesses for the next token, and the highlighted bar is the one
+            that was picked.
           </>
         )
       }
       tryit={
-        live ? (
-          <>Click any bar to pick that token and see the next guesses. Try a different prompt, or deliberately pick unlikely tokens and watch the story bend.</>
+        mine ? (
+          <>Click any bar to add that token and see the next guesses. Deliberately pick unlikely tokens and watch the story bend.</>
         ) : (
-          <>Press <b>next word</b> a few times. Notice the model is often unsure (no bar near 100%), and the pick isn't always the top bar.</>
+          <>Press <b>next word</b> a few times. Notice the model is often unsure (no bar near 100%), and the pick isn't always the top bar. Then switch to <b>your prompt</b>.</>
         )
       }
     >
-      {live && (
-        <div className="lr-controls" style={{ flexWrap: "nowrap" }}>
-          <input className="lr-input" value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && start()} aria-label="prompt" />
-          <button className="lr-btn solid" onClick={start} disabled={busy || !prompt.trim()}>
-            guess
+      <div className="lr-guess-mode">
+        <Seg
+          label="what to continue"
+          value={mode}
+          onChange={(v) => setMode(v)}
+          options={[
+            { v: "example", label: "recorded example" },
+            { v: "mine", label: "your prompt" },
+          ]}
+        />
+        {mine && (ctx || picked > 0) && (
+          <button className="lr-btn" onClick={reset} title="back to the recorded example">
+            ⟲ reset
           </button>
+        )}
+      </div>
+      {mine && !live ? (
+        <div className="lr-empty lr-guess-load">
+          <span>To continue your own text, GPT-2 has to run in this tab (it downloads once, then works offline).</span>
+          <LiveButton label="load GPT-2" />
+        </div>
+      ) : mine ? (
+        <form
+          className="lr-controls lr-guess-input"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void start();
+          }}
+        >
+          <input className="lr-input" value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="your prompt" placeholder="Type the start of a sentence" spellCheck={false} />
+          <button className="lr-btn solid" type="submit" disabled={busy || !prompt.trim()}>
+            {ctx ? "guess again" : "guess"}
+          </button>
+        </form>
+      ) : null}
+      {(!mine || showingMine) && (
+        <div>
+          <div className="lr-text lr-guess-text">
+            <span className="ctx">{decodeTokens(shownCtx.slice(0, nCtxPrompt))}</span>
+            <span>{decodeTokens(shownCtx.slice(nCtxPrompt))}</span>
+            <span className="lr-cursor" />
+          </div>
+          <div style={{ marginTop: "1rem" }}>
+            <div className="lr-small lr-guess-head">
+              <span>{shownDist ? "the model's top 10 guesses for the next token" : "…"}</span>
+              <SpaceKey />
+            </div>
+            <div className="lr-bars">
+              {shownDist?.map((d) => {
+                const Tag = showingMine ? "button" : "div";
+                return (
+                  <Tag
+                    key={d.id}
+                    className={`lr-bar${d.id === chosen ? " hi" : ""}`}
+                    onClick={showingMine && !busy ? () => guess([...shownCtx, d.id]) : undefined}
+                    disabled={showingMine ? busy : undefined}
+                    title={showingMine ? `add “${tokenText(d.id)}” and guess again` : undefined}
+                  >
+                    <span className="tk">
+                      <Tk s={tokenText(d.id)} />
+                    </span>
+                    <span className="b">
+                      <i style={{ width: `${Math.max(1, d.p * 100)}%` }} />
+                    </span>
+                    <span className="pc">{(d.p * 100).toFixed(1)}%</span>
+                  </Tag>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
-      <div>
-        <div className="lr-text" style={{ minHeight: "4rem" }}>
-          <span className="ctx">{decodeTokens(shownCtx.slice(0, nCtxPrompt))}</span>
-          <span>{decodeTokens(shownCtx.slice(nCtxPrompt))}</span>
-          <span className="lr-cursor" />
-        </div>
-        <div style={{ marginTop: "1rem" }}>
-          <div className="lr-small" style={{ marginBottom: "0.4rem" }}>
-            {shownDist ? "the model's top 10 guesses for the next token" : "…"}
-          </div>
-          <div className="lr-bars">
-            {shownDist?.map((d) => {
-              const Tag = live && ctx ? "button" : "div";
-              return (
-                <Tag
-                  key={d.id}
-                  className={`lr-bar${d.id === chosen ? " hi" : ""}`}
-                  onClick={live && ctx && !busy ? () => guess([...shownCtx, d.id]) : undefined}
-                  disabled={live && ctx ? busy : undefined}
-                >
-                  <span className="tk">{visible(tokenText(d.id))}</span>
-                  <span className="b">
-                    <i style={{ width: `${Math.max(1, d.p * 100)}%` }} />
-                  </span>
-                  <span className="pc">{(d.p * 100).toFixed(1)}%</span>
-                </Tag>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-      {!(live && ctx) && (
+      {mine && live && !showingMine && <div className="lr-empty">Type the start of a sentence and press guess: GPT-2 will score every possible next token.</div>}
+      {!mine && (
         <div className="lr-controls" style={{ marginTop: "1rem", marginBottom: 0 }}>
           <button className="lr-btn" onClick={() => setStep(0)} disabled={step === 0}>
             ⟲ start
@@ -135,9 +179,13 @@ function Guesser() {
             next word →
           </button>
           <span className="lr-small">
-            step {step + 1} / {genCount || "…"}
-            {live && " · or type your own prompt above"}
+            word {step + 1} of {genCount || "…"}
           </span>
+        </div>
+      )}
+      {showingMine && (
+        <div className="lr-small" style={{ marginTop: "0.8rem" }}>
+          {picked > 0 ? `${picked} token${picked === 1 ? "" : "s"} picked by you · ` : ""}live · computed in this tab
         </div>
       )}
     </Fig>
@@ -190,11 +238,22 @@ function LongTail() {
           dotted line is the long tail of tokens that each get almost nothing.
         </>
       }
-      tryit={<>Hover the dots to see which tokens they are.</>}
+      tryit={<>Move along the dots to see which tokens they are.</>}
     >
-      <div ref={ref}>
+      <div ref={ref} style={{ position: "relative" }}>
         {probs && w > 0 && (
-          <svg width={W} height={H} onMouseLeave={() => setHover(null)}>
+          <svg
+            width={W}
+            height={H}
+            onMouseLeave={() => setHover(null)}
+            onPointerMove={(e) => {
+              // nearest dot by rank: readers aim at a position, not at a 2px dot
+              const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+              const rank = x.invert(e.clientX - r.left);
+              const i = Math.round(rank) - 1;
+              setHover(i >= 0 && i < probs.probs.length && rank < probs.probs.length * 1.15 ? i : null);
+            }}
+          >
             {[1e-6, 1e-4, 1e-2, 1].map((t) => (
               <g key={t}>
                 <line x1={padL} x2={W - 8} y1={y(t)} y2={y(t)} stroke={pal.rule} />
@@ -222,18 +281,19 @@ function LongTail() {
                 cy={y(Math.max(1e-6, d.p))}
                 r={hover === i ? 4 : i < 10 ? 2.6 : 1.4}
                 fill={i < 10 ? pal.accent : pal.heat[3]}
-                onMouseEnter={() => setHover(i)}
               />
             ))}
-            {hover != null && (
-              <text x={Math.min(W - 120, x(hover + 1) + 8)} y={y(Math.max(1e-6, probs.probs[hover].p)) - 8} fontSize={11} fill={pal.fg}>
-                #{hover + 1} “{visible(tokenText(probs.probs[hover].id))}” {(probs.probs[hover].p * 100).toPrecision(2)}%
-              </text>
-            )}
+            {hover != null && <line x1={x(hover + 1)} x2={x(hover + 1)} y1={6} y2={H - padB} stroke={pal.muted} strokeWidth={1} opacity={0.5} />}
             <text x={W - 8} y={14} textAnchor="end" fontSize={10} fill={pal.muted}>
               rank →
             </text>
           </svg>
+        )}
+        {probs && hover != null && (
+          <Tip x={Math.min(Math.max(x(hover + 1), 90), W - 90)} y={y(Math.max(1e-6, probs.probs[hover].p)) - 6}>
+            <b>{(probs.probs[hover].p * 100).toPrecision(2)}%</b> <Tk s={tokenText(probs.probs[hover].id)} />
+            <span className="nv-muted"> · rank {hover + 1}</span>
+          </Tip>
         )}
       </div>
     </Fig>

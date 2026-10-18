@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { claim, decodes, engine, release, showToken, useEngine, useRunSource } from "../engine/client";
+import { Tk } from "../ui/Tok";
+import { claim, decodes, engine, release, useEngine, useRunSource } from "../engine/client";
 import type { OpRec } from "../engine/types";
 import { NeedsEngine, fitCanvas, useFigureSource, useInView, useWidth } from "../ui/Figure";
 import { KIND_LABEL, kindColor, rgb, usePalette, useReducedMotion } from "../ui/theme";
@@ -300,7 +301,7 @@ function Walk({ walk, tokens }: { walk: WalkData; tokens: number[] }) {
                   <span className="nv-muted">if it stopped here:</span>{" "}
                   {walk.lens[dDepth].top.slice(0, 4).map((t, j) => (
                     <span key={j} className={`nv-chip${t.id === chosen ? " next" : ""}`}>
-                      {showToken(t.id)} <span className="nv-muted">{(t.p * 100).toFixed(t.p < 0.1 ? 1 : 0)}%</span>
+                      <Tk id={t.id} /> <span className="nv-muted">{(t.p * 100).toFixed(t.p < 0.1 ? 1 : 0)}%</span>
                     </span>
                   ))}
                 </div>
@@ -329,7 +330,7 @@ function Walk({ walk, tokens }: { walk: WalkData; tokens: number[] }) {
 function TokChip({ id, big, accent }: { id: number; big?: boolean; accent?: boolean }) {
   return (
     <span className={`nv-tokchip${big ? " big" : ""}${accent ? " accent" : ""}`}>
-      {showToken(id)}
+      <Tk id={id} />
       {big && <small>#{id}</small>}
     </span>
   );
@@ -512,7 +513,7 @@ function Sampler({ walk, chosen }: { walk: WalkData; chosen: number }) {
       <div className="nv-probs" style={{ marginTop: "0.6rem" }}>
         {shown.map((d) => (
           <div key={d.id} className={`nv-prob${d.id === chosen ? " chosen" : ""}`}>
-            <span className="tk">{showToken(d.id)}</span>
+            <span className="tk"><Tk id={d.id} /></span>
             <span className="b">
               <i style={{ width: `${Math.max(0.5, d.q * 100)}%`, transition: "width 0.2s" }} />
             </span>
@@ -530,7 +531,7 @@ function Sampler({ walk, chosen }: { walk: WalkData; chosen: number }) {
       {draws.length > 0 && (
         <div style={{ marginTop: "0.6rem", display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
           {draws.map((id, i) => (
-            <span key={i} className={`nv-chip${id === chosen ? " next" : ""}`}>{id < 0 ? "(tail)" : showToken(id)}</span>
+            <span key={i} className={`nv-chip${id === chosen ? " next" : ""}`}>{id < 0 ? "(tail)" : <Tk id={id} />}</span>
           ))}
         </div>
       )}

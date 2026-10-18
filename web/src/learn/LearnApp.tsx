@@ -77,20 +77,30 @@ function Rail({ idx }: { idx: number }) {
   const visited = readVisited();
   return (
     <nav className="lr-rail" aria-label="chapters">
-      {CHAPTERS.map((c, i) => (
-        <a
-          key={c.slug}
-          href={chapterHref(c)}
-          onClick={linkTo(chapterHref(c))}
-          className={`${i === idx ? "on" : ""} ${visited.has(c.slug) ? "seen" : ""} ${i > 0 && CHAPTERS[i - 1].part !== c.part ? "gap" : ""}`}
-          aria-current={i === idx ? "page" : undefined}
-        >
-          <span className="d" />
-          <span className="t">
-            <span className="nv-muted">{String(i + 1).padStart(2, "0")}</span> {c.title}
-          </span>
-        </a>
-      ))}
+      {CHAPTERS.map((c, i) => {
+        const first = i === 0 || CHAPTERS[i - 1].part !== c.part;
+        return (
+          <div key={c.slug} className={first ? "lr-rail-first" : undefined}>
+            {first && (
+              <span className="lr-rail-part">
+                part {c.part + 1} · {PARTS[c.part].toLowerCase()}
+              </span>
+            )}
+            <a
+              href={chapterHref(c)}
+              onClick={linkTo(chapterHref(c))}
+              className={`${i === idx ? "on" : ""} ${visited.has(c.slug) ? "seen" : ""}`}
+              aria-current={i === idx ? "page" : undefined}
+              aria-label={`${String(i + 1).padStart(2, "0")} ${c.title}`}
+            >
+              <span className="d" />
+              <span className="t">
+                <span className="nv-muted">{String(i + 1).padStart(2, "0")}</span> {c.title}
+              </span>
+            </a>
+          </div>
+        );
+      })}
     </nav>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Tk } from "../../ui/Tok";
 import { fitCanvas, useWidth } from "../../ui/Figure";
 import { usePalette, type Palette } from "../../ui/theme";
-import { visible } from "../bpe";
 import { chartColors, Chip, Deeper, Fig, G, Idea, unpackVec, useLearnData, type LearnData } from "../kit";
 
 const GROUP_LABEL: Record<string, string> = {
@@ -142,7 +142,7 @@ function Explorer({ d }: { d: LearnData }) {
         <div style={{ marginTop: "1.4rem", paddingTop: "1.1rem", borderTop: `1px solid ${pal.rule}` }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: "0.6rem", flexWrap: "wrap" }}>
             <Chip tone={0}>
-              <span style={{ fontSize: "1.1rem", fontWeight: 700 }}>{visible(e.text[e.words[show]])}</span>
+              <span style={{ fontSize: "1.1rem", fontWeight: 700 }}><Tk s={e.text[e.words[show]]} /></span>
             </Chip>
             <span className="lr-small">
               token {e.words[show]} → row {e.words[show].toLocaleString()} of the table
@@ -158,7 +158,7 @@ function Explorer({ d }: { d: LearnData }) {
           <div className="lr-bars">
             {e.near[sel].map(([id, s]) => (
               <div key={id} className="lr-bar" style={{ gridTemplateColumns: "minmax(4rem,7rem) 1fr 3rem" }}>
-                <span className="tk">{visible(e.text[id])}</span>
+                <span className="tk"><Tk s={e.text[id]} /></span>
                 <span className="b">
                   <i style={{ width: `${Math.max(2, s * 100)}%` }} />
                 </span>
@@ -177,7 +177,7 @@ export default function Embeddings() {
   return (
     <>
       <p>
-        A token ID like <code>3290</code> (that's “·dog”) is just a row number. The model's first step is to look up that
+        A token ID like <code>3290</code> (that's “<Tk s=" dog" />”) is just a row number. The model's first step is to look up that
         row in a big table and fetch what's there: a list of <span className="k">768</span> numbers. That list is the
         token's <G k="embedding" />, and from here on the model only ever works with lists of numbers like it, called{" "}
         <G k="vector">vectors</G>.

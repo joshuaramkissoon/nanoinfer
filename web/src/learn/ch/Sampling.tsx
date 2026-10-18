@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
+import { SpaceKey, Tk } from "../../ui/Tok";
 import { decodeTokens, tokenText } from "../../engine/client";
 import { softmaxAt, type LogitSummary } from "../../lib/recorded";
 import { usePalette } from "../../ui/theme";
-import { visible } from "../bpe";
 import { Chip, Deeper, Fig, Idea, Seg, Slider, Stat, useRecorded } from "../kit";
 
 /** Probabilities after temperature and top-k, plus entropy (in "effective choices"). */
@@ -101,10 +101,13 @@ function Sampler() {
         </span>
       </div>
       <div>
+        <div className="lr-keyrow">
+          <SpaceKey />
+        </div>
         <div className="lr-bars">
           {shown.map((p, i) => (
             <div key={p.id} className={`lr-bar${i === 0 ? " hi" : ""}`} style={{ opacity: p.p === 0 ? 0.35 : 1 }}>
-              <span className="tk">{visible(tokenText(p.id))}</span>
+              <span className="tk"><Tk s={tokenText(p.id)} /></span>
               <span className="b">
                 <i style={{ width: `${(p.p / pmax) * 100}%` }} />
               </span>
@@ -140,7 +143,7 @@ function Sampler() {
           <div style={{ lineHeight: 2 }}>
             {draws.map((id, i) => (
               <Chip key={draws.length - i} tone={id === d.probs[0].id ? 0 : id === "tail" ? 5 : 1}>
-                {id === "tail" ? "(rare)" : visible(tokenText(id))}
+                {id === "tail" ? "(rare)" : <Tk s={tokenText(id)} />}
               </Chip>
             ))}
             {!draws.length && <span className="lr-small">draws appear here</span>}

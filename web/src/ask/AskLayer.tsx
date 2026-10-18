@@ -1,7 +1,8 @@
-// Select any text inside [data-askable] → a small toolbar → ask about it, or one
-// click for "simpler" / "why?" / "example". Answers stream into a side panel, with
-// the surrounding section ([data-ask-section]) sent as context. The model call goes
-// through /api/ask (server/ask.ts), so no key ever reaches the browser.
+// Select any text inside [data-askable] → a small toolbar with the same actions as
+// Tangent: Ask (type a question), Explain, Define, Simplify ¶ (the whole paragraph in
+// plain words), ✦ Deeper (a short reading on it) and a hold-to-talk mic. Answers stream
+// into a side panel, with the surrounding section ([data-ask-section]) sent as context.
+// The model call goes through /api/ask (server/ask.ts), so no key ever reaches the browser.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Markdown } from "./md";
@@ -9,6 +10,8 @@ import "./ask.css";
 
 interface Pending {
   text: string;
+  /** the paragraph the selection sits in (what "Simplify ¶" rewrites) */
+  para: string;
   rect: DOMRect;
   context: string;
   title: string;
@@ -26,9 +29,12 @@ interface Turn {
 }
 type Status = { available: boolean; keyEnv: string; model: string } | null;
 
-const LABEL: Record<string, string> = { simpler: "Explain it more simply", why: "Why?", example: "Show me an example" };
+/** How each one-click action is labelled in the answers panel (Tangent's labels). */
+const LABEL: Record<string, string> = { explain: "Explain", define: "Define", simplify: "Plain words", deeper: "Deeper" };
 
-function contextOf(node: Node | null): { context: string; title: string } {
+const PARA = "p, li, blockquote, figcaption, td, h1, h2, h3, .lr-idea, .lr-q, .nv-lead";
+
+function contextOf(node: Node | null): { context: string; title: string; para: string } {
   const el = ((node?.nodeType === 3 ? node.parentElement : node) as HTMLElement | null) ?? null;
   const sec = el?.closest("[data-ask-section]") as HTMLElement | null;
   const root = el?.closest("[data-askable]") as HTMLElement | null;
@@ -40,7 +46,35 @@ function contextOf(node: Node | null): { context: string; title: string } {
     const next = sec.nextElementSibling as HTMLElement | null;
     context = [prev?.innerText ?? "", context, next?.innerText ?? ""].filter(Boolean).join("\n\n");
   }
-  return { context: context.slice(0, 6000), title };
+  const p = (el?.closest(PARA) as HTMLElement | null) ?? sec ?? el;
+  return { context: context.slice(0, 6000), title, para: (p?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 1500) };
+}
+
+// ---- voice: the browser's own speech recognition (Chrome, Edge, Safari) ----------------
+
+interface Recognition {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((e: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null;
+  onerror: ((e: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+}
+const SpeechRec = (window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition }).SpeechRecognition ??
+  (window as unknown as { webkitSpeechRecognition?: new () => Recognition }).webkitSpeechRecognition;
+
+function MicIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-2.1a7 7 0 0 0 6-6.9h-2Z"
+      />
+    </svg>
+  );
 }
 
 let seq = 0;
@@ -55,11 +89,17 @@ export function AskLayer() {
   const [mode, setMode] = useState<"quick" | "think">("quick");
   const [follow, setFollow] = useState("");
   const [model, setModel] = useState("");
+  /** voice: null, or what's been heard so far */
+  const [heard, setHeard] = useState<string | null>(null);
+  const [voiceMsg, setVoiceMsg] = useState("");
   const bar = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const turnsRef = useRef(turns);
   turnsRef.current = turns;
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  const voice = useRef<{ rec: Recognition | null; text: string; startedAt: number; toggled: boolean; send: boolean }>({ rec: null, text: "", startedAt: 0, toggled: false, send: false });
 
   useEffect(() => {
     fetch("/api/ask")
@@ -74,7 +114,7 @@ export function AskLayer() {
     const on = () => {
       clearTimeout(t);
       t = setTimeout(() => {
-        if (document.activeElement === input.current) return;
+        if (document.activeElement === input.current || voice.current.rec) return;
         const sel = getSelection();
         if (!sel || !sel.rangeCount || sel.isCollapsed) {
           setPending(null);
@@ -86,31 +126,19 @@ export function AskLayer() {
         if (!start?.closest("[data-askable]") || start.closest(".ask-panel, input, textarea, button, .ask-bar")) return;
         const text = sel.toString().replace(/\s+/g, " ").trim();
         if (text.length < 2 || text.length > 1500) return;
-        setPending({ text, rect: range.getBoundingClientRect(), ...contextOf(range.commonAncestorContainer) });
+        setPending({ text, rect: range.getBoundingClientRect(), ...contextOf(range.startContainer) });
         setAsking(false);
         setQ("");
       }, 140);
     };
     document.addEventListener("selectionchange", on);
-    const hide = () => document.activeElement !== input.current && setPending(null);
+    const hide = () => document.activeElement !== input.current && !voice.current.rec && setPending(null);
     window.addEventListener("scroll", hide, { passive: true });
     return () => {
       document.removeEventListener("selectionchange", on);
       window.removeEventListener("scroll", hide);
     };
   }, []);
-
-  useEffect(() => {
-    const on = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (pending) {
-        setPending(null);
-        getSelection()?.removeAllRanges();
-      } else if (open) setOpen(false);
-    };
-    window.addEventListener("keydown", on);
-    return () => window.removeEventListener("keydown", on);
-  }, [pending, open]);
 
   const run = useCallback(
     async (turn: Turn, history: { role: string; content: string }[]) => {
@@ -166,8 +194,11 @@ export function AskLayer() {
   );
 
   const ask = (kind: string, question = "") => {
-    if (!pending) return;
-    const turn: Turn = { id: ++seq, kind, sel: pending.text, q: question, context: pending.context, title: pending.title, a: "", done: false, error: null };
+    const pend = pendingRef.current;
+    if (!pend) return;
+    // "Simplify ¶" works on the whole paragraph, not just the selected words
+    const sel = kind === "simplify" ? pend.para || pend.text : pend.text;
+    const turn: Turn = { id: ++seq, kind, sel, q: question, context: pend.context, title: pend.title, a: "", done: false, error: null };
     setTurns((ts) => [...ts, turn]);
     setOpen(true);
     setPending(null);
@@ -176,6 +207,106 @@ export function AskLayer() {
     if (status?.available) void run(turn, []);
     setTimeout(() => scroller.current && (scroller.current.scrollTop = scroller.current.scrollHeight), 30);
   };
+  const askRef = useRef(ask);
+  askRef.current = ask;
+
+  const openAsk = (initial: string) => {
+    setQ(initial);
+    setAsking(true);
+  };
+
+  // ---- voice: hold the mic (or V) and talk; a quick tap keeps listening until the next tap
+  const stopVoice = useCallback((send: boolean) => {
+    const v = voice.current;
+    if (!v.rec) return;
+    v.send = send;
+    v.rec.stop();
+  }, []);
+  const startVoice = useCallback(() => {
+    const v = voice.current;
+    if (v.rec || !pendingRef.current) return;
+    if (!SpeechRec) {
+      setVoiceMsg("Voice isn't supported in this browser");
+      setTimeout(() => setVoiceMsg(""), 2500);
+      return;
+    }
+    const rec = new SpeechRec();
+    rec.lang = navigator.language || "en-GB";
+    rec.interimResults = true;
+    rec.continuous = true;
+    Object.assign(v, { rec, text: "", startedAt: Date.now(), toggled: false, send: false });
+    setHeard("");
+    rec.onresult = (e) => {
+      let text = "";
+      for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+      v.text = text.trim();
+      setHeard(v.text);
+    };
+    rec.onerror = (e) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") setVoiceMsg("Microphone access was blocked");
+      else if (e.error !== "aborted" && e.error !== "no-speech") setVoiceMsg("Couldn't hear that. Try again");
+      v.send = false;
+      setTimeout(() => setVoiceMsg(""), 2500);
+    };
+    rec.onend = () => {
+      const text = v.text;
+      const send = v.send && !!text;
+      v.rec = null;
+      setHeard(null);
+      if (send) askRef.current("ask", text);
+    };
+    try {
+      rec.start();
+    } catch {
+      v.rec = null;
+      setHeard(null);
+    }
+  }, []);
+  const micDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    if (voice.current.rec && voice.current.toggled) return stopVoice(true);
+    startVoice();
+  };
+  const micUp = () => {
+    const v = voice.current;
+    if (!v.rec) return;
+    if (Date.now() - v.startedAt < 350) v.toggled = true;
+    else stopVoice(true);
+  };
+
+  // keys: Esc closes; typing while the toolbar is up starts a question; hold V to talk
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (voice.current.rec) stopVoice(false);
+        if (pendingRef.current) {
+          setPending(null);
+          getSelection()?.removeAllRanges();
+        } else if (open) setOpen(false);
+        return;
+      }
+      if (!pendingRef.current || asking || e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable]")) return;
+      if (e.code === "KeyV") {
+        e.preventDefault();
+        if (!e.repeat) startVoice();
+        return;
+      }
+      if (e.key.length === 1 && !voice.current.rec) {
+        e.preventDefault();
+        openAsk(e.key);
+      }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "KeyV" && voice.current.rec && !voice.current.toggled) stopVoice(true);
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, [open, asking, startVoice, stopVoice]);
 
   const followUp = () => {
     const last = turnsRef.current[turnsRef.current.length - 1];
@@ -195,7 +326,7 @@ export function AskLayer() {
   // toolbar position
   let style: React.CSSProperties | undefined;
   if (pending) {
-    const w = asking ? 300 : 330, coarse = matchMedia("(pointer: coarse)").matches;
+    const w = asking || heard != null ? 320 : 430, coarse = matchMedia("(pointer: coarse)").matches;
     let top = coarse ? pending.rect.bottom + 10 : pending.rect.top - 48;
     if (top < 10) top = pending.rect.bottom + 10;
     style = { top, left: Math.max(8, Math.min(innerWidth - w - 8, pending.rect.left + pending.rect.width / 2 - w / 2)) };
@@ -212,19 +343,47 @@ export function AskLayer() {
                 if (q.trim()) ask("ask", q.trim());
               }}
             >
-              <input ref={input} autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about this…" aria-label="your question" />
-              <button type="submit" disabled={!q.trim()}>
+              <input
+                ref={input}
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onBlur={() => setTimeout(() => document.activeElement !== input.current && !input.current?.value && setPending(null), 150)}
+                placeholder="Ask about this…"
+                aria-label="your question"
+              />
+              <button type="submit" className="ask-send" disabled={!q.trim()} aria-label="ask">
                 ↵
               </button>
             </form>
+          ) : heard != null ? (
+            <div className="ask-listening" aria-live="polite">
+              <span className="ask-rec" aria-hidden />
+              <span className={heard ? "" : "ask-hint"}>{heard || (voice.current.toggled ? "Listening. Tap the mic again to send" : "Listening…")}</span>
+              <button className="mic held" onPointerDown={micDown} onPointerUp={micUp} aria-label="stop and send">
+                <MicIcon />
+              </button>
+            </div>
+          ) : voiceMsg ? (
+            <div className="ask-listening">
+              <span className="ask-hint">{voiceMsg}</span>
+            </div>
           ) : (
             <>
-              <button className="primary" onClick={() => setAsking(true)}>
-                <span className="spark">✦</span> Ask
+              <button className="ask-primary" onClick={() => openAsk("")}>
+                Ask
               </button>
-              <button onClick={() => ask("simpler")}>Simpler</button>
-              <button onClick={() => ask("why")}>Why?</button>
-              <button onClick={() => ask("example")}>Example</button>
+              <button onClick={() => ask("explain")}>Explain</button>
+              <button onClick={() => ask("define")}>Define</button>
+              <button onClick={() => ask("simplify")} title="Plain-words version of this paragraph">
+                Simplify ¶
+              </button>
+              <button className="ask-deeper" onClick={() => ask("deeper")} title="Go down the rabbit hole: a short reading on this">
+                <span className="spark">✦</span> Deeper
+              </button>
+              <button className="mic" onPointerDown={micDown} onPointerUp={micUp} onContextMenu={(e) => e.preventDefault()} aria-label="Hold to ask out loud" title="Hold to talk (or hold V)">
+                <MicIcon />
+              </button>
             </>
           )}
         </div>
@@ -268,7 +427,7 @@ export function AskLayer() {
             return (
               <section key={t.id} className="ask-turn">
                 {newThread && <blockquote>{t.sel.length > 220 ? t.sel.slice(0, 220) + "…" : t.sel}</blockquote>}
-                <div className="ask-q">{t.kind === "ask" || t.kind === "followup" ? t.q : LABEL[t.kind]}</div>
+                <div className="ask-q">{t.kind === "ask" || t.kind === "followup" ? t.q : (LABEL[t.kind] ?? t.kind)}</div>
                 <div className="ask-a">
                   {t.a ? <Markdown src={t.a} /> : !t.done && status?.available ? <span className="ask-dots">thinking</span> : null}
                   {t.error && (

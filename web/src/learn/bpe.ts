@@ -131,4 +131,4 @@ export function loadTokenizer(): Promise<Tokenizer> {
 }
 
 /** Show whitespace in a token chip. */
-export const visible = (s: string) => s.replace(/ /g, "·").replace(/\n/g, "⏎").replace(/\t/g, "⇥");
+export const visible = (s: string) => s.replace(/ /g, "␣").replace(/\n/g, "⏎").replace(/\t/g, "⇥");

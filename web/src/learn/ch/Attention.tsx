@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { Tk } from "../../ui/Tok";
 import { claim, engine, release, tokenText, useEngine } from "../../engine/client";
 import { LiveButton } from "../../ui/Figure";
 import { css, rgb, usePalette, type Palette } from "../../ui/theme";
-import { visible } from "../bpe";
 import { Deeper, Fig, G, Idea, Seg, Slider, useRecorded } from "../kit";
 
 // ---- toy -----------------------------------------------------------------------------
@@ -260,13 +260,13 @@ function RealAttention() {
       </div>
       {row && (
         <div className="lr-note">
-          layer {lh[0] + 1}, head {lh[1] + 1} · query “{visible(tokenText(data!.tokens[qi]))}” looks hardest at{" "}
+          layer {lh[0] + 1}, head {lh[1] + 1} · query “<Tk s={tokenText(data!.tokens[qi])} />” looks hardest at{" "}
           {(() => {
             let b = 0;
             for (let j = 0; j <= qi; j++) if (row[j] > row[b]) b = j;
             return (
               <b>
-                “{visible(tokenText(data!.tokens[b]))}” ({(row[b] * 100).toFixed(0)}%)
+                “<Tk s={tokenText(data!.tokens[b])} />” ({(row[b] * 100).toFixed(0)}%)
               </b>
             );
           })()}
