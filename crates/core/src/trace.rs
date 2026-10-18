@@ -217,7 +217,8 @@ pub struct ForwardEvent {
     pub info: ForwardInfo,
     pub start: f64,
     pub duration: f64,
-    pub kv_len: Option<usize>,
+    /// `(len, capacity)` of the KV cache after this call, for stages that have one.
+    pub kv: Option<(usize, usize)>,
 }
 
 /// A ready-made sink for dashboards: records every op with timings from an
@@ -237,7 +238,7 @@ pub struct Recorder<C: Clock> {
     pub attention_head: Option<(usize, usize)>,
     /// Attention probabilities of the newest token, for the last forward.
     pub attention_probs: Vec<f32>,
-    kv_len: Option<usize>,
+    kv: Option<(usize, usize)>,
 }
 
 impl<C: Clock> Recorder<C> {
@@ -254,7 +255,7 @@ impl<C: Clock> Recorder<C> {
             top: Vec::new(),
             attention_head: None,
             attention_probs: Vec::new(),
-            kv_len: None,
+            kv: None,
         }
     }
 
@@ -272,16 +273,11 @@ impl<C: Clock> Recorder<C> {
 impl<C: Clock> Trace for Recorder<C> {
     fn forward_start(&mut self, _info: &ForwardInfo) {
         self.fwd_t = self.now();
-        self.kv_len = None;
+        self.kv = None;
     }
     fn forward_end(&mut self, info: &ForwardInfo) {
         let now = self.now();
-        self.forwards.push(ForwardEvent {
-            info: *info,
-            start: self.fwd_t,
-            duration: now - self.fwd_t,
-            kv_len: self.kv_len,
-        });
+        self.forwards.push(ForwardEvent { info: *info, start: self.fwd_t, duration: now - self.fwd_t, kv: self.kv });
     }
     fn op_start(&mut self, _op: &Op) {
         self.op_t = self.now();
@@ -290,8 +286,8 @@ impl<C: Clock> Trace for Recorder<C> {
         let now = self.now();
         self.ops.push(OpEvent { op: *op, forward: self.forwards.len(), start: self.op_t, duration: now - self.op_t });
     }
-    fn kv_cache(&mut self, len: usize, _capacity: usize) {
-        self.kv_len = Some(len);
+    fn kv_cache(&mut self, len: usize, capacity: usize) {
+        self.kv = Some((len, capacity));
     }
     fn wants_logits(&self) -> bool {
         self.top_k > 0

@@ -1,0 +1,199 @@
+//! `nanoinfer bench`: prefill and decode throughput, measured separately.
+//!
+//! Prefill (feeding the prompt) and decode (one token at a time) stress the
+//! hardware in completely different ways, so averaging them into one "tok/s"
+//! hides everything interesting. Each run:
+//!
+//! 1. fresh session, prompt of exactly `--prompt-len` tokens
+//! 2. time ONE forward over the whole prompt          -> prefill tok/s
+//! 3. time `--tokens` single-token forwards (greedy)  -> decode tok/s
+//!
+//! We do `--warmup` untimed runs first (page in the mmap, warm caches, let the
+//! CPU clock up), then `--runs` timed runs, and report median ± stddev. A JSON
+//! line is appended to `bench/results.jsonl` so the hillclimb has a history.
+
+use clap::Args;
+use nanoinfer_core::{sampler, NoTrace, Session, Stage};
+use serde_json::json;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Instant;
+
+#[derive(Args)]
+pub struct BenchArgs {
+    #[arg(long, default_value = "kv-cache")]
+    stage: Stage,
+    /// Decode steps to time per run.
+    #[arg(long, default_value_t = 64)]
+    tokens: usize,
+    /// Prompt length in tokens.
+    #[arg(long, default_value_t = 64)]
+    prompt_len: usize,
+    #[arg(long, default_value_t = 5)]
+    runs: usize,
+    #[arg(long, default_value_t = 1)]
+    warmup: usize,
+    /// Peak memory bandwidth in GB/s used for the theoretical decode ceiling
+    /// (Apple M4 base: ~120 GB/s).
+    #[arg(long, default_value_t = 120.0)]
+    bandwidth_gbs: f64,
+    /// Where to append the result line.
+    #[arg(long, default_value = "bench/results.jsonl")]
+    out: PathBuf,
+    /// Don't append to the results file.
+    #[arg(long)]
+    no_record: bool,
+    /// Free-form note stored with the result.
+    #[arg(long, default_value = "")]
+    note: String,
+}
+
+/// Prompt text for benchmarking: ordinary English, repeated to the requested length.
+const BENCH_TEXT: &str = "The history of computing is a story of making machines do arithmetic faster. \
+Early computers filled rooms and performed a few thousand operations per second. ";
+
+fn median(xs: &[f64]) -> f64 {
+    let mut v = xs.to_vec();
+    v.sort_by(f64::total_cmp);
+    let n = v.len();
+    if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        (v[n / 2 - 1] + v[n / 2]) / 2.0
+    }
+}
+
+fn stddev(xs: &[f64]) -> f64 {
+    let n = xs.len() as f64;
+    let mean = xs.iter().sum::<f64>() / n;
+    (xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n).sqrt()
+}
+
+fn cmd_output(cmd: &str, args: &[&str]) -> Option<String> {
+    let out = Command::new(cmd).args(args).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn git_sha() -> String {
+    let sha = cmd_output("git", &["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let dirty = cmd_output("git", &["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
+    if dirty {
+        format!("{sha}-dirty")
+    } else {
+        sha
+    }
+}
+
+fn machine() -> String {
+    cmd_output("sysctl", &["-n", "machdep.cpu.brand_string"])
+        .unwrap_or_else(|| format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH))
+}
+
+/// RFC 3339 UTC timestamp without pulling in a date crate.
+fn timestamp() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as i64;
+    let (days, rem) = (secs.div_euclid(86400), secs.rem_euclid(86400));
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
+pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let tok = crate::load_tokenizer(weights)?;
+    let model = crate::load_model(weights)?;
+    let cfg = model.config;
+    if a.prompt_len + a.tokens > cfg.n_ctx {
+        return Err(format!("prompt_len + tokens must be <= {}", cfg.n_ctx).into());
+    }
+    let mut prompt = Vec::new();
+    while prompt.len() < a.prompt_len {
+        prompt.extend(tok.encode(BENCH_TEXT));
+    }
+    prompt.truncate(a.prompt_len);
+
+    let weight_bytes = cfg.decode_weight_bytes(4);
+    let ceiling = a.bandwidth_gbs * 1e9 / weight_bytes as f64;
+    eprintln!(
+        "bench: stage={} prompt_len={} tokens={} runs={} (+{} warmup)",
+        a.stage, a.prompt_len, a.tokens, a.runs, a.warmup
+    );
+    eprintln!(
+        "decode ceiling: {:.0} GB/s / {:.1} MB of weights per token = {:.0} tok/s",
+        a.bandwidth_gbs,
+        weight_bytes as f64 / 1e6,
+        ceiling
+    );
+
+    let mut prefill = Vec::new();
+    let mut decode = Vec::new();
+    for run in 0..a.warmup + a.runs {
+        let mut s = Session::new(&model, a.stage);
+        let t = Instant::now();
+        let mut next = sampler::argmax(s.step(&model, &prompt, &mut NoTrace)?);
+        let t_prefill = t.elapsed().as_secs_f64();
+        let t = Instant::now();
+        for _ in 0..a.tokens {
+            next = sampler::argmax(s.step(&model, &[next], &mut NoTrace)?);
+        }
+        let t_decode = t.elapsed().as_secs_f64();
+        let (p, d) = (a.prompt_len as f64 / t_prefill, a.tokens as f64 / t_decode);
+        let label = if run < a.warmup { "warmup" } else { "run" };
+        eprintln!("  {label:<6} prefill {p:>9.2} tok/s   decode {d:>8.3} tok/s");
+        if run >= a.warmup {
+            prefill.push(p);
+            decode.push(d);
+        }
+    }
+
+    let (pm, ps, dm, ds) = (median(&prefill), stddev(&prefill), median(&decode), stddev(&decode));
+    println!(
+        "{}: prefill {:.2} ± {:.2} tok/s | decode {:.3} ± {:.3} tok/s | {:.2}% of {:.0} tok/s ceiling",
+        a.stage,
+        pm,
+        ps,
+        dm,
+        ds,
+        100.0 * dm / ceiling,
+        ceiling
+    );
+
+    if !a.no_record {
+        let line = json!({
+            "timestamp": timestamp(),
+            "git_sha": git_sha(),
+            "stage": a.stage.name(),
+            "kernels": a.stage.kernels(),
+            "model": "gpt2-124m",
+            "dtype": "f32",
+            "threads": 1,
+            "prompt_len": a.prompt_len,
+            "gen_tokens": a.tokens,
+            "runs": a.runs,
+            "prefill_tok_s": pm,
+            "prefill_tok_s_std": ps,
+            "decode_tok_s": dm,
+            "decode_tok_s_std": ds,
+            "decode_ceiling_tok_s": ceiling,
+            "pct_of_ceiling": 100.0 * dm / ceiling,
+            "bandwidth_gbs": a.bandwidth_gbs,
+            "machine": machine(),
+            "note": a.note,
+        });
+        if let Some(dir) = a.out.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&a.out)?;
+        writeln!(f, "{line}")?;
+        eprintln!("appended to {}", a.out.display());
+    }
+    Ok(())
+}

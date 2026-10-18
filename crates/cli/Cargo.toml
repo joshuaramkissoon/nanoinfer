@@ -1,0 +1,16 @@
+[package]
+name = "nanoinfer-cli"
+description = "Command-line driver for nanoinfer: generate text and benchmark stages."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "nanoinfer"
+path = "src/main.rs"
+
+[dependencies]
+nanoinfer-core = { path = "../core" }
+serde_json.workspace = true
+memmap2 = "0.9"
+clap = { version = "4", features = ["derive"] }

@@ -174,7 +174,7 @@ fn trace_reports_ops_kv_topk_and_attention() {
     s.step(model, &[11], &mut rec).unwrap();
 
     assert_eq!(rec.forwards.len(), 2);
-    assert_eq!(rec.forwards[1].kv_len, Some(prompt.len() + 1));
+    assert_eq!(rec.forwards[1].kv.map(|k| k.0), Some(prompt.len() + 1));
     // 12 layers x 10 ops (ln, qkv, kv_write, attn, proj, res, ln, fc, gelu, fc_proj, res = 11) + embed + ln_f + lm_head
     let per_forward = rec.ops.iter().filter(|o| o.forward == 1).count();
     assert_eq!(per_forward, 12 * 11 + 3);
