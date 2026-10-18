@@ -19,10 +19,12 @@
 //! macOS only: on other targets this crate is empty.
 #![cfg(target_os = "macos")]
 
+pub mod batch;
 mod forward;
 pub mod gpu;
 pub mod weights;
 
+pub use batch::{Batch, BatchEngine, BatchOpts};
 pub use forward::{MetalEngine, MetalSession};
 pub use gpu::{RunStats, Sync};
 

@@ -297,6 +297,34 @@ chart in this post is the real engine, running in your browser.
 - **Line:** "Same bytes, same maths, 50% faster: the lanes just asked for more data
   before waiting."
 
+### GPU stage 9: batched decode (why batching is the whole game)
+
+- **Hypothesis:** at batch 1 each weight byte does one multiply-add. Decode B
+  sequences per forward and each byte does B: aggregate throughput grows ~B× for
+  free until the arithmetic catches up with the bytes (the ridge), and the ridge
+  moves left as the weights shrink.
+- **Change:** a ragged, paged forward (any mix of sequences and positions per step;
+  PagedAttention-style 16-token KV pages + block table), a batched matvec that
+  dequantises each weight once for up to 16 tokens and reuses each activation load
+  across 2 weight rows, the prefill GEMMs from 32 rows, per-row flash-decoding and
+  argmax. GPU-resident loop for B streams. Bit-identical tokens alone or batched.
+- **Result (agg tok/s, B = 1 → 8 → 64 → 256):** Q4 657 → 2235 → 4606 → **4986**
+  (7.6×); f16 268 → 1829 → 4002 → 4892 (18×); f32 134 → 939 → 3372 → 4146 (31×).
+  Per-stream speed at Q4 B=64: 72 tok/s (13.9 ms per token).
+- **Aha:** the ridge is where quantisation stops paying. f32 stays memory-bound to
+  B≈8–16 (7× throughput for +14% latency at B=8); Q4 is compute-bound by B≈4. At
+  B ≥ 64 every dtype lands at ~4–5k tok/s on the same GEMMs: a 4-bit model and a
+  32-bit model serve the same number of tokens per second.
+- **Aha 2:** the first batched kernel stalled at B=4 (~250 GFLOP/s): reusing weights
+  across tokens isn't enough, activations have to be reused across weight rows too.
+  Register blocking again, one level up.
+- **Viz:** the batching curve: x = B (log), left axis aggregate tok/s, right axis
+  per-token latency, one line per dtype, shaded memory-bound region ending at each
+  dtype's ridge (`bench/batching.json`). Slider on B shows "each stream gets X tok/s,
+  the GPU makes Y".
+- **Line:** "Serving one user at a time, the GPU spends its life waiting for weights.
+  Serving 64, it finally has something to do with them."
+
 ### Stage 3: neon (hand-written SIMD), a null result
 
 - **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per

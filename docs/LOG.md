@@ -897,6 +897,103 @@ x (from L1), dequantises 32 nibbles and does 32 FMAs, so it is no longer
 waiting on DRAM alone. Q4 decode now sits at ~45% of the 120 GB/s spec
 ceiling, ~67% of the 80 GB/s practical one.
 
+### Metal stage 9: batched decode (metal-batch, B = 1 … 256)
+
+**Hypothesis.** At batch 1 every weight byte read from DRAM is used for one
+multiply-add (0.5–3.5 FLOP/byte, depending on dtype). With B sequences per
+forward the matvec becomes a skinny GEMM: the weights are read once per
+*step*, so step time should stay flat (memory-bound) while aggregate tok/s
+grows ~B×, until the arithmetic catches up with the bytes (the ridge). The
+ridge should move left as the weights shrink: f32 has 8× the bytes of Q4 per
+FLOP, so it should stay memory-bound to a much bigger B.
+
+**What changed** (new, nothing earlier edited):
+- `crates/metal/src/batch.rs` + `shaders/batch.metal`: a ragged, paged
+  forward. `Batch::step(work)` takes any list of `(sequence, tokens)`; rows of
+  different sequences sit side by side, rows of one sequence are consecutive
+  positions. The KV cache is paged (PagedAttention): per layer a pool of
+  16-position f16 pages and a block table per sequence, allocated on demand
+  and returned when a sequence ends. Token ids live in a GPU table
+  `toks[seq, pos]`; the per-row argmax writes `toks[seq, pos + 1]`, which is
+  what `Batch::decode_resident` uses to run many steps with the CPU waiting
+  once (the round-1 pipelining, for B sequences).
+- `matvec_batch` / `matvec_batch_r`: 8-lane-per-row matvec that dequantises a
+  weight unit into registers once and dots it with NB ≤ 16 activation rows;
+  the `_r` variant gives each lane R weight rows so every x load serves R rows.
+  From 32 rows on, the forward switches to the round-1 simdgroup-matrix
+  prefill GEMMs (+ GELU / residual / paged KV-write kernels).
+- Attention: `b_attn_split` / `b_attn_merge`, flash-decoding per row over its
+  own sequence's pages (grid head × chunk × row).
+- LM head only for rows that need logits (`b_ln_gather` + head matvec/GEMM),
+  `b_argmax_rows` per row.
+- **Batch invariance by construction**: every kernel used below 32 rows
+  accumulates each token's dot products in the same order whatever NB and R
+  are (unit sums formed identically, same 8-lane shuffle tree). A sequence's
+  tokens are bit-identical alone or in a batch (`tests/batch.rs`), which is
+  what later makes speculative decoding provably equal to greedy.
+- Tests (`tests/batch.rs`): f32 batch path reproduces HF greedy (matvec-only
+  and GEMM-from-4-rows); Q4 and f16: 4 prompts prefilled in one ragged
+  forward + 10 CPU-loop steps + 10 GPU-resident steps == each prompt alone;
+  page reuse after freeing sequences; all-row logits + truncate.
+
+**First attempt: `matvec_batch` (R = 1) is cache-bound at ~250 GFLOP/s.**
+Q4, matvec only: B=1 631, B=2 952, B=4 992, B=8 1039, B=16 924 tok/s: flat
+from B=4. Each weight row re-reads the activation slice: at B=8 that is
+32 B of x (from L2) per 0.56 B of Q4 weight, ~4 GB of L2 reads per step.
+Rows per lane (the `_r` kernels) cut that R×. Sweep (`NANOINFER_MVR`, Q4,
+agg tok/s):
+
+| R by NB (1,2,4,8,16) | B=1 | 2 | 4 | 8 | 16 | 32 |
+|---|---|---|---|---|---|---|
+| 0,2,4,4,2 | 631 | 1151 | 1646 | 1554 | 2558 | 2808 |
+| 0,4,4,4,4 | 579 | 1051 | 1606 | 1503 | 1379 | 1743 |
+| 2,2,2,2,2 | 570 | 1183 | 1731 | **2165** | 2494 | 2648 |
+
+R=4 with 8–16 tokens spills registers (R × NB accumulators twice over). Kept
+R=2 for NB ≥ 2 and the R=1 kernel for single rows (B=1 is latency-bound and
+prefers more SIMD-groups). Results are identical bit for bit across all of
+these, only the speed changes.
+
+**Numbers** (prompt 64, 64 GPU-resident decode steps, median of 3, load
+14–16; GEMM from 32 rows; `bench/batching.json`):
+
+| B | Q4 agg tok/s | Q4 step ms | Q8 agg | f16 agg | f16 step ms | f32 agg | f32 step ms |
+|---|---|---|---|---|---|---|---|
+| 1 | 657 | 1.52 | 488 | 268 | 3.73 | 134 | 7.48 |
+| 2 | 1194 | 1.68 | 923 | 574 | 3.49 | 249 | 8.02 |
+| 4 | 1819 | 2.20 | 1594 | 1047 | 3.82 | 490 | 8.16 |
+| 8 | 2235 | 3.58 | 2139 | 1829 | 4.37 | 939 | 8.52 |
+| 16 | 2585 | 6.19 | 2499 | 2538 | 6.30 | 1320 | 12.1 |
+| 32 | 3704 | 8.64 | 3458 | 2977 | 10.8 | 2241 | 14.3 |
+| 64 | 4606 | 13.9 | 4533 | 4002 | 16.0 | 3372 | 19.0 |
+| 128 | 4786 | 26.7 | 4807 | 4069 | 31.5 | 3838 | 33.3 |
+| 256 | **4986** | 51.3 | 4916 | 4892 | 52.3 | 4146 | 61.7 |
+
+Speed-up over B=1: Q4 7.6×, Q8 10×, f16 18×, f32 31×. Matvec-only Q4 (no
+GEMM switch): 2646 at B=32, 2577 at B=64, so the GEMMs win from B≈32.
+
+**What surprised me.**
+- **The ridge moves with the dtype, exactly as the roofline says.** Step time
+  (the latency every stream sees) is flat while memory-bound: f32 stays at
+  7.5–8.5 ms up to B=8 (7× the throughput for +14% latency), f16 to B≈4–8,
+  Q4 only to B≈2 (1.52 → 1.68 ms) and is 2.4× slower per step by B=8. With
+  ~600 GFLOP/s of batched matvec, the crossover B* ≈ (step time at B=1) ×
+  FLOP/s ÷ 2·params: Q4 1.5 ms → B* ≈ 4, f16 3.7 ms → ≈ 9, f32 7.5 ms → ≈ 18.
+  Quantisation makes single-stream decode faster and makes batching pay
+  off *less*: at B ≥ 64 every dtype ends at ~4–5k tok/s, compute-bound on
+  the same GEMMs (1.0–1.2 TFLOP/s, ~25–30% of f32 peak), and Q4's byte
+  savings are worth almost nothing (4986 vs 4892 tok/s for f16 at B=256).
+- **Per-stream speed is the price.** Q4 B=64: 4606 tok/s aggregate but 72
+  tok/s per stream (13.9 ms per token) vs 657 alone. That's the
+  throughput/latency frontier a server picks a point on.
+- **The first batched kernel was compute-starved, not bandwidth-starved.**
+  Reusing weights across tokens is half the job; the activations have to be
+  reused across weight rows too (R rows per lane), or the L2 becomes the
+  wall. Same lesson as CPU stage 4 (register blocking), on the GPU.
+- B=1 through the batched path (657 tok/s, CPU waits once per 64 steps) is
+  as fast as the round-1 single-stream best: the ragged/paged machinery
+  costs nothing measurable.
+
 ---
 
 ## Stage 3: neon (explicit SIMD), a null result

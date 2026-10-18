@@ -7,6 +7,11 @@
 //! `GPUEndTime - GPUStartTime` per token, dispatches and command buffers per
 //! token, and achieved GB/s against the bandwidth ceiling.
 
+#[path = "metal_batch.rs"]
+pub mod metal_batch;
+#[path = "metal_serve.rs"]
+pub mod metal_serve;
+
 use crate::bench::{git_sha, machine, median, prefer_performance_cores, stddev, timestamp, BENCH_TEXT};
 use clap::Parser;
 use nanoinfer_metal::{MetalEngine, MetalStage};
@@ -47,6 +52,12 @@ struct MetalBenchArgs {
 /// If argv is `bench ... --stage metal-*`, run the Metal bench and return its result.
 pub fn intercept() -> Option<Result<(), Box<dyn std::error::Error>>> {
     let argv: Vec<String> = std::env::args().collect();
+    // Round 2 GPU commands: `nanoinfer metal-batch ...` etc.
+    match argv.get(1).map(String::as_str) {
+        Some("metal-batch") => return Some(metal_batch::run(metal_batch::BatchArgs::parse_from(&argv[1..]))),
+        Some("metal-serve") => return Some(metal_serve::run(metal_serve::ServeArgs::parse_from(&argv[1..]))),
+        _ => {}
+    }
     let is_bench = argv.iter().skip(1).any(|a| a == "bench");
     let metal = argv.windows(2).any(|w| w[0] == "--stage" && w[1].starts_with("metal"))
         || argv.iter().any(|a| a.starts_with("--stage=metal"));
