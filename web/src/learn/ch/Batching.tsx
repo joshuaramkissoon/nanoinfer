@@ -3,7 +3,7 @@ import { Tip, useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
 import { log } from "../../lib/fmt";
 import { Climb, bestBatch } from "../Climb";
-import { chartColors, Deeper, Fig, G, Idea, Seg, nf, useLearnData, type LearnData, type ServingRate } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, Swatch, nf, useLearnData, type LearnData, type ServingRate } from "../kit";
 
 const DT_LABEL: Record<string, string> = { q4_0: "4-bit", q8_0: "8-bit", f16: "16-bit", f32: "32-bit" };
 const fmtMs = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`);
@@ -257,8 +257,8 @@ function PagedKv({ srv }: { srv: ServingRate }) {
       caption={
         <>
           Snapshots of the continuous server's KV-cache memory as it ran. Each square is one <G k="page" /> of 16 tokens' keys and
-          values (the first {shown} of {nf(kv.pages)} pages in the pool). Grey: in use by some request. Outline: free. Ember: the
-          pages of the request you picked. The row of boxes above is that request's <b>block table</b>: its tokens in order,
+          values (the first {shown} of {nf(kv.pages)} pages in the pool). <Swatch c={cc.c2}>Blue</Swatch>: in use by some
+          request. Outline: free. <Swatch c={cc.c1}>Ember</Swatch>: the pages of the request you picked. The row of boxes above is that request's <b>block table</b>: its tokens in order,
           16 per box, and which page each lives in.
         </>
       }
@@ -332,8 +332,8 @@ function PagedKv({ srv }: { srv: ServingRate }) {
                   width={cs - 1}
                   height={cs - 1}
                   rx={2}
-                  fill={mine ? cc.c1 : o != null ? pal.muted : "transparent"}
-                  opacity={mine ? 1 : o != null ? 0.45 : 1}
+                  fill={mine ? cc.c1 : o != null ? cc.c2 : "transparent"}
+                  opacity={mine ? 1 : o != null ? 0.42 : 1}
                   stroke={o == null ? pal.rule : "none"}
                   style={{ cursor: o != null ? "pointer" : undefined }}
                   onClick={() => o != null && setSel(o)}
@@ -406,12 +406,17 @@ export default function Batching() {
         </p>
       )}
       <Idea>Batching turns a memory-bound job into a compute-bound one: each weight read serves many users. Continuous batching keeps the batch full without making anyone wait for a seat.</Idea>
-      <Deeper title="Paged KV cache: memory that can be handed out and taken back">
+      <p>
+        Continuous batching has one more requirement: memory for KV caches that grow and finish at unpredictable times. Servers
+        solve it the way an operating system does, with pages (the fold below).
+      </p>
+      <Deeper title="Paged attention: virtual memory for the KV cache">
         <p>
-          Every live request also needs its <G k="KV cache" />, and it grows by one token per step. Reserving room for the
-          longest answer up front wastes most of it. Instead the server cuts the cache into small pages and gives a request a
-          new page each time it fills one, like a filing cabinet that hands out folders as needed. A small table per request (its
-          block table) records which pages are its, in order.
+          Every live request needs its <G k="KV cache" />, and it grows by one token per step. Reserving a contiguous region big
+          enough for the longest possible answer wastes most of it. So the server does what an OS does for processes: it cuts
+          cache memory into fixed-size pages, hands a request a new page whenever it fills one, and keeps a per-request page
+          table (here called the <b>block table</b>) mapping token positions to physical pages. Attention reads through that
+          table, so a request's pages can sit anywhere. Waste is at most the unfilled end of each request's last page.
         </p>
         {srv && <PagedKv srv={srv} />}
       </Deeper>

@@ -753,7 +753,8 @@ button.lr-bar:hover {
 .lr-bar .b i {
   display: block;
   height: 100%;
-  background: var(--m-heat-3);
+  /* grey by default: only the highlighted bar (.hi) wears ember, so it's the one thing to look at (DESIGN.md) */
+  background: color-mix(in srgb, var(--m-sub) 50%, transparent);
   border-radius: 2px;
   transition: width 0.35s var(--lr-ease);
 }

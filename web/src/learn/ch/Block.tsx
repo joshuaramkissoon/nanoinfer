@@ -3,71 +3,72 @@ import { SpaceKey, Tk } from "../../ui/Tok";
 import { decodeTokens, tokenText } from "../../engine/client";
 import { fitCanvas, useWidth } from "../../ui/Figure";
 import { usePalette, type Palette } from "../../ui/theme";
-import { Deeper, Fig, G, Idea, useFrame, useOnScreen, useRecorded } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Swatch, useFrame, useOnScreen, useRecorded } from "../kit";
 
 /** fig 6.1: inside one block */
 function BlockDiagram() {
   const pal = usePalette();
+  const cc = chartColors(pal.dark);
   const [t, setT] = useState(0);
   const [onScreen, vis] = useOnScreen<HTMLElement>();
   useFrame(vis, (dt) => setT((v) => (v + dt * 0.35) % 1));
-  const W = 600, H = 250, sx = 150;
-  const y = (f: number) => 20 + f * (H - 40);
+  const W = 440, H = 280, sx = 78;
+  const y = (f: number) => 18 + f * (H - 36);
   const pulse = y(t);
-  const box = (x: number, yy: number, w: number, label: string, sub: string, c: string) => (
-    <g>
-      <rect x={x} y={yy - 18} width={w} height={36} rx={7} fill={pal.dark ? "#262421" : "#fff"} stroke={c} />
-      <text x={x + w / 2} y={yy - 1} textAnchor="middle" fontSize={12} fontWeight={700} fill={pal.fg}>
-        {label}
-      </text>
-      <text x={x + w / 2} y={yy + 12} textAnchor="middle" fontSize={9.5} fill={pal.muted}>
-        {sub}
-      </text>
-    </g>
-  );
-  const branch = (yy0: number, yy1: number, label: string, sub: string, c: string) => (
-    <g>
-      <path d={`M${sx},${yy0} H${sx + 60} V${yy1 - 30}`} fill="none" stroke={pal.muted} strokeDasharray="3 3" />
-      {box(sx + 60 - 70, (yy0 + yy1) / 2, 140, label, sub, c)}
-      <path d={`M${sx + 60},${(yy0 + yy1) / 2 + 18} V${yy1} H${sx + 9}`} fill="none" stroke={c} strokeWidth={1.5} />
-      <circle cx={sx} cy={yy1} r={9} fill={pal.bg} stroke={c} strokeWidth={1.5} />
-      <text x={sx} y={yy1 + 4} textAnchor="middle" fontSize={13} fill={c} fontWeight={700}>
-        +
-      </text>
-    </g>
-  );
+  const bx = sx + 44, bw = W - bx - 6, cx = bx + bw / 2;
+  const branch = (yy0: number, yy1: number, label: string, l1: string, l2: string) => {
+    const mid = (yy0 + yy1) / 2;
+    return (
+      <g>
+        <path d={`M${sx},${yy0} H${cx} V${mid - 30}`} fill="none" stroke={pal.muted} strokeDasharray="3 3" />
+        <rect x={bx} y={mid - 30} width={bw} height={60} rx={8} fill={cc.c1} fillOpacity={0.1} stroke={cc.c1} />
+        <text x={cx} y={mid - 9} textAnchor="middle" fontSize={14.5} fontWeight={700} fill={pal.fg}>
+          {label}
+        </text>
+        <text x={cx} y={mid + 8} textAnchor="middle" fontSize={12} fill={pal.sub}>
+          {l1}
+        </text>
+        <text x={cx} y={mid + 23} textAnchor="middle" fontSize={11.5} fill={pal.muted}>
+          {l2}
+        </text>
+        <path d={`M${cx},${mid + 30} V${yy1} H${sx + 11}`} fill="none" stroke={cc.c1} strokeWidth={1.5} />
+        <circle cx={sx} cy={yy1} r={10} fill={pal.bg} stroke={cc.c1} strokeWidth={1.6} />
+        <text x={sx} y={yy1 + 5} textAnchor="middle" fontSize={15} fill={cc.c1} fontWeight={700}>
+          +
+        </text>
+      </g>
+    );
+  };
   return (
     <Fig
       figRef={onScreen}
       n="6.1"
-      title="One transformer block"
+      title="One block: read the stream, compute an edit, add it back"
       prov="diagram"
       caption={
         <>
-          The thick ember line is the <b>residual stream</b>: the token's 768 numbers flowing from top to bottom. A block
-          reads a copy, runs attention (gather from earlier tokens, chapter 5), and <b>adds</b> the result back on (⊕). Then
-          it does the same with an MLP: two big matrices with a bend in between, working on this token alone. GPT-2 stacks
-          12 of these blocks.
+          The thick grey line is the <b>residual stream</b>: the token's 768 numbers flowing from top to bottom (the dot is one
+          token passing through). A block reads a copy, runs <Swatch c={cc.c1}>attention</Swatch> (gather from earlier tokens,
+          chapter 5), and <b>adds</b> the result back on (+). Then it does the same with the{" "}
+          <Swatch c={cc.c1}>feed-forward network</Swatch> (also called the MLP): two big matrices with a bend in between, working
+          on this token alone. GPT-2 stacks 12 of these blocks.
         </>
       }
     >
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 560, display: "block", margin: "0 auto" }}>
-        <line x1={sx} x2={sx} y1={y(0)} y2={y(1)} stroke={pal.heat[3]} strokeWidth={7} strokeLinecap="round" opacity={0.85} />
-        <circle cx={sx} cy={pulse} r={5} fill={pal.accent} />
-        <text x={sx - 14} y={y(0) + 4} textAnchor="end" fontSize={11} fill={pal.sub}>
-          stream in
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 520, display: "block", margin: "0 auto" }} role="img" aria-label="a transformer block: attention then feed-forward, each added back onto the residual stream">
+        <line x1={sx} x2={sx} y1={y(0)} y2={y(1)} stroke={pal.muted} strokeWidth={8} strokeLinecap="round" opacity={0.55} />
+        <circle cx={sx} cy={pulse} r={6} fill={cc.c1} />
+        <text x={sx - 16} y={y(0) + 5} textAnchor="end" fontSize={12.5} fill={pal.sub}>
+          in
         </text>
-        <text x={sx - 14} y={y(1) + 4} textAnchor="end" fontSize={11} fill={pal.sub}>
-          stream out
+        <text x={sx - 16} y={y(1) + 5} textAnchor="end" fontSize={12.5} fill={pal.sub}>
+          out
         </text>
-        {branch(y(0.08), y(0.47), "attention", "look at earlier tokens", pal.cool)}
-        {branch(y(0.55), y(0.94), "MLP", "768 → 3072 → 768", pal.heat[3])}
-        <text x={sx + 210} y={y(0.27) + 4} fontSize={10.5} fill={pal.muted}>
-          4 matrices: query, key, value, output
+        <text x={sx - 16} y={y(0.5) + 5} textAnchor="end" fontSize={11.5} fill={pal.muted}>
+          stream
         </text>
-        <text x={sx + 210} y={y(0.745) + 4} fontSize={10.5} fill={pal.muted}>
-          2 matrices: up, down (+ GELU bend)
-        </text>
+        {branch(y(0.05), y(0.47), "attention", "look at earlier tokens", "4 matrices: query, key, value, out")}
+        {branch(y(0.55), y(0.95), "feed-forward (MLP)", "think about this token", "768 → 3072 → 768, 2 matrices")}
       </svg>
     </Fig>
   );
@@ -163,7 +164,7 @@ function Stream() {
           </div>
           <div className="lr-bars">
             {cell.top.map((t, i) => (
-              <div key={t.id} className={`lr-bar${i === 0 && d === 12 ? " hi" : ""}`} style={{ gridTemplateColumns: "minmax(4rem,8rem) 1fr 3.4rem" }}>
+              <div key={t.id} className={`lr-bar${i === 0 ? " hi" : ""}`} style={{ gridTemplateColumns: "minmax(4rem,8rem) 1fr 3.4rem" }}>
                 <span className="tk"><Tk s={tokenText(t.id)} /></span>
                 <span className="b">
                   <i style={{ width: `${Math.max(1, t.p * 100)}%` }} />
@@ -195,7 +196,7 @@ export default function Block() {
         the vector is like a shared notebook travelling down the model: each layer reads it, writes a note in the margin,
         and passes it on. That notebook is called the residual stream.
       </p>
-      <Idea>The model is 12 identical-shaped blocks. Each reads the residual stream, computes an edit (attention, then an MLP), and adds it back. At the end, the stream is turned into a score for every token.</Idea>
+      <Idea>The model is 12 identical-shaped blocks. Each reads the residual stream, computes an edit (attention, then a feed-forward network), and adds it back. At the end, the stream is turned into a score for every token.</Idea>
       <p>Because each layer only adds, we can peek at the notebook halfway through and ask: what would you guess right now?</p>
       <Stream />
       <Deeper title="What turns the stream into a guess?">

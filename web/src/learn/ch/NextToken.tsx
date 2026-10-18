@@ -78,12 +78,12 @@ function Guesser() {
       caption={
         mine ? (
           <>
-            Your prompt (grey), any tokens you've picked (black), and below it GPT-2's ten most likely next tokens with their
+            Your prompt (grey), any tokens you've picked (bright), and below it GPT-2's ten most likely next tokens with their
             probabilities (out of all 50,257). Each guess is computed when you ask, in this tab.
           </>
         ) : (
           <>
-            A real sentence GPT-2 wrote, replayed one token at a time. Grey is the prompt a person typed; black is what the model
+            A real sentence GPT-2 wrote, replayed one token at a time. Grey is the prompt a person typed; bright is what the model
             has added so far. The bars are the model's ten best guesses for the next token, and the highlighted bar is the one
             that was picked.
           </>
