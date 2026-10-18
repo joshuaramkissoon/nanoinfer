@@ -10,6 +10,9 @@ import type { ProbeRow, StageInfo } from "./types";
 export interface WebgpuRecording {
   recordedAt: string;
   ua: string;
+  /** plain-words browser and build, and the machine's state while recording */
+  browser?: string;
+  conditions?: string;
   adapter: string;
   features: string[];
   /** dispatch / submit / round-trip probe in this browser */

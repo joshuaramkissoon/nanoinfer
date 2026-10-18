@@ -2,7 +2,8 @@
 """Precompute the small data files the Foundations (/learn) pages draw from.
 
 Reads the real GPT-2 checkpoint (weights/gpt2/model.safetensors) and our own
-benchmark logs (bench/batching.json, bench/serving.json) and writes
+benchmark logs (bench/results.jsonl, batching.json, serving.json, specdec.json,
+webgpu.json) and writes
 web/public/learn/data.json (~250 KB). Nothing here is invented: every vector,
 neighbour list, histogram and timing comes from those files.
 
@@ -193,8 +194,110 @@ def main() -> None:
                 "ttft_p50_ms": x["ttft_ms"]["p50"],
                 "ttft_p99_ms": x["ttft_ms"]["p99"],
                 "makespan": x["makespan_s"],
-                "gantt": [[q["arrival"], q["admitted"], q["first_token"], q["finished"]] for q in g],
+                "gantt": [[q["arrival"], q["admitted"], q["first_token"], q["finished"], q["out_len"]] for q in g],
             }
+
+    # ---- headline numbers for the climb, the GPU chapter and the landing page ----
+    # the best untraced run at the default bench shape (prompt 64 + 64), per stage
+    rows = []
+    for line in (ROOT / "bench" / "results.jsonl").read_text().splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+
+    def best(stage: str) -> dict:
+        rs = [r for r in rows if r.get("stage") == stage and not r.get("traced") and r.get("prompt_len", 64) == 64]
+        r = max(rs, key=lambda r: r["decode_tok_s"])
+        return {
+            "stage": stage,
+            "decode": round(r["decode_tok_s"], 2),
+            "prefill": round(r.get("prefill_tok_s") or 0),
+            "note": r.get("note", ""),
+            "when": str(r.get("timestamp", ""))[:10],
+        }
+
+    wg = json.loads((ROOT / "bench" / "webgpu.json").read_text())
+    probe = wg["metal_probe"]
+    metal_pair = {s["metal"]["stage"]: s["metal"] for s in wg["stages"] if s.get("metal")}
+    gpu_best = best("metal-lanes")
+    # one token four ways: wall ms per token from the quiet paired runs; idle is
+    # estimated as (CPU waits per token) x the measured commit + wait round trip
+    rt_ms = probe["commit_wait_round_trip_us"] / 1000
+    steps = []
+    for stage, label, waits, note in (
+        ("metal-naive", "ask after every step", None, "{d} operations, and after each one the CPU waits ~{rt} µs to hear it's done"),
+        ("metal-onecb", "ask once per token", 1, "same kernels, all {d} sent in one batch, one wait"),
+        ("metal-par", "GPU-shaped kernels", 1, "256 threads per job instead of 1 for LayerNorm and attention"),
+        ("metal-lanes", "4-bit, never wait", 0, "fewer bytes, and the next token is queued before this one finishes"),
+    ):
+        if stage in metal_pair:
+            m = metal_pair[stage]
+            tok, d = m["decode_tok_s"], m.get("dispatches_per_token", 0)
+        else:
+            tok, d = gpu_best["decode"], 0
+        ms = 1000 / tok
+        idle = min(ms * 0.9, (d if waits is None else waits) * rt_ms)
+        steps.append({"label": label, "stage": stage, "tokS": round(tok, 1), "work": round(ms - idle, 3), "idle": round(idle, 3),
+                      "note": note.format(d=int(d), rt=probe["commit_wait_round_trip_us"])})
+    headline = {
+        "naive": best("naive"),
+        "gpu": gpu_best,
+        "gpuReadGBs": probe["read_bandwidth_gbs"],
+        "gpuSteps": steps,
+        "conditions": "quiet machine (load 2-5), prompt 64 + 64 greedy tokens, best of 5-7 runs",
+    }
+
+    # ---- WebGPU, native (wgpu on Metal), paired with the Metal rung doing the same ----
+    webgpu = {
+        "what": wg["what"],
+        "stages": [
+            {"stage": s["stage"], "decode": round(s["decode_tok_s"], 1), "prefill": round(s["prefill_tok_s"]),
+             "metal": s["metal"]["stage"] if s.get("metal") else None,
+             "metalDecode": round(s["metal"]["decode_tok_s"], 1) if s.get("metal") else None}
+            for s in wg["stages"]
+        ],
+    }
+
+    # ---- serving: the timeline and paged-KV snapshots ----------------------------
+    for rk in ("rate=16",):
+        cont = srv["runs"][rk]["continuous"]
+        serving[rk]["kv"] = {
+            "pages": srv["runs"][rk]["workload"]["kv_pages"],
+            "pageTokens": 16,
+            "stats": cont["kv_stats"],
+            "staticPeak": srv["runs"][rk]["static"]["kv_pages_peak"],
+            "contPeak": cont["kv_pages_peak"],
+            "snapshots": [{"iter": sn["iter"], "seqs": [[q["id"], q["len"], q["pages"]] for q in sn["seqs"]]} for sn in cont["kv_snapshots"]],
+        }
+        serving[rk]["note"] = srv["runs"][rk].get("note", "")
+        serving[rk]["requests"] = srv["runs"][rk]["workload"]["requests"]
+        serving[rk]["maxBatch"] = srv["runs"][rk]["workload"]["max_batch"]
+
+    # ---- speculative decoding --------------------------------------------------------
+    sd = json.loads((ROOT / "bench" / "specdec.json").read_text())
+    spec = {}
+    for pk, pr in sd["pairs"].items():
+        prompts = []
+        for q in pr["prompts"]:
+            k4 = next(e for e in q["per_k"] if e["k"] == 4)
+            top = max(q["per_k"], key=lambda e: e["speedup_vs_target"])
+            prompts.append({
+                "prompt": q["prompt"],
+                "text": q["text"][-160:],
+                "target": round(q["target_tok_s"], 1),
+                "draft": round(q["draft_tok_s"]),
+                "c": q["c"],
+                "alpha": round(k4["alpha"], 3),
+                "bestK": top["k"],
+                "best": round(top["speedup_vs_target"], 2),
+                "bestTokS": round(top["tok_s"]),
+                "perK": [[e["k"], round(e["speedup_vs_target"], 2), round(e["alpha"], 3)] for e in q["per_k"]],
+                "playback": k4["playback"][:96],
+                "k4": {"speedup": round(k4["speedup_vs_target"], 2), "tokS": round(k4["tok_s"]), "perForward": round(k4["tokens_per_target_forward"], 2)},
+            })
+        spec[pr["target"]] = {"target": pr["target"], "targetDtype": pr["target_dtype"], "draft": pr["draft"], "draftDtype": pr["draft_dtype"],
+                              "note": pr["note"], "prompts": prompts}
 
     data = {
         "source": "weights/gpt2/model.safetensors (OpenAI GPT-2 124M) and bench/*.json (Apple M4)",
@@ -203,6 +306,9 @@ def main() -> None:
         "corner": [[round(float(x), 4) for x in row] for row in corner],
         "batching": batching,
         "serving": serving,
+        "headline": headline,
+        "webgpu": webgpu,
+        "spec": spec,
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
