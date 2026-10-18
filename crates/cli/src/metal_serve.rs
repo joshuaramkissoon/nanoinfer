@@ -133,13 +133,25 @@ struct Iter {
     kv_pages: usize,
 }
 
+/// The paged KV cache at one iteration (continuous policy): for the viz.
+struct KvSnap {
+    t: f64,
+    iter: usize,
+    /// (request id, sequence length, block table)
+    seqs: Vec<(usize, usize, Vec<u32>)>,
+}
+
 struct Outcome {
     logs: Vec<ReqLog>,
     iters: Vec<Iter>,
+    kv_snaps: Vec<KvSnap>,
     makespan: f64,
     /// Peak KV pages reserved by the policy (static: prompt + max output per slot).
     reserved_peak: usize,
 }
+
+/// Snapshot the continuous scheduler's block tables every this many iterations.
+const KV_SNAP_EVERY: usize = 10;
 
 fn pages(n: usize) -> usize {
     n.div_ceil(KV_BLOCK)
@@ -234,7 +246,7 @@ fn run_static(engine: &BatchEngine, reqs: &[Req], max_batch: usize) -> Result<Ou
             b.free_seq(seqs[j]);
         }
     }
-    Ok(Outcome { logs, iters, makespan: clock, reserved_peak })
+    Ok(Outcome { logs, iters, kv_snaps: vec![], makespan: clock, reserved_peak })
 }
 
 fn run_continuous(engine: &BatchEngine, reqs: &[Req], max_batch: usize, budget: usize) -> Result<Outcome, String> {
@@ -247,6 +259,7 @@ fn run_continuous(engine: &BatchEngine, reqs: &[Req], max_batch: usize, budget: 
     let mut b = engine.batch();
     let mut logs = vec![ReqLog::default(); reqs.len()];
     let mut iters = Vec::new();
+    let mut kv_snaps: Vec<KvSnap> = Vec::new();
     let mut clock = 0.0f64;
     let mut waiting: VecDeque<usize> = VecDeque::new();
     let mut next = 0;
@@ -309,6 +322,10 @@ fn run_continuous(engine: &BatchEngine, reqs: &[Req], max_batch: usize, budget: 
             occupied: live.len(),
             kv_pages: b.blocks_used(),
         });
+        if (iters.len() - 1) % KV_SNAP_EVERY == 0 {
+            let seqs = live.iter().map(|l| (reqs[l.req].id, b.seq_len(l.seq), b.block_table(l.seq).to_vec())).collect();
+            kv_snaps.push(KvSnap { t: clock, iter: iters.len() - 1, seqs });
+        }
         clock += dt;
         for ((j, is_prefill, n), o) in kinds.into_iter().zip(out) {
             let l = &mut live[j];
@@ -339,7 +356,7 @@ fn run_continuous(engine: &BatchEngine, reqs: &[Req], max_batch: usize, budget: 
         }
     }
     let reserved_peak = iters.iter().map(|i| i.kv_pages).max().unwrap_or(0);
-    Ok(Outcome { logs, iters, makespan: clock, reserved_peak })
+    Ok(Outcome { logs, iters, kv_snaps, makespan: clock, reserved_peak })
 }
 
 fn pct(xs: &mut [f64], p: f64) -> f64 {
@@ -400,8 +417,36 @@ fn summarise(name: &str, reqs: &[Req], o: &Outcome, gantt: usize) -> Value {
                    "occupied": i.occupied, "kv_pages": i.kv_pages})
         })
         .collect();
+    // Paged-KV snapshots (continuous only), <= 20 for the page, and the
+    // internal fragmentation of the pages in use (unused tail positions).
+    let snap_stride = o.kv_snaps.len().div_ceil(20).max(1);
+    let snaps: Vec<Value> = o
+        .kv_snaps
+        .iter()
+        .step_by(snap_stride)
+        .map(|k| {
+            let seqs: Vec<Value> = k.seqs.iter().map(|(id, len, pages)| json!({"id": id, "len": len, "pages": pages})).collect();
+            json!({"t": k.t, "iter": k.iter, "seqs": seqs})
+        })
+        .collect();
+    let (mut slots, mut used, mut n_seq, mut n_snap) = (0usize, 0usize, 0usize, 0usize);
+    for k in &o.kv_snaps {
+        for (_, len, pages) in &k.seqs {
+            slots += pages.len() * KV_BLOCK;
+            used += len;
+            n_seq += 1;
+        }
+        n_snap += 1;
+    }
+    let kv_stats = (n_snap > 0).then(|| {
+        json!({"snapshots": n_snap, "avg_live_seqs": n_seq as f64 / n_snap as f64,
+               "avg_pages_per_seq": slots as f64 / KV_BLOCK as f64 / n_seq.max(1) as f64,
+               "internal_fragmentation": 1.0 - used as f64 / slots.max(1) as f64})
+    });
     json!({
         "policy": name,
+        "kv_snapshots": snaps,
+        "kv_stats": kv_stats,
         "throughput_tok_s": gen as f64 / o.makespan,
         "generated_tokens": gen,
         "makespan_s": o.makespan,

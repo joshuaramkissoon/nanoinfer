@@ -1057,6 +1057,33 @@ p99 15.3 ms; 256 → 62 ms / 19.5 ms; 512 → 56 ms / 18.9 ms.
   tokens per iteration halves the p99 TPOT jitter but quintuples TTFT.
 
 
+### metal-serve, re-run on a quiet machine + paged-KV snapshots for the viz
+
+`metal-serve` now snapshots the continuous scheduler's block tables every 10
+iterations (`kv_snapshots` in `bench/serving.json`, ≤ 20 per run: for each
+live request its id, length and page ids in position order) and summarises
+them (`kv_stats`). `Batch::block_table(s)` exposes a sequence's pages.
+
+| arrivals | static tok/s | continuous tok/s | × | TTFT p50 static → cont. | KV peak pages static → cont. |
+|---|---|---|---|---|---|
+| all at t=0 | 1389 | **2198** | 1.58 | 6.88 s → 3.16 s | 810 → 530 |
+| Poisson 8/s | 885 | 1051 | 1.19 | 1.39 s → **23 ms** | 729 → 195 |
+| Poisson 16/s | 1080 | **1812** | 1.68 | 3.47 s → **40 ms** | 799 → 493 |
+| 16/s, budget 32 | 1081 | 1780 | 1.65 | → 150 ms (TPOT p99 13.4 ms) | → 472 |
+| 16/s, budget 512 | 1075 | 1828 | 1.70 | → 40 ms (TPOT p99 17.4 ms) | → 491 |
+
+(16–20% faster than the load-8–11 run above; same ratios.)
+
+**Paged KV in numbers** (continuous): live sequences average 26 (offline),
+17 (16/s), 3.4 (8/s); each holds ~14 pages (≈ 224 positions); internal
+fragmentation, the unused tail of each sequence's last page, is **3.2–3.3%**
+of allocated KV. Static batching instead reserves prompt + the batch's
+longest output per slot: its 810-page peak against continuous's 530 is the
+waste paging removes. After a few hundred iterations block tables are
+scattered across the pool (request 0 at iteration 250: pages 0–3, 15, 30, 4,
+6, 8, 10, 32, 35, 50, 81, …): pages freed by finished requests are reused
+immediately, which is exactly what a contiguous per-sequence cache can't do.
+
 ### Salvage note (18 Oct, evening)
 
 The Metal round-2 and WebGPU agents were stopped mid-work by a kernel

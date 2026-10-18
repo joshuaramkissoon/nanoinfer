@@ -226,6 +226,11 @@ impl<'e> Batch<'e> {
         }
     }
 
+    /// The KV pages (block table) of sequence `s`, in position order.
+    pub fn block_table(&self, s: usize) -> &[u32] {
+        &self.seq_blocks[s]
+    }
+
     /// KV pages currently allocated / in the pool.
     pub fn blocks_used(&self) -> usize {
         self.e.opts.kv_blocks - self.free_blocks.len()

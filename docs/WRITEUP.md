@@ -345,6 +345,13 @@ chart in this post is the real engine, running in your browser.
   first token → done bars, from `bench/serving.json` `gantt`), plus a strip of rows
   per iteration (decode vs prefill, `iters`) showing static's sawtooth of dying
   batches vs continuous's flat full line; KV pages over time beside it.
+- **Viz 2 (paged KV):** the pool as a grid of 16-token pages coloured by request,
+  stepping through `kv_snapshots` (`bench/serving.json`): pages appear as
+  sequences grow, vanish when they finish, and get reused scattered; caption
+  with `kv_stats` (3.3% internal fragmentation vs static's 810-vs-530-page
+  reservation).
+- **Quiet re-run numbers:** offline 1389 → 2198 tok/s; 16 req/s 1080 → 1812 with
+  TTFT p50 3.47 s → 40 ms.
 - **Line:** "The static server was busy 100% of the time and still made people wait
   four seconds to hear the first word."
 
