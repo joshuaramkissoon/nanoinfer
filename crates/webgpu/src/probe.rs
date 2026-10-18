@@ -84,7 +84,11 @@ pub async fn run(gpu: &Gpu, now: &dyn Fn() -> f64, reps: usize) -> ProbeResult {
     // 1a. GPU-side time of the same 1000-dispatch pass (timestamp queries).
     if gpu.has(wgpu::Features::TIMESTAMP_QUERY) {
         let n = 1000;
-        let qs = gpu.device.create_query_set(&wgpu::QuerySetDescriptor { label: Some("ts"), ty: wgpu::QueryType::Timestamp, count: 2 });
+        let qs = gpu.device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: Some("ts"),
+            ty: wgpu::QueryType::Timestamp,
+            count: 2,
+        });
         let qbuf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ts-resolve"),
             size: 16,

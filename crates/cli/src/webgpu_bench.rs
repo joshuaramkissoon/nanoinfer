@@ -171,7 +171,12 @@ fn run(a: Args) -> Result<(), Box<dyn std::error::Error>> {
         let tot: f64 = by.iter().map(|e| e.1).sum();
         println!("    (sum {tot:.3} ms)");
         for (n, ms, k) in by {
-            println!("    {n:<12} {:>9.1} us  {:>5.1}%  ({k} dispatches, {:.1} us each)", ms * 1e3, 100.0 * ms / tot, ms * 1e3 / k as f64);
+            println!(
+                "    {n:<12} {:>9.1} us  {:>5.1}%  ({k} dispatches, {:.1} us each)",
+                ms * 1e3,
+                100.0 * ms / tot,
+                ms * 1e3 / k as f64
+            );
         }
     }
     if !a.no_record {

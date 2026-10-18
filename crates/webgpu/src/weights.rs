@@ -74,7 +74,7 @@ pub fn quantize_q8_0(w: &[f32]) -> (Vec<u8>, Vec<u8>) {
     assert_eq!(w.len() % 32, 0);
     let mut qs = Vec::with_capacity(w.len());
     let mut sc = Vec::with_capacity(w.len() / 16);
-    for block in w.chunks_exact(32) {
+    for block in w.as_chunks::<32>().0 {
         let amax = block.iter().fold(0.0f32, |m, v| m.max(v.abs()));
         let d = amax / 127.0;
         let id = if d > 0.0 { 1.0 / d } else { 0.0 };
@@ -166,7 +166,8 @@ impl Weights {
             .iter()
             .enumerate()
             .map(|(i, l)| {
-                let mat = |name: &str, w: &[f32], rows, cols| Mat::upload(gpu, &format!("h{i}.{name}"), w, rows, cols, dtype);
+                let mat =
+                    |name: &str, w: &[f32], rows, cols| Mat::upload(gpu, &format!("h{i}.{name}"), w, rows, cols, dtype);
                 let ones = vec![1.0f32; c];
                 let zeros = vec![0.0f32; c];
                 let lw = if fold {

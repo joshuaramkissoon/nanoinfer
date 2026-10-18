@@ -133,7 +133,10 @@ impl Gpu {
                 count: None,
             })
             .collect();
-        let l = Rc::new(self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some(sig), entries: &entries }));
+        let l = Rc::new(
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some(sig), entries: &entries }),
+        );
         self.layouts.borrow_mut().insert(sig.to_string(), l.clone());
         l
     }
@@ -176,7 +179,10 @@ impl Gpu {
             layout: Some(&pl),
             module: &m,
             entry_point: Some(entry),
-            compilation_options: wgpu::PipelineCompilationOptions { constants, zero_initialize_workgroup_memory: false },
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants,
+                zero_initialize_workgroup_memory: false,
+            },
             cache: None,
         });
         let cs: Vec<String> = constants.iter().map(|(k, v)| format!("{k}={v}")).collect();
@@ -195,7 +201,7 @@ impl Gpu {
 
     pub fn buffer_init(&self, label: &str, data: &[u8]) -> wgpu::Buffer {
         let mut v;
-        let data = if data.len() % 4 != 0 || data.is_empty() {
+        let data = if !data.len().is_multiple_of(4) || data.is_empty() {
             v = data.to_vec();
             v.resize(data.len().max(16).next_multiple_of(4), 0);
             &v[..]
@@ -241,7 +247,11 @@ impl Gpu {
                 }),
             })
             .collect();
-        self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some(&k.name), layout: &k.layout, entries: &entries })
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&k.name),
+            layout: &k.layout,
+            entries: &entries,
+        })
     }
 
     pub fn step_bind(&self, buf: &wgpu::Buffer) -> wgpu::BindGroup {

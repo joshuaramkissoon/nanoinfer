@@ -48,7 +48,9 @@ fn tpr(d: DType, cols: usize) -> u32 {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let var = if cols > 1024 { "NANOINFER_WGPU_TPR_WIDE" } else { "NANOINFER_WGPU_TPR_NARROW" };
-        if let Some(t) = std::env::var(var).or_else(|_| std::env::var("NANOINFER_WGPU_TPR")).ok().and_then(|v| v.parse().ok()) {
+        if let Some(t) =
+            std::env::var(var).or_else(|_| std::env::var("NANOINFER_WGPU_TPR")).ok().and_then(|v| v.parse().ok())
+        {
             return t;
         }
     }
@@ -99,7 +101,11 @@ impl Engine {
     /// Reuse already-uploaded weights (must match the stage's dtypes).
     pub fn with_weights(gpu: Rc<Gpu>, config: Config, stage: WgpuStage, w: Rc<Weights>) -> Engine {
         let recipe = stage.recipe();
-        assert_eq!((w.dtype, w.head_dtype, w.ln_folded), (recipe.dtype, recipe.head_dtype, recipe.ln_fold), "weights dtype / folding mismatch");
+        assert_eq!(
+            (w.dtype, w.head_dtype, w.ln_folded),
+            (recipe.dtype, recipe.head_dtype, recipe.ln_fold),
+            "weights dtype / folding mismatch"
+        );
         Engine { gpu, config, stage, recipe, w, kernels: RefCell::new(HashMap::new()) }
     }
 
@@ -119,7 +125,11 @@ impl Engine {
     /// Threads per matvec row for this engine (16 for 768-wide Q8 rows with
     /// `wide_q8`: 3 vec4<u32> loads each).
     fn tpr(&self, d: DType, cols: usize) -> u32 {
-        if self.recipe.wide_q8 && d == DType::Q8_0 && cols <= 1024 && std::env::var("NANOINFER_WGPU_TPR_NARROW").is_err() {
+        if self.recipe.wide_q8
+            && d == DType::Q8_0
+            && cols <= 1024
+            && std::env::var("NANOINFER_WGPU_TPR_NARROW").is_err()
+        {
             return 16;
         }
         tpr(d, cols)
@@ -132,7 +142,12 @@ impl Engine {
                 MatKind::Matvec => (include_str!("shaders/matvec.wgsl"), "matvec", true, ""),
                 // naga takes subgroup builtins without `enable subgroups;` (and rejects
                 // the directive); a browser would need it.
-                MatKind::MatvecSg => (include_str!("shaders/matvec_sg.wgsl"), "matvec_sg", true, if cfg!(target_arch = "wasm32") { "enable subgroups;\n" } else { "" }),
+                MatKind::MatvecSg => (
+                    include_str!("shaders/matvec_sg.wgsl"),
+                    "matvec_sg",
+                    true,
+                    if cfg!(target_arch = "wasm32") { "enable subgroups;\n" } else { "" },
+                ),
                 MatKind::MatvecLn => (include_str!("shaders/matvec_ln.wgsl"), "matvec_ln", true, ""),
                 MatKind::Naive => (include_str!("shaders/matmul_naive.wgsl"), "matmul_naive", false, ""),
                 MatKind::Tiled => (include_str!("shaders/matmul_tiled.wgsl"), "matmul_tiled", false, ""),
@@ -285,18 +300,49 @@ struct Planner<'a> {
 }
 
 impl Planner<'_> {
-    fn push(&mut self, k: Rc<Kernel>, key: Key, bufs: &[&wgpu::Buffer], params: [u32; 8], dims: [u32; 3], shape: (usize, usize), n: usize) {
+    #[allow(clippy::too_many_arguments)]
+    fn push(
+        &mut self,
+        k: Rc<Kernel>,
+        key: Key,
+        bufs: &[&wgpu::Buffer],
+        params: [u32; 8],
+        dims: [u32; 3],
+        shape: (usize, usize),
+        n: usize,
+    ) {
         let bg = self.binder.bind(&self.e.gpu, key, &k, bufs, params);
         self.plan.push(Disp { k, bg, dims, step: self.step, name: key.name, layer: key.layer, shape, n });
     }
 
-    fn small(&mut self, k: &Rc<Kernel>, name: &'static str, layer: i32, bufs: &[&wgpu::Buffer], params: [u32; 8], dims: [u32; 3]) {
+    fn small(
+        &mut self,
+        k: &Rc<Kernel>,
+        name: &'static str,
+        layer: i32,
+        bufs: &[&wgpu::Buffer],
+        params: [u32; 8],
+        dims: [u32; 3],
+    ) {
         let key = Key { name, layer, part: 0, prefill: self.n > 1 };
         self.push(k.clone(), key, bufs, params, dims, (0, 0), self.n);
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn mat(&mut self, name: &'static str, layer: i32, part: u32, mat: &Mat, x: &wgpu::Buffer, y: &wgpu::Buffer, bias: Option<&wgpu::Buffer>, epi: u32, ldy: u32, y_off: u32, x_last: bool) {
+    fn mat(
+        &mut self,
+        name: &'static str,
+        layer: i32,
+        part: u32,
+        mat: &Mat,
+        x: &wgpu::Buffer,
+        y: &wgpu::Buffer,
+        bias: Option<&wgpu::Buffer>,
+        epi: u32,
+        ldy: u32,
+        y_off: u32,
+        x_last: bool,
+    ) {
         self.mat_ln(name, layer, part, mat, x, y, bias, epi, ldy, y_off, x_last, false)
     }
 
@@ -304,7 +350,21 @@ impl Planner<'_> {
     /// also holds its row sums) a decode matvec takes the raw residual as `x`
     /// and normalises on the fly.
     #[allow(clippy::too_many_arguments)]
-    fn mat_ln(&mut self, name: &'static str, layer: i32, part: u32, mat: &Mat, x: &wgpu::Buffer, y: &wgpu::Buffer, bias: Option<&wgpu::Buffer>, epi: u32, ldy: u32, y_off: u32, x_last: bool, ln: bool) {
+    fn mat_ln(
+        &mut self,
+        name: &'static str,
+        layer: i32,
+        part: u32,
+        mat: &Mat,
+        x: &wgpu::Buffer,
+        y: &wgpu::Buffer,
+        bias: Option<&wgpu::Buffer>,
+        epi: u32,
+        ldy: u32,
+        y_off: u32,
+        x_last: bool,
+        ln: bool,
+    ) {
         let e = self.e;
         let r = e.recipe;
         let n = self.n;
@@ -328,7 +388,9 @@ impl Planner<'_> {
         let rows_n = if x_last { 1 } else { n };
         let dims = match kind {
             MatKind::Naive => [(mat.rows as u32).div_ceil(64), rows_n as u32, 1],
-            MatKind::Matvec | MatKind::MatvecSg | MatKind::MatvecLn => [(mat.rows as u32).div_ceil(256 / e.tpr(mat.dtype, mat.cols)), rows_n as u32, 1],
+            MatKind::Matvec | MatKind::MatvecSg | MatKind::MatvecLn => {
+                [(mat.rows as u32).div_ceil(256 / e.tpr(mat.dtype, mat.cols)), rows_n as u32, 1]
+            }
             MatKind::Tiled | MatKind::Tiled4 => [(mat.rows as u32).div_ceil(64), (rows_n as u32).div_ceil(64), 1],
         };
         let c = e.config.n_embd as u32;
@@ -365,7 +427,13 @@ impl Planner<'_> {
         let ln_src = include_str!("shaders/layernorm.wgsl");
         let at_src = include_str!("shaders/attention.wgsl");
         let ln64 = r.ln64 && cfg.n_embd == 768;
-        let ln_entry = if ln64 { "layernorm_wg64" } else if par { "layernorm_par" } else { "layernorm_naive" };
+        let ln_entry = if ln64 {
+            "layernorm_wg64"
+        } else if par {
+            "layernorm_par"
+        } else {
+            "layernorm_naive"
+        };
         let ln = e.op_kernel("layernorm", ln_src, ln_entry, "rrrwu");
         let ln_dims = if par || ln64 { [nu, 1, 1] } else { [nu.div_ceil(64), 1, 1] };
         // attn4 is a decode kernel: prefill (many token rows, plenty of
@@ -379,7 +447,10 @@ impl Planner<'_> {
         let fd_chunks = self.max_seq.div_ceil(FD_CHUNK) as u32;
         let fd = (r.flashdec && self.n == 1).then(|| {
             let src = include_str!("shaders/attention_fd.wgsl");
-            (e.op_kernel("attention_fd", src, "attn_fd_split", "rrrwwu"), e.op_kernel("attention_fd", src, "attn_fd_merge", "rrrwwu"))
+            (
+                e.op_kernel("attention_fd", src, "attn_fd_split", "rrrwwu"),
+                e.op_kernel("attention_fd", src, "attn_fd_merge", "rrrwwu"),
+            )
         });
         let attn_dims = if par { [nu, h, 1] } else { [nu.div_ceil(64), h, 1] };
         let kvw = e.op_kernel("kv_write", include_str!("shaders/kv_write.wgsl"), "kv_write", "rwwu");
@@ -410,7 +481,14 @@ impl Planner<'_> {
                 self.small(&kvw, "kv_write", li, &[&b.qkv, &b.kc, &b.vc], [c, layer_off, 0, 0, 0, 0, 0, 0], elem(c));
             }
             if r.kv16 {
-                self.small(&kvw16, "kv_write", li, &[&b.qkv, &b.kc, &b.vc], [c, layer_off, 0, 0, 0, 0, 0, 0], [(nu * c / 2).div_ceil(256), 1, 1]);
+                self.small(
+                    &kvw16,
+                    "kv_write",
+                    li,
+                    &[&b.qkv, &b.kc, &b.vc],
+                    [c, layer_off, 0, 0, 0, 0, 0, 0],
+                    [(nu * c / 2).div_ceil(256), 1, 1],
+                );
             }
             let att_bufs = [&b.qkv, &b.kc, &b.vc, &b.att, &b.scores];
             if let Some((split, merge)) = &fd {
@@ -475,7 +553,11 @@ impl Session {
         let steps = g.uniform("steps", STEP_STRIDE * MAX_STEPS as u64);
         let step_bg = g.step_bind(&steps);
         let ts = g.has(wgpu::Features::TIMESTAMP_QUERY).then(|| {
-            let qs = g.device.create_query_set(&wgpu::QuerySetDescriptor { label: Some("ts"), ty: wgpu::QueryType::Timestamp, count: 2 });
+            let qs = g.device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: Some("ts"),
+                ty: wgpu::QueryType::Timestamp,
+                count: 2,
+            });
             let rs = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("ts-resolve"),
                 size: 16,
@@ -506,7 +588,12 @@ impl Session {
             rb_gen: g.readback("rb_gen", (rows + 1) * 4),
             ts,
         };
-        let binder = Binder { params: g.uniform("params", 256 * PARAM_SLOTS as u64), n_params: 0, bgs: vec![], index: HashMap::new() };
+        let binder = Binder {
+            params: g.uniform("params", 256 * PARAM_SLOTS as u64),
+            n_params: 0,
+            bgs: vec![],
+            index: HashMap::new(),
+        };
         Session { e, pos: 0, max_seq, b, binder, last: RunStats::default(), profile: false }
     }
 
@@ -535,7 +622,8 @@ impl Session {
 
     /// Plan one forward of `n` tokens using step slot `step`.
     pub fn plan(&mut self, plan: &mut Vec<Disp>, n: usize, step: u32, argmax: bool) {
-        Planner { e: &self.e, b: &self.b, binder: &mut self.binder, plan, n, step, max_seq: self.max_seq }.forward(argmax);
+        Planner { e: &self.e, b: &self.b, binder: &mut self.binder, plan, n, step, max_seq: self.max_seq }
+            .forward(argmax);
     }
 
     fn write_steps(&self, steps: &[Step]) {
@@ -554,7 +642,12 @@ impl Session {
     }
 
     /// Run a plan; `copy` = (src, src offset, dst, bytes) appended after the last op.
-    async fn execute(&mut self, plan: &[Disp], copy: Option<(&wgpu::Buffer, u64, &wgpu::Buffer, u64)>, now: &dyn Fn() -> f64) {
+    async fn execute(
+        &mut self,
+        plan: &[Disp],
+        copy: Option<(&wgpu::Buffer, u64, &wgpu::Buffer, u64)>,
+        now: &dyn Fn() -> f64,
+    ) {
         let g = &self.e.gpu;
         let mut stats = RunStats { dispatches: plan.len(), forwards: 1, ..Default::default() };
         match self.e.recipe.sync {
@@ -587,7 +680,10 @@ impl Session {
                         beginning_of_pass_write_index: Some(0),
                         end_of_pass_write_index: Some(1),
                     });
-                    let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("forward"), timestamp_writes: tw });
+                    let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("forward"),
+                        timestamp_writes: tw,
+                    });
                     for d in plan {
                         self.record(&mut pass, d);
                     }
@@ -683,7 +779,8 @@ impl Session {
             while done < n {
                 let k = (n - done).min(RESIDENT_CHUNK).min(MAX_STEPS);
                 let pos0 = self.pos;
-                let steps: Vec<Step> = (0..k).map(|i| Step { n: 1, pos0: (pos0 + i) as u32, ..Default::default() }).collect();
+                let steps: Vec<Step> =
+                    (0..k).map(|i| Step { n: 1, pos0: (pos0 + i) as u32, ..Default::default() }).collect();
                 self.write_steps(&steps);
                 let mut plan = vec![];
                 for i in 0..k {
@@ -714,7 +811,12 @@ impl Session {
     /// works the same natively and in a browser.) Small matrices hit in
     /// cache on repeats, so trust GB/s only for the large ones. Leaves the
     /// session's activations and cache dirty: `reset()` afterwards.
-    pub async fn profile_ops(&mut self, tokens: &[u32], reps: usize, now: &dyn Fn() -> f64) -> Result<Vec<(&'static str, i32, f64)>, String> {
+    pub async fn profile_ops(
+        &mut self,
+        tokens: &[u32],
+        reps: usize,
+        now: &dyn Fn() -> f64,
+    ) -> Result<Vec<(&'static str, i32, f64)>, String> {
         self.check(tokens.len())?;
         let g = self.e.gpu.clone();
         self.put_tokens(tokens);
@@ -763,4 +865,3 @@ impl Session {
         bytemuck::cast_slice(&g.read(&self.b.rb_logits, v).await).to_vec()
     }
 }
-

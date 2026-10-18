@@ -92,7 +92,16 @@ impl<'e> MetalSession<'e> {
         let cfg = e.config;
         let (c, rows, v) = (cfg.n_embd, cfg.n_ctx, cfg.n_vocab);
         let g = &e.gpu;
-        let kv = cfg.n_layer * cfg.n_ctx * c * if e.recipe.kv_q8 { 1 } else if e.recipe.kv_f16 { 2 } else { F };
+        let kv = cfg.n_layer
+            * cfg.n_ctx
+            * c
+            * if e.recipe.kv_q8 {
+                1
+            } else if e.recipe.kv_f16 {
+                2
+            } else {
+                F
+            };
         let kv_scales = if e.recipe.kv_q8 { cfg.n_layer * cfg.n_ctx * cfg.n_head * F } else { 16 };
         let scores = if e.recipe.attn == Attn::Naive { rows * cfg.n_head * cfg.n_ctx * F } else { 16 };
         MetalSession {
@@ -389,7 +398,15 @@ impl<'e> MetalSession<'e> {
     /// Byte offset of layer `l` in the K/V cache buffers.
     fn kv_layer_off(&self, l: usize) -> usize {
         let cfg = &self.e.config;
-        l * cfg.n_ctx * cfg.n_embd * if self.e.recipe.kv_q8 { 1 } else if self.e.recipe.kv_f16 { 2 } else { F }
+        l * cfg.n_ctx
+            * cfg.n_embd
+            * if self.e.recipe.kv_q8 {
+                1
+            } else if self.e.recipe.kv_f16 {
+                2
+            } else {
+                F
+            }
     }
 
     /// The f16-KV variant of a kernel that reads or writes the cache.

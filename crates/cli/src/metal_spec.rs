@@ -332,7 +332,14 @@ pub fn run(a: SpecArgs) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write_summary(a: &SpecArgs, tname: &str, dname: &str, tdt: nanoinfer_metal::DType, ddt: nanoinfer_metal::DType, cats: &[Value]) -> Result<(), Box<dyn std::error::Error>> {
+fn write_summary(
+    a: &SpecArgs,
+    tname: &str,
+    dname: &str,
+    tdt: nanoinfer_metal::DType,
+    ddt: nanoinfer_metal::DType,
+    cats: &[Value],
+) -> Result<(), Box<dyn std::error::Error>> {
     {
         let key = format!("{tname}:{}+{dname}:{}", tdt.name(), ddt.name());
         let mut doc: Value =

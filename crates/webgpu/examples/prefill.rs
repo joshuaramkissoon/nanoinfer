@@ -19,17 +19,26 @@ fn main() {
     let ops = block_on(s.profile_ops(&prompt, 5, &now)).unwrap();
     let mut by: Vec<(&str, f64)> = vec![];
     for (n, _, ms) in ops {
-        match by.iter_mut().find(|x| x.0 == n) { Some(x) => x.1 += ms, None => by.push((n, ms)) }
+        match by.iter_mut().find(|x| x.0 == n) {
+            Some(x) => x.1 += ms,
+            None => by.push((n, ms)),
+        }
     }
     by.sort_by(|a, b| b.1.total_cmp(&a.1));
-    for (n, ms) in by { println!("  {n:<12} {:>9.1} us", ms * 1e3); }
+    for (n, ms) in by {
+        println!("  {n:<12} {:>9.1} us", ms * 1e3);
+    }
     for sess in 0..1 {
         let mut s = e.session(p + 8);
         for rep in 0..3 {
             s.reset();
             let t = Instant::now();
             block_on(s.step_greedy(&prompt, &now)).unwrap();
-            println!("session {sess} prefill {rep}: {:.2} ms ({:.0} tok/s)", t.elapsed().as_secs_f64() * 1e3, p as f64 / t.elapsed().as_secs_f64());
+            println!(
+                "session {sess} prefill {rep}: {:.2} ms ({:.0} tok/s)",
+                t.elapsed().as_secs_f64() * 1e3,
+                p as f64 / t.elapsed().as_secs_f64()
+            );
         }
     }
 }

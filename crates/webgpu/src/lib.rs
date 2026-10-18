@@ -41,7 +41,11 @@ impl DType {
     }
     /// The lossier of two formats (for test tolerances).
     pub fn max_lossy(self, other: DType) -> DType {
-        if self.bytes_per_weight() < other.bytes_per_weight() { self } else { other }
+        if self.bytes_per_weight() < other.bytes_per_weight() {
+            self
+        } else {
+            other
+        }
     }
     pub fn bytes_per_weight(self) -> f64 {
         match self {
@@ -199,8 +203,12 @@ impl WgpuStage {
             WgpuStage::Tiled => "64x64 tiled prefill matmul",
             WgpuStage::Ln64 => "LayerNorm on 64 threads, row in registers (12 barriers, not 16)",
             WgpuStage::Q8Head => "Q8_0 LM head too (half the head's bytes; costs quality)",
-            WgpuStage::LnFold => "LayerNorm gains folded into qkv/fc weights; decode matvec computes mean/var (no LN kernels)",
-            WgpuStage::Attn4 => "attention with vec4 loads: q in registers, 4 dims x 1/16 of the keys per thread in P.V",
+            WgpuStage::LnFold => {
+                "LayerNorm gains folded into qkv/fc weights; decode matvec computes mean/var (no LN kernels)"
+            }
+            WgpuStage::Attn4 => {
+                "attention with vec4 loads: q in registers, 4 dims x 1/16 of the keys per thread in P.V"
+            }
             WgpuStage::FlashDec => "decode attention split over 64-key chunks + merge (flash-decoding)",
             WgpuStage::Kv16 => "f16 KV cache (half the attention bytes; K/V packed by a kv_write kernel)",
             WgpuStage::Vec => "vec4 traffic: prefill tiles staged/read as vec4s, Q8 matvec 16 weights per load",
@@ -247,9 +255,26 @@ impl WgpuStage {
             WgpuStage::Tiled => Recipe { matmul: Matmul::Tiled, ..resident },
             WgpuStage::Ln64 => Recipe { matmul: Matmul::Tiled, ln64: true, ..resident },
             WgpuStage::Q8Head => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ..resident },
-            WgpuStage::LnFold => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, ..resident },
-            WgpuStage::Attn4 => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, attn4: true, ..resident },
-            WgpuStage::Kv16 => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, attn4: true, kv16: true, ..resident },
+            WgpuStage::LnFold => {
+                Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, ..resident }
+            }
+            WgpuStage::Attn4 => Recipe {
+                matmul: Matmul::Tiled,
+                ln64: true,
+                head_dtype: DType::Q8_0,
+                ln_fold: true,
+                attn4: true,
+                ..resident
+            },
+            WgpuStage::Kv16 => Recipe {
+                matmul: Matmul::Tiled,
+                ln64: true,
+                head_dtype: DType::Q8_0,
+                ln_fold: true,
+                attn4: true,
+                kv16: true,
+                ..resident
+            },
             WgpuStage::Vec => Recipe {
                 matmul: Matmul::Tiled4,
                 ln64: true,
@@ -260,7 +285,15 @@ impl WgpuStage {
                 wide_q8: true,
                 ..resident
             },
-            WgpuStage::FlashDec => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, attn4: true, flashdec: true, ..resident },
+            WgpuStage::FlashDec => Recipe {
+                matmul: Matmul::Tiled,
+                ln64: true,
+                head_dtype: DType::Q8_0,
+                ln_fold: true,
+                attn4: true,
+                flashdec: true,
+                ..resident
+            },
         }
     }
 

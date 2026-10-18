@@ -19,7 +19,7 @@ fn main() {
     .unwrap();
     let text = std::fs::read_to_string(root.join("weights/wikitext-2-raw-test.txt")).unwrap();
     let ids = tok.encode(&text[..200_000]);
-    let windows: Vec<&[u32]> = ids.chunks_exact(256).take(4).collect();
+    let windows: Vec<&[u32]> = ids.as_chunks::<256>().0.iter().take(4).map(|w| &w[..]).collect();
     let q8 = MetalEngine::new(&model, MetalStage::Lanes).unwrap();
     let rec = nanoinfer_metal::Recipe { head_dtype: DType::Q4_0, ..MetalStage::Lanes.recipe() };
     let q4 = MetalEngine::with_recipe(&model, MetalStage::Lanes, rec).unwrap();
@@ -47,7 +47,12 @@ fn main() {
     }
     errs.sort_by(f32::total_cmp);
     let p = |v: &[f32], q: f64| v[((v.len() - 1) as f64 * q) as usize];
-    println!("{n} positions: max |q4 - q8| logit error p50 {:.3}, p99 {:.3}, max {:.3}", p(&errs, 0.5), p(&errs, 0.99), errs[errs.len() - 1]);
+    println!(
+        "{n} positions: max |q4 - q8| logit error p50 {:.3}, p99 {:.3}, max {:.3}",
+        p(&errs, 0.5),
+        p(&errs, 0.99),
+        errs[errs.len() - 1]
+    );
     println!("argmax agreement q4 head vs q8 head: {:.1}%", 100.0 * agree as f64 / n as f64);
     gaps.sort_by(f32::total_cmp);
     println!("q8 top-1 minus top-2 gap: p10 {:.3}, p50 {:.3}", p(&gaps, 0.1), p(&gaps, 0.5));

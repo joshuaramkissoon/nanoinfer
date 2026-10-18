@@ -425,7 +425,8 @@ fn summarise(name: &str, reqs: &[Req], o: &Outcome, gantt: usize) -> Value {
         .iter()
         .step_by(snap_stride)
         .map(|k| {
-            let seqs: Vec<Value> = k.seqs.iter().map(|(id, len, pages)| json!({"id": id, "len": len, "pages": pages})).collect();
+            let seqs: Vec<Value> =
+                k.seqs.iter().map(|(id, len, pages)| json!({"id": id, "len": len, "pages": pages})).collect();
             json!({"t": k.t, "iter": k.iter, "seqs": seqs})
         })
         .collect();
