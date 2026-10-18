@@ -142,10 +142,21 @@ impl Gpu {
         if let Some(m) = self.modules.borrow().get(name) {
             return m.clone();
         }
-        let m = Rc::new(self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(name),
-            source: wgpu::ShaderSource::Wgsl(src.into()),
-        }));
+        let desc = wgpu::ShaderModuleDescriptor { label: Some(name), source: wgpu::ShaderSource::Wgsl(src.into()) };
+        // Diagnostic only (native): NANOINFER_WGPU_UNCHECKED=1 drops wgpu's
+        // injected bounds checks, to measure what robust buffer access costs.
+        // Browsers always keep them.
+        #[cfg(not(target_arch = "wasm32"))]
+        let unchecked = std::env::var("NANOINFER_WGPU_UNCHECKED").is_ok_and(|v| v == "1");
+        #[cfg(target_arch = "wasm32")]
+        let unchecked = false;
+        let m = Rc::new(if unchecked {
+            // SAFETY: every kernel guards its own indices against the sizes in
+            // its parameters; this mode exists for measurement, not for use.
+            unsafe { self.device.create_shader_module_trusted(desc, wgpu::ShaderRuntimeChecks::unchecked()) }
+        } else {
+            self.device.create_shader_module(desc)
+        });
         self.modules.borrow_mut().insert(name.to_string(), m.clone());
         m
     }

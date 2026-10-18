@@ -35,11 +35,24 @@ fn wdot_src(d: DType) -> &'static str {
 }
 /// Threads per row in the matvec: ~3 vector loads in flight per thread on a
 /// 768-wide row (the Metal lesson), whatever the load width.
-fn tpr(d: DType) -> u32 {
+/// Q8 decode matvecs load 16 weights at a time (`wq8x16.wgsl`).
+fn q8x16() -> bool {
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(t) = std::env::var("NANOINFER_WGPU_TPR").ok().and_then(|v| v.parse().ok()) {
-        return t;
+    if let Ok(v) = std::env::var("NANOINFER_WGPU_Q8X16") {
+        return v == "1";
     }
+    false
+}
+
+fn tpr(d: DType, cols: usize) -> u32 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let var = if cols > 1024 { "NANOINFER_WGPU_TPR_WIDE" } else { "NANOINFER_WGPU_TPR_NARROW" };
+        if let Some(t) = std::env::var(var).or_else(|_| std::env::var("NANOINFER_WGPU_TPR")).ok().and_then(|v| v.parse().ok()) {
+            return t;
+        }
+    }
+    let _ = cols;
     match d {
         DType::F32 => 64,
         DType::F16 | DType::Q8_0 => 32,
@@ -62,6 +75,7 @@ enum MatKind {
     MatvecLn,
     Naive,
     Tiled,
+    Tiled4,
 }
 
 /// GPU-resident model for one stage. Weights are shared (`Rc`) between
@@ -102,8 +116,17 @@ impl Engine {
         k
     }
 
-    fn mat_kernel(&self, kind: MatKind, d: DType, epi: u32) -> Rc<Kernel> {
-        let key = format!("mat/{kind:?}/{d:?}/{epi}");
+    /// Threads per matvec row for this engine (16 for 768-wide Q8 rows with
+    /// `wide_q8`: 3 vec4<u32> loads each).
+    fn tpr(&self, d: DType, cols: usize) -> u32 {
+        if self.recipe.wide_q8 && d == DType::Q8_0 && cols <= 1024 && std::env::var("NANOINFER_WGPU_TPR_NARROW").is_err() {
+            return 16;
+        }
+        tpr(d, cols)
+    }
+
+    fn mat_kernel(&self, kind: MatKind, d: DType, epi: u32, cols: usize) -> Rc<Kernel> {
+        let key = format!("mat/{kind:?}/{d:?}/{epi}/{}", self.tpr(d, cols));
         self.cached(key, || {
             let (body, entry, wdot, enable) = match kind {
                 MatKind::Matvec => (include_str!("shaders/matvec.wgsl"), "matvec", true, ""),
@@ -113,16 +136,18 @@ impl Engine {
                 MatKind::MatvecLn => (include_str!("shaders/matvec_ln.wgsl"), "matvec_ln", true, ""),
                 MatKind::Naive => (include_str!("shaders/matmul_naive.wgsl"), "matmul_naive", false, ""),
                 MatKind::Tiled => (include_str!("shaders/matmul_tiled.wgsl"), "matmul_tiled", false, ""),
+                MatKind::Tiled4 => (include_str!("shaders/matmul_tiled4.wgsl"), "matmul_tiled4", false, ""),
             };
-            let src = format!(
-                "{enable}{COMMON}\n{MAT_COMMON}\n{}\n{}\n{body}",
-                w_src(d),
-                if wdot { wdot_src(d) } else { "" }
-            );
+            let x16 = wdot && d == DType::Q8_0 && (self.recipe.wide_q8 || q8x16());
+            let src = if x16 {
+                format!("{enable}{COMMON}\n{MAT_COMMON}\n{}\n{body}", include_str!("shaders/wq8x16.wgsl"))
+            } else {
+                format!("{enable}{COMMON}\n{MAT_COMMON}\n{}\n{}\n{body}", w_src(d), if wdot { wdot_src(d) } else { "" })
+            };
             let module = format!("{entry}/{d:?}");
             let mut consts = vec![("EPI", epi as f64)];
             if wdot {
-                consts.push(("TPR", tpr(d) as f64));
+                consts.push(("TPR", self.tpr(d, cols) as f64));
             }
             self.gpu.kernel(&module, &src, entry, "rrrrwwwu", &consts)
         })
@@ -288,6 +313,7 @@ impl Planner<'_> {
             match r.matmul {
                 Matmul::Naive => MatKind::Naive,
                 Matmul::Tiled => MatKind::Tiled,
+                Matmul::Tiled4 => MatKind::Tiled4,
             }
         } else {
             match (r.matvec, ln) {
@@ -298,12 +324,12 @@ impl Planner<'_> {
             }
         };
         assert!(!ln || prefill || kind == MatKind::MatvecLn, "folded LayerNorm needs the workgroup matvec");
-        let k = e.mat_kernel(kind, mat.dtype, epi);
+        let k = e.mat_kernel(kind, mat.dtype, epi, mat.cols);
         let rows_n = if x_last { 1 } else { n };
         let dims = match kind {
             MatKind::Naive => [(mat.rows as u32).div_ceil(64), rows_n as u32, 1],
-            MatKind::Matvec | MatKind::MatvecSg | MatKind::MatvecLn => [(mat.rows as u32).div_ceil(256 / tpr(mat.dtype)), rows_n as u32, 1],
-            MatKind::Tiled => [(mat.rows as u32).div_ceil(64), (rows_n as u32).div_ceil(64), 1],
+            MatKind::Matvec | MatKind::MatvecSg | MatKind::MatvecLn => [(mat.rows as u32).div_ceil(256 / e.tpr(mat.dtype, mat.cols)), rows_n as u32, 1],
+            MatKind::Tiled | MatKind::Tiled4 => [(mat.rows as u32).div_ceil(64), (rows_n as u32).div_ceil(64), 1],
         };
         let c = e.config.n_embd as u32;
         let layer_off = (layer.max(0) as u32) * self.max_seq as u32 * c;

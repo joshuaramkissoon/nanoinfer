@@ -78,6 +78,8 @@ pub enum Matmul {
     Naive,
     /// 64x64 tiles through workgroup memory, 4x4 register blocks.
     Tiled,
+    /// Same tiles, staged and read as vec4s (4x fewer workgroup accesses).
+    Tiled4,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +105,9 @@ pub struct Recipe {
     pub flashdec: bool,
     /// K/V cache stored as f16 (packed in u32); needs `attn4`.
     pub kv16: bool,
+    /// Q8 decode matvecs load 16 weights (one vec4<u32>) at a time, 16
+    /// threads per 768-wide row.
+    pub wide_q8: bool,
     /// Argmax on the GPU, written straight into the next forward's input slot.
     pub gpu_argmax: bool,
     /// Greedy decode encodes many forwards into one submit and reads the
@@ -130,6 +135,7 @@ pub enum WgpuStage {
     Attn4,
     FlashDec,
     Kv16,
+    Vec,
 }
 
 impl WgpuStage {
@@ -151,6 +157,7 @@ impl WgpuStage {
         WgpuStage::Attn4,
         WgpuStage::FlashDec,
         WgpuStage::Kv16,
+        WgpuStage::Vec,
     ];
 
     pub fn name(self) -> &'static str {
@@ -172,6 +179,7 @@ impl WgpuStage {
             WgpuStage::Attn4 => "webgpu-attn4",
             WgpuStage::FlashDec => "webgpu-flashdec",
             WgpuStage::Kv16 => "webgpu-kv16",
+            WgpuStage::Vec => "webgpu-vec",
         }
     }
 
@@ -195,6 +203,7 @@ impl WgpuStage {
             WgpuStage::Attn4 => "attention with vec4 loads: q in registers, 4 dims x 1/16 of the keys per thread in P.V",
             WgpuStage::FlashDec => "decode attention split over 64-key chunks + merge (flash-decoding)",
             WgpuStage::Kv16 => "f16 KV cache (half the attention bytes; K/V packed by a kv_write kernel)",
+            WgpuStage::Vec => "vec4 traffic: prefill tiles staged/read as vec4s, Q8 matvec 16 weights per load",
         }
     }
 
@@ -212,6 +221,7 @@ impl WgpuStage {
             attn4: false,
             flashdec: false,
             kv16: false,
+            wide_q8: false,
             gpu_argmax: false,
             resident: false,
         };
@@ -240,6 +250,16 @@ impl WgpuStage {
             WgpuStage::LnFold => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, ..resident },
             WgpuStage::Attn4 => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, attn4: true, ..resident },
             WgpuStage::Kv16 => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, attn4: true, kv16: true, ..resident },
+            WgpuStage::Vec => Recipe {
+                matmul: Matmul::Tiled4,
+                ln64: true,
+                head_dtype: DType::Q8_0,
+                ln_fold: true,
+                attn4: true,
+                kv16: true,
+                wide_q8: true,
+                ..resident
+            },
             WgpuStage::FlashDec => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, attn4: true, flashdec: true, ..resident },
         }
     }

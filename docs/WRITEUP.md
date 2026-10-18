@@ -448,6 +448,11 @@ chart in this post is the real engine, running in your browser.
 - **Aha 2:** a LayerNorm is a scale and a shift; both can live in the next
   matrix. The fused-LN that failed on Metal re-normalised x in every
   threadgroup; the algebraic fold needs only two extra sums.
+- **Aha 3 (the robustness tax):** browsers bounds-check every array index in a
+  shader. Turning that off natively made prefill 41% faster; rewriting the
+  matmul to move vec4s instead of scalars (4× fewer checked accesses) got
+  +67% prefill *with* the checks on (webgpu-vec, 2,650 → 4,413 tok/s), and
+  left only 6% on the table.
 - **Viz:** decode tok/s vs context length (64, 512, 960) for q8head → lnfold →
   attn4 → kv16, plus the flash-decoding bar sitting below attn4.
 - **Line:** "We split attention across 16× more workgroups and it got slower.

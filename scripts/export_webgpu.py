@@ -59,7 +59,7 @@ def main():
             k = str(r["prompt_len"])
             d[k] = max(d.get(k, 0), round(r["decode_tok_s"], 1))
     order = ["naive", "onesubmit", "matvec", "par", "subgroup", "fused", "f16", "q8", "argmax", "resident", "tiled",
-             "ln64", "q8head", "lnfold", "attn4", "flashdec", "kv16"]
+             "ln64", "q8head", "lnfold", "attn4", "flashdec", "kv16", "vec"]
     stages = []
     for name in order:
         r = latest.get("webgpu-" + name)

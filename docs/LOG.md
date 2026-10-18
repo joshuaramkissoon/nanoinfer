@@ -1438,13 +1438,49 @@ prefill. KL vs the f32 cache at context 300: 6e-11, same top-1.
 | 512 | 452 | 476 | +5% | 3672 → 3752 |
 | 960 | 388 | 437 | **+13%** | 2831 → 3383 (+20%) |
 
+**Threads per row, again, and wider Q8 loads** (`NANOINFER_WGPU_TPR_NARROW`
+/ `_WIDE` for 768- vs 3072-wide rows, `NANOINFER_WGPU_Q8X16=1` for a Q8
+matvec that loads 16 int8 per vec4<u32> with one scale, on webgpu-kv16):
+TPR narrow/wide 32/32 518, 16/32 519, 16/64 530, 32/64 521, 64/64 471,
+16/128 526: noise except 64 being worse. 16-wide Q8 loads: 513–517 →
+523–537 (+2–4%, with 16 threads per narrow row).
+
+**The robustness tax.** wgpu (like every browser) injects bounds checks on
+every dynamic index into storage, workgroup and local arrays.
+`NANOINFER_WGPU_UNCHECKED=1` (native-only diagnostic:
+`create_shader_module_trusted` with `ShaderRuntimeChecks::unchecked()`)
+removes them. webgpu-kv16, prompt 64: decode 513 → **545 (+6%)**, prefill
+2,650 → **3,747 (+41%)**. The scalar tiled matmul does 8 workgroup loads
+per 16 FMAs, each with a clamp. A browser can't turn this off, so the fix
+has to be fewer, wider accesses.
+
+**webgpu-vec: vector traffic.** (1) `matmul_tiled4`: same 64×64 tile and 4×4
+register blocks, but staging is one vec4 of X and one `wget4` (4 weights)
+per thread per 16-deep K step, the tiles are row-major vec4s over k (padded
+to 5 vec4s per row against bank conflicts), and the inner loop does 16 vec4
+dots per 8 vec4 loads. (First try stored [k][row] vec4s by component from
+four threads: a race, since stores are whole-vector; KL 9.2.) (2) the 16-wide
+Q8 matvec loads with 16 threads per 768-wide row (`Recipe.wide_q8`).
+
+| prompt | kv16 prefill | vec prefill | kv16 decode | vec decode |
+|---|---|---|---|---|
+| 64 | 2,650 | **4,413 (+67%)** | 512 | 538 (+5%) |
+| 512 | 3,617 | **4,944 (+37%)** | 461 | 478 (+4%) |
+| 960 | 3,264 | 4,286 (+31%) | 420 | 433 (+3%) |
+
+Unchecked, webgpu-vec gains only 6% more at prompt 512 (4,960 → 5,239), vs
+33% for the scalar kernel: most of the tax is gone. A K step of 32 instead
+of 16 (fewer barriers) changed nothing (4,431 / 4,898). Prefill is now ~49% of
+Metal's simdgroup_matrix GEMM at prompt 512 (4,944 vs 10,100), was 36%.
+
 **Where WebGPU ends** (best quiet runs, `bench/webgpu.json`): Q8 decode
-**556 tok/s at prompt 64** (attn4; kv16 539), 476 at 512, 435 at 960;
+**556 tok/s at prompt 64** (attn4; kv16 539, vec 538), 478 at 512 (vec), 435
+at 960 (kv16); prefill 4,413 tok/s at 64 and 4,944 at 512 (vec);
 metal-pipelined-q8 (the matching Metal rung: Q8 weights + Q8 head, GPU loop)
 600 → **~90%** of hand-written Metal at short context (was 75–85% after
 round 1). The remaining gap is the narrow matvecs (qkv 66 GB/s, attn_proj
-39 GB/s vs Metal's lanes kernel at 58–80) and prefill (2,970 vs ~6,000 tok/s:
-no simdgroup_matrix in WGSL).
+39 GB/s vs Metal's lanes kernel at 58–80) and prefill (4,944 vs ~10,100 tok/s
+at 512: no simdgroup_matrix in WGSL).
 
 **Browser-relevant costs.** Natively, a dispatch inside a pass costs 1.8 µs
 of GPU time and a pass 28 µs; `onSubmittedWorkDone` round trip 165 µs,

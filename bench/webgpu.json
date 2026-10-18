@@ -435,6 +435,28 @@
     "512": 476.2,
     "960": 434.8
    }
+  },
+  {
+   "decode_ceiling_tok_s": 914.266,
+   "decode_gbs": 70.604,
+   "decode_tok_s": 537.923,
+   "decode_tok_s_std": 1.836,
+   "dispatches_per_token": 77.0,
+   "dtype": "q8_0",
+   "git_sha": "115ba36-dirty",
+   "kernels": "vec4 traffic: prefill tiles staged/read as vec4s, Q8 matvec 16 weights per load",
+   "note": "webgpu-round2-ab,load=4.47/3.70/3.20",
+   "pct_of_ceiling": 58.837,
+   "prefill_gflops": 754.933,
+   "prefill_tok_s": 4412.868,
+   "stage": "webgpu-vec",
+   "submits_per_token": 0.062,
+   "timestamp": "2026-10-18T19:05:56Z",
+   "wall_ms_per_token": 1.859,
+   "decode_tok_s_by_prompt_len": {
+    "512": 477.5,
+    "960": 433.3
+   }
   }
  ],
  "probe": [
