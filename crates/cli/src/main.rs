@@ -10,6 +10,8 @@
 //! memory-mapped), the clock, and the process environment.
 
 mod bench;
+mod membw;
+mod ppl;
 mod report;
 
 use clap::{Parser, Subcommand};
@@ -58,6 +60,10 @@ enum Cmd {
     },
     /// Measure prefill and decode throughput.
     Bench(bench::BenchArgs),
+    /// Measure how fast the CPU can stream memory (sets a realistic decode ceiling).
+    Membw(membw::MembwArgs),
+    /// Perplexity on WikiText-2, plus KL / top-1 agreement against an f32 stage.
+    Ppl(ppl::PplArgs),
     /// Show how text is split into tokens.
     Tokenize { text: String },
 }
@@ -97,6 +103,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{} tokens", ids.len());
         }
         Cmd::Bench(args) => bench::run(&cli.weights, args)?,
+        Cmd::Membw(args) => membw::run(args)?,
+        Cmd::Ppl(args) => ppl::run(&cli.weights, args)?,
         Cmd::Generate { stage, prompt, tokens, temperature, top_k, seed, profile, trace_out, attention } => {
             let tok = load_tokenizer(&cli.weights)?;
             let model = load_model(&cli.weights)?;

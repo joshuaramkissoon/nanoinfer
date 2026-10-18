@@ -89,5 +89,26 @@ chart in this post is the real engine, running in your browser.
 - **Side note for the post:** macOS put the benchmark on an efficiency core and halved the
   numbers until we set the thread's QoS. Measure the measurement first.
 
+### Stage 2: unrolled (16 accumulators)
+
+- **Hypothesis:** the scalar dot product is one dependency chain, so the core waits on
+  itself. Sixteen independent partial sums give it 16 chains to overlap, and since we
+  pick the summation order, the compiler may vectorise them.
+- **Change:** `[f32; 16]` accumulators over 16-wide chunks, then a tree reduction. Plain
+  Rust, no intrinsics. The compiler turned it into 4 NEON registers (4 × `fmul.4s` +
+  4 × `fadd.4s` per 16 weights).
+- **Result:** decode **100.5 tok/s** (5.8×), **41% of the 243 tok/s spec ceiling**; prefill
+  **185 tok/s** (7.5×). Same perplexity as f32 (51.837 vs 51.837).
+- **Aha:** every matmul now moves ~54.5 GB/s, the most one core can read (our `membw`
+  probe: 57 GB/s on 1 thread, 98 GB/s on all 10, so the CPU never sees the 120 GB/s spec).
+  One change to a loop moved decode from "waiting on arithmetic" to "waiting on memory".
+  The textbook "decode is memory-bound" just became true for us.
+- **Aha 2:** the compiler won't vectorise `iter().sum()` because float addition isn't
+  associative, but it *will* vectorise 16 explicit accumulators: you gave it permission
+  by writing the order down.
+- **Viz:** roofline: stage 1's dot sits on the compute roof far below the slope; stage 2's
+  dot lands on the 1-thread bandwidth line. Bandwidth probe bar chart (1..10 threads).
+- **Line:** "Sixteen variables instead of one made it 5.8× faster, and turned the
+  bottleneck from the CPU into the memory."
 
 ## Open questions / things to verify before publishing

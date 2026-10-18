@@ -25,6 +25,7 @@
 //! selectable at runtime through [`crate::Stage`].
 
 pub mod reference;
+pub mod unrolled;
 
 /// Where queries, keys and values live in memory. Attention doesn't care whether
 /// K/V were just computed (stage 0: a fused `[n, 3C]` QKV buffer) or come from a
@@ -88,4 +89,15 @@ pub struct Reference;
 
 impl Kernels for Reference {
     const NAME: &'static str = "reference";
+}
+
+/// Stage 2: multiple independent accumulators in the matmul (autovectorised).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Unrolled;
+
+impl Kernels for Unrolled {
+    const NAME: &'static str = "unrolled";
+    fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: usize, d_in: usize, d_out: usize) {
+        unrolled::matmul(out, x, w, bias, n, d_in, d_out)
+    }
 }

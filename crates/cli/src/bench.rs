@@ -55,10 +55,10 @@ pub struct BenchArgs {
 }
 
 /// Prompt text for benchmarking: ordinary English, repeated to the requested length.
-const BENCH_TEXT: &str = "The history of computing is a story of making machines do arithmetic faster. \
+pub(crate) const BENCH_TEXT: &str = "The history of computing is a story of making machines do arithmetic faster. \
 Early computers filled rooms and performed a few thousand operations per second. ";
 
-fn median(xs: &[f64]) -> f64 {
+pub(crate) fn median(xs: &[f64]) -> f64 {
     let mut v = xs.to_vec();
     v.sort_by(f64::total_cmp);
     let n = v.len();
@@ -69,7 +69,7 @@ fn median(xs: &[f64]) -> f64 {
     }
 }
 
-fn stddev(xs: &[f64]) -> f64 {
+pub(crate) fn stddev(xs: &[f64]) -> f64 {
     let n = xs.len() as f64;
     let mean = xs.iter().sum::<f64>() / n;
     (xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n).sqrt()
@@ -80,7 +80,7 @@ fn cmd_output(cmd: &str, args: &[&str]) -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn git_sha() -> String {
+pub(crate) fn git_sha() -> String {
     let sha = cmd_output("git", &["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
     let dirty = cmd_output("git", &["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
     if dirty {
@@ -90,13 +90,13 @@ fn git_sha() -> String {
     }
 }
 
-fn machine() -> String {
+pub(crate) fn machine() -> String {
     cmd_output("sysctl", &["-n", "machdep.cpu.brand_string"])
         .unwrap_or_else(|| format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH))
 }
 
 /// RFC 3339 UTC timestamp without pulling in a date crate.
-fn timestamp() -> String {
+pub(crate) fn timestamp() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as i64;
     let (days, rem) = (secs.div_euclid(86400), secs.rem_euclid(86400));
     // Howard Hinnant's civil_from_days.
@@ -116,7 +116,7 @@ fn timestamp() -> String {
 /// long single-threaded benchmark can be migrated to an efficiency core
 /// mid-run (we saw decode drop from 19 to 6.5 tok/s between runs).
 #[cfg(target_os = "macos")]
-fn prefer_performance_cores() {
+pub fn prefer_performance_cores() {
     const QOS_CLASS_USER_INTERACTIVE: u32 = 0x21;
     extern "C" {
         fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
@@ -128,7 +128,7 @@ fn prefer_performance_cores() {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn prefer_performance_cores() {}
+pub fn prefer_performance_cores() {}
 
 /// One timed run: (prefill seconds, decode seconds).
 fn time_run<T: Trace>(
@@ -163,8 +163,17 @@ pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error
     }
     prompt.truncate(a.prompt_len);
 
-    let weight_bytes = cfg.decode_weight_bytes(4);
-    let ceiling = a.bandwidth_gbs * 1e9 / weight_bytes as f64;
+    let fmt = a.stage.weight_format();
+    let weight_bytes = fmt.decode_bytes(&cfg);
+    let ceiling = a.bandwidth_gbs * 1e9 / weight_bytes;
+    // FLOPs per token (matmuls only; attention is <1% here). Decode runs every
+    // matrix once per token; prefill runs the blocks per token but the LM head
+    // only once per prompt (we only need the last position's logits).
+    let c = cfg.n_embd;
+    let block_flops = 2.0 * (cfg.n_layer * 12 * c * c) as f64;
+    let head_flops = 2.0 * (cfg.n_vocab * c) as f64;
+    let decode_flops = block_flops + head_flops;
+    let prefill_flops = block_flops + head_flops / a.prompt_len as f64;
     eprintln!(
         "bench: stage={} prompt_len={} tokens={} runs={} (+{} warmup)",
         a.stage, a.prompt_len, a.tokens, a.runs, a.warmup
@@ -172,7 +181,7 @@ pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error
     eprintln!(
         "decode ceiling: {:.0} GB/s / {:.1} MB of weights per token = {:.0} tok/s",
         a.bandwidth_gbs,
-        weight_bytes as f64 / 1e6,
+        weight_bytes / 1e6,
         ceiling
     );
 
@@ -196,13 +205,19 @@ pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error
     }
 
     let (pm, ps, dm, ds) = (median(&prefill), stddev(&prefill), median(&decode), stddev(&decode));
+    let decode_gbs = dm * weight_bytes / 1e9;
+    let prefill_gflops = pm * prefill_flops / 1e9;
+    let decode_gflops = dm * decode_flops / 1e9;
     println!(
-        "{}: prefill {:.2} ± {:.2} tok/s | decode {:.3} ± {:.3} tok/s | {:.2}% of {:.0} tok/s ceiling",
+        "{}: prefill {:.2} ± {:.2} tok/s ({:.1} GFLOP/s) | decode {:.3} ± {:.3} tok/s ({:.1} GB/s, {:.1} GFLOP/s) | {:.2}% of {:.0} tok/s ceiling",
         a.stage,
         pm,
         ps,
+        prefill_gflops,
         dm,
         ds,
+        decode_gbs,
+        decode_gflops,
         100.0 * dm / ceiling,
         ceiling
     );
@@ -214,7 +229,7 @@ pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error
             "stage": a.stage.name(),
             "kernels": a.stage.kernels(),
             "model": "gpt2-124m",
-            "dtype": "f32",
+            "dtype": fmt.name(),
             "threads": 1,
             "prompt_len": a.prompt_len,
             "gen_tokens": a.tokens,
@@ -224,6 +239,9 @@ pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error
             "decode_tok_s": dm,
             "decode_tok_s_std": ds,
             "decode_ceiling_tok_s": ceiling,
+            "decode_gbs": decode_gbs,
+            "decode_gflops": decode_gflops,
+            "prefill_gflops": prefill_gflops,
             "pct_of_ceiling": 100.0 * dm / ceiling,
             "bandwidth_gbs": a.bandwidth_gbs,
             "machine": machine(),

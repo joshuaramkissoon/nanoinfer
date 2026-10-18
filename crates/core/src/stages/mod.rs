@@ -21,7 +21,7 @@ pub mod kv_cache;
 pub mod naive;
 
 use crate::error::{Error, Result};
-use crate::kernels::{Kernels, Reference};
+use crate::kernels::{Kernels, Reference, Unrolled};
 use crate::trace::{ForwardInfo, Phase, Trace};
 use crate::weights::Model;
 use std::fmt;
@@ -34,22 +34,31 @@ pub enum Stage {
     Naive,
     /// Stage 1: cache each layer's keys and values; process only the new token.
     KvCache,
+    /// Stage 2: KV cache + matmul with 16 independent accumulators (autovectorised).
+    Unrolled,
 }
 
 impl Stage {
-    pub const ALL: &'static [Stage] = &[Stage::Naive, Stage::KvCache];
+    pub const ALL: &'static [Stage] = &[Stage::Naive, Stage::KvCache, Stage::Unrolled];
 
     /// Name of the kernel set this stage runs.
     pub fn kernels(self) -> &'static str {
         match self {
             Stage::Naive | Stage::KvCache => Reference::NAME,
+            Stage::Unrolled => Unrolled::NAME,
         }
+    }
+
+    /// How this stage stores weight matrices (sets its decode ceiling).
+    pub fn weight_format(self) -> WeightFormat {
+        WeightFormat::F32
     }
 
     pub fn name(self) -> &'static str {
         match self {
             Stage::Naive => "naive",
             Stage::KvCache => "kv-cache",
+            Stage::Unrolled => "unrolled",
         }
     }
 }
@@ -64,6 +73,52 @@ impl FromStr for Stage {
     type Err = Error;
     fn from_str(s: &str) -> Result<Stage> {
         Stage::ALL.iter().copied().find(|st| st.name() == s).ok_or_else(|| Error::UnknownStage(s.to_string()))
+    }
+}
+
+/// How a stage stores its weight *matrices* (biases and LayerNorm parameters
+/// always stay f32: they're <0.1% of the bytes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WeightFormat {
+    F32,
+    F16,
+    /// ggml-style blocks of 32 int8 weights sharing one scale.
+    Q8_0,
+    /// ggml-style blocks of 32 4-bit weights sharing one scale.
+    Q4_0,
+}
+
+impl WeightFormat {
+    pub fn name(self) -> &'static str {
+        match self {
+            WeightFormat::F32 => "f32",
+            WeightFormat::F16 => "f16",
+            WeightFormat::Q8_0 => "q8_0",
+            WeightFormat::Q4_0 => "q4_0",
+        }
+    }
+
+    /// Storage cost per matrix weight, including block scales.
+    pub fn bits_per_weight(self) -> f64 {
+        match self {
+            WeightFormat::F32 => 32.0,
+            WeightFormat::F16 => 16.0,
+            // 32 × int8 + one f32 scale per block
+            WeightFormat::Q8_0 => (32.0 * 8.0 + 32.0) / 32.0,
+            // 32 × 4 bits + one f32 scale per block
+            WeightFormat::Q4_0 => (32.0 * 4.0 + 32.0) / 32.0,
+        }
+    }
+
+    /// Bytes that must be streamed from memory to decode one token in this format:
+    /// every matrix (incl. the tied LM head) at [`Self::bits_per_weight`], plus
+    /// f32 biases / LayerNorm params. Same accounting as
+    /// [`Config::decode_weight_bytes`] for f32.
+    pub fn decode_bytes(self, cfg: &crate::Config) -> f64 {
+        let c = cfg.n_embd;
+        let matrix = cfg.n_layer * 12 * c * c + cfg.n_vocab * c;
+        let other = cfg.n_params() - cfg.n_ctx * c - matrix;
+        matrix as f64 * self.bits_per_weight() / 8.0 + other as f64 * 4.0
     }
 }
 
@@ -153,7 +208,7 @@ impl Session {
         let max_seq = max_seq.min(model.config.n_ctx);
         let kv = match stage {
             Stage::Naive => KvCache::default(),
-            Stage::KvCache => KvCache::new(model, max_seq),
+            _ => KvCache::new(model, max_seq),
         };
         Session { stage, tokens: Vec::new(), max_seq, kv, acts: Activations::default() }
     }
@@ -205,7 +260,7 @@ impl Session {
 
         let n_computed = match self.stage {
             Stage::Naive => len,
-            Stage::KvCache => new_tokens.len(),
+            _ => new_tokens.len(),
         };
         let info = ForwardInfo { stage: self.stage, phase, n_new: new_tokens.len(), n_computed, context_len: len };
         if T::ENABLED {
@@ -214,6 +269,7 @@ impl Session {
         match self.stage {
             Stage::Naive => naive::forward::<Reference, T>(model, &self.tokens, &mut self.acts, trace),
             Stage::KvCache => kv_cache::forward::<Reference, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
+            Stage::Unrolled => kv_cache::forward::<Unrolled, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
         }
         if T::ENABLED {
             if trace.wants_logits() {

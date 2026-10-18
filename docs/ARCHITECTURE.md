@@ -110,3 +110,14 @@ forward and N single-token decode forwards per run, separately. After warmup it
 reports median ± stddev and the decode ceiling (`--bandwidth-gbs`, default 120 for the
 M4, ÷ `Config::decode_weight_bytes`), and appends a JSON line to `bench/results.jsonl`.
 `--with-trace` attaches a timing `Recorder`, to measure tracing overhead.
+The ceiling uses `Stage::weight_format().decode_bytes(cfg)` (matrices at the stage's
+bits per weight, biases/LayerNorm at f32). Bench also prints achieved decode GB/s
+and prefill/decode GFLOP/s (matmul FLOPs only).
+
+`nanoinfer membw --threads 1,4,10` measures real CPU read bandwidth (each thread
+sums its own slice of a 512 MB buffer), which gives the realistic ceiling.
+
+`nanoinfer ppl --stage S --reference unrolled` runs WikiText-2
+(`scripts/fetch_wikitext.sh`) through the decode path in windows and reports
+perplexity, plus KL / top-1 agreement / max |Δlogit| against an f32 reference stage
+in lockstep. This is the quality gate for lossy (f16, quantised) stages.

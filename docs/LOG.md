@@ -28,6 +28,25 @@ bytes each. The position table is excluded (only one row is read per token).
 reach 85–90% of spec, so the *practical* ceiling is closer to ~210 tok/s. We
 plot against the spec number and say so.
 
+**Measured ceiling (`nanoinfer membw`, stage 2 session).** Each of N threads sums
+its own slice of a 512 MB buffer (u64 lanes, so the loop is load-bound). Best of
+10 passes, with Backdrop.app using ~2 cores in the background:
+
+| threads | 1 | 2 | 4 | 6 | 8 | 10 |
+|---|---|---|---|---|---|---|
+| read GB/s | 58 | 70 | 92 | 96 | 98 | 98 |
+
+So the CPU cluster tops out at **~98 GB/s, 82% of the 120 GB/s spec**, and that
+needs ≥6 threads. One P-core alone can stream **~57 GB/s**. Realistic f32 decode
+ceilings: **~198 tok/s** (all cores) and **~115 tok/s on one thread**. We keep
+the 120 GB/s spec number as the headline denominator (so % figures stay
+comparable across the series) and quote the measured ones alongside.
+
+(First version of the probe reported 431 GB/s at 10 threads. The coordinating
+thread took the timestamp after the start barrier, and with every core busy it
+was descheduled until the workers had nearly finished. Each worker now times
+itself and we take max(end) − min(start).)
+
 This ceiling only falls if we read fewer bytes per token: smaller dtypes (f16
 halves it, int8 quarters it) or batching (several sequences share one read
 of the weights).
@@ -36,6 +55,7 @@ of the weights).
 |---|---|---|---|---|
 | 0 naive | 26.16 ± 0.31 | 0.368 ± 0.003 | 0.15% | — |
 | 1 kv-cache | 27.06 ± 0.43 | 18.95 ± 0.16 | 7.8% | 51× decode |
+| 2 unrolled (16 accumulators) | 184.8 ± 3.4 | 100.5 ± 2.1 | 41.4% | 5.8× decode, 7.5× prefill |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -176,3 +196,62 @@ Where a decode token's time goes (`generate --profile`, kv-cache, short context)
 throughput: multiple accumulators / SIMD in the matmul (NEON, 4 lanes × several
 accumulators), then threads, then reduce bytes (f16/int8) once we are actually
 bandwidth-bound.
+
+---
+
+## Stage 2: unrolled (multiple accumulators)
+
+**Hypothesis.** Stage 1's matmul is one long chain of dependent adds: each
+`acc += a*b` waits ~4 cycles for the previous one. If each dot product keeps 16
+independent partial sums, the out-of-order core can overlap 16 chains, and,
+because we chose the summation order explicitly, LLVM is allowed to vectorise
+them (no fast-math needed: nothing is reordered behind our back). Expect several×
+on both prefill and decode, until decode hits the single-core bandwidth wall.
+
+**What changed.** `kernels/unrolled.rs`: `dot()` over `as_chunks::<16>()` with an
+`[f32; 16]` accumulator array, tree-reduced at the end, scalar remainder. New
+kernel set `Unrolled` (only `matmul` overridden), stage `unrolled` =
+`kv_cache::forward::<Unrolled, _>`. Plain portable Rust, no intrinsics.
+
+**Disassembly** (`objdump -d target/release/nanoinfer`, `unrolled::matmul`): the
+inner loop is 4 × `ldp q` (2 for x, 2 for w), 4 × `fmul.4s`, 4 × `fadd.4s`. So the
+16 scalar accumulators became 4 NEON registers, as hoped. It is **not** fused:
+Rust never contracts `a*b + c` into `fmla` (that changes rounding), so we pay
+two instructions and two roundings per lane. Explicit NEON (`vfmaq_f32`) fixes that.
+
+**Correctness.** Logits vs HF within 1e-3 (same test as every stage). WikiText-2
+(255 tokens, `ppl` command): ppl 51.8370 vs 51.8369 for kv-cache, mean KL 6e-10
+nats, top-1 agreement 100%, max |Δlogit| 0.001. Summation order only.
+
+**Numbers** (prompt 64, 64 decode steps, 5 runs; kv-cache re-measured in the same
+session because the machine was loaded):
+
+| stage | prefill tok/s | prefill GFLOP/s | decode tok/s | decode GB/s | % of 243 (spec) | % of 115 (1-thread measured) |
+|---|---|---|---|---|---|---|
+| kv-cache (same session) | 24.7 ± 0.7 | 4.2 | 17.3 ± 0.3 | 8.5 | 7.1% | 15% |
+| **unrolled** | **184.8 ± 3.4** | 31.6 | **100.5 ± 2.1** | **49.7** | **41.4%** | **87%** |
+
+Per-op decode profile (`generate --profile`, 64 tokens):
+
+| op | share | GFLOP/s | GB/s |
+|---|---|---|---|
+| lm_head | 29% | 27.4 | 54.9 |
+| fc_proj | 22% | 27.2 | 54.5 |
+| fc | 22% | 27.2 | 54.6 |
+| qkv | 16% | 27.2 | 54.4 |
+| attn_proj | 5% | 27.3 | 54.8 |
+| gelu | 2.8% | | |
+| attn | 2.3% | | |
+
+**What surprised me.**
+- **One code change flipped decode from compute-bound to memory-bound.** Every
+  matmul now runs at ~54.5 GB/s, flat across shapes, which is the measured
+  single-core read bandwidth (57 GB/s). Stage 1 was waiting on arithmetic. Stage 2
+  is waiting on DRAM. Faster arithmetic on one core can now only buy the last
+  ~13% of decode; it still matters for prefill.
+- **The fc vs fc_proj gap from stage 1 vanished** (both 54.5 GB/s). It was a
+  latency-chain effect, gone once the chains are short and independent.
+- **GELU is now 2.8% of decode** (scalar `tanh`, 3072 per layer) and attention
+  2.3%: things that were invisible at 19 tok/s start to show at 100.
+- Prefill went 7.5× (25 → 185) and decode 5.8×. Prefill at 31.6 GFLOP/s is still
+  compute-bound (`fmul`+`fadd`, no FMA, one weight row in flight at a time).
