@@ -417,6 +417,31 @@ chart in this post is the real engine, running in your browser.
 - **Line:** "A portable API costs you about a fifth, and almost none of it is
   where you'd expect."
 
+### WebGPU round 2: LayerNorm into the weights, vector attention, f16 KV
+
+- **Hypothesis:** with dispatch overhead ruled out, the WebGPU gap is in kernels:
+  LayerNorm kernels (13% of a profiled token), scalar-load attention at long
+  context, and an f32 KV cache.
+- **Change:** (1) *lnfold*: fold LN gain/bias into the next matrix at upload,
+  y = rstd·(W'x − mean·rowsum W') + b'; the matvec sums x and x² from loads it
+  makes anyway, so decode has no LayerNorm kernels (89 → 65 dispatches).
+  (2) *attn4*: q in registers, vec4 keys/values, softmax sum inside P·V.
+  (3) *kv16*: f16 KV cache. (Dead end: flash-decoding, slower everywhere.)
+- **Result (Q8, interleaved):** short context 516 → 556 tok/s (+8%); at prompt
+  960 324 → 435 tok/s (+34%), prefill at 960 +20%. **~90% of Metal** at short
+  context (556 vs 600).
+- **Aha:** flash-decoding lost because attention at long context was already
+  reading DRAM at ~90 GB/s with 12 workgroups; the problem was bytes (5.9 MB
+  of f32 K/V per layer at 960 tokens), so f16 KV fixed what more parallelism
+  couldn't. Check the bytes before adding threads.
+- **Aha 2:** a LayerNorm is a scale and a shift; both can live in the next
+  matrix. The fused-LN that failed on Metal re-normalised x in every
+  threadgroup; the algebraic fold needs only two extra sums.
+- **Viz:** decode tok/s vs context length (64, 512, 960) for q8head → lnfold →
+  attn4 → kv16, plus the flash-decoding bar sitting below attn4.
+- **Line:** "We split attention across 16× more workgroups and it got slower.
+  It was never short of workers, only of bandwidth."
+
 ### Stage 3: neon (hand-written SIMD), a null result
 
 - **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per

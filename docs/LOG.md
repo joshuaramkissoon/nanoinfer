@@ -1312,6 +1312,91 @@ Metal rung doing the same thing measured in the same session;
 - GPU pass timestamps on wgpu-Metal are unreliable for small passes (they
   report more GPU time than wall time); the table uses wall time only.
 
+### WebGPU round 2: closing the gap to Metal (webgpu-lnfold, -attn4, -flashdec, -kv16)
+
+**Machine note.** From ~19:30 macOS's `mediaanalysisd` (photo analysis) and
+VideoToolbox encode/decode sessions shared the GPU (IOKit: GPU 91% busy with
+no bench running), so absolute numbers drift by up to 15% between minutes.
+Every comparison below is interleaved A/B in one loop; `bench/webgpu.json`
+reports the best of the 2–4 quiet-session runs per stage.
+
+**Where the time goes** (`bench --stage webgpu-q8head --profile`, each op
+×20 back to back, prompt 64): fc 18.5%, lm_head 17%, fc_proj 17%, qkv 14%,
+attention 9%, attn_proj 8.6%, **ln_1 + ln_2 13% (13 µs per LayerNorm)**.
+Per-matrix: lm_head 95 GB/s, fc_proj 89, fc 72, qkv 66, attn_proj 39.
+
+**Threads per row** (`NANOINFER_WGPU_TPR`, webgpu-q8head): 8 → 482,
+16 → 513, **32 → 521 (default)**, 64 → 487 tok/s. Already at the optimum.
+
+**webgpu-lnfold: LayerNorm folded into the weights.** Metal's fused-LN
+(stage 6b) failed because every threadgroup re-normalised x before its
+first weight load. Instead, fold the algebra into the weights at upload:
+W·(g ⊙ x̂ + b_ln) + b = (W diag g)·x̂ + (b + W·b_ln), and
+(W')·x̂ = rstd · (W'·x − mean · rowsum(W')). So the decode matvec reads the
+raw residual x; the threads of each workgroup's first row also sum x and x²
+from the same vec4s and reduce them in the same barrier steps; the epilogue
+applies rstd and the mean correction (row sums of the *stored, quantised* W'
+are kept after the biases in the bias buffer). No LayerNorm kernels in
+decode: 89 → 65 dispatches. Prefill keeps a LayerNorm with unit gain and
+zero bias in front of the folded matrices. Same HF KL as q8head (5–7e-3),
+same greedy agreement.
+Result (interleaved, 3 pairs): 509–519 → **536–542 tok/s (+4%)**. The
+profile's 13 µs per LayerNorm overstated it: the real saving is ~3 µs per
+removed dispatch.
+
+**webgpu-attn4: attention with vector loads.** At prompt 960 attention is
+29% of the profile (65 µs per layer). `attn_par` computed each score with 64
+scalar loads of q and k and P·V with one dim per thread (L/4 dependent scalar
+loads), plus 20 barriers. `attn_par4`: q in registers as 16 vec4s, keys as
+vec4s, P·V with 4 dims × 1/16 of the keys per thread, and the softmax
+denominator summed inside the P·V pass (12 barriers). Decode only (prefill
+was 5% slower on it).
+
+| prompt | lnfold | attn4 | Δ |
+|---|---|---|---|
+| 64 | 534–541 | 545–551 | +2% |
+| 512 | 407 | 463 | **+14%** |
+| 960 | 327 | 400 | **+22%** |
+
+**webgpu-flashdec (dead end, kept runnable).** Decode attention split over
+64-key chunks (grid chunks × heads, 64 threads each) plus a merge kernel per
+layer. Correct (max |diff| 6e-5 vs attn4 at context 300) and *slower
+everywhere*: 565 → 535 (P=64), 457 → 437 (512), 393 → 340 (960). Profile at
+960: split 95 µs + merge 13.5 µs per layer vs attn4's 65 µs. The reason is
+the cache size, not parallelism: at 960 positions one layer's f32 K + V is
+12 heads × 960 × 64 × 4 B × 2 = 5.9 MB, i.e. attn4's 65 µs is already
+~90 GB/s. Twelve workgroups were enough to saturate DRAM; 192 smaller ones
+only added a merge and partial writes. (Metal's flash-decoding paid because
+Metal's single-workgroup attention was latency-bound at the time.)
+
+**webgpu-kv16: f16 KV cache.** Halve those bytes: K/V packed two halves per
+u32. The qkv matvec writes plain f32 rows; `kv_write16` packs K and V
+(+12 dispatches); attn4 dequantises on load (`kv_f16.wgsl`), also used for
+prefill. KL vs the f32 cache at context 300: 6e-11, same top-1.
+
+| prompt | attn4 | kv16 | Δ | prefill attn4 → kv16 |
+|---|---|---|---|---|
+| 64 | 536 | 539 | +0.5% | 2929 → 2799 |
+| 512 | 452 | 476 | +5% | 3672 → 3752 |
+| 960 | 388 | 437 | **+13%** | 2831 → 3383 (+20%) |
+
+**Where WebGPU ends** (best quiet runs, `bench/webgpu.json`): Q8 decode
+**556 tok/s at prompt 64** (attn4; kv16 539), 476 at 512, 435 at 960;
+metal-pipelined-q8 (the matching Metal rung: Q8 weights + Q8 head, GPU loop)
+600 → **~90%** of hand-written Metal at short context (was 75–85% after
+round 1). The remaining gap is the narrow matvecs (qkv 66 GB/s, attn_proj
+39 GB/s vs Metal's lanes kernel at 58–80) and prefill (2,970 vs ~6,000 tok/s:
+no simdgroup_matrix in WGSL).
+
+**Browser-relevant costs.** Natively, a dispatch inside a pass costs 1.8 µs
+of GPU time and a pass 28 µs; `onSubmittedWorkDone` round trip 165 µs,
+`mapAsync` of 4 bytes 196 µs. In a tab every one of these crosses the GPU
+process IPC as well (Chrome's Dawn wire), so the GPU-resident loop (16
+tokens per submit, one `mapAsync`) and one pass per forward matter more there,
+and fusion that removes dispatches matters less than it seems. The wasm
+build (`crates/wasm`, `--features webgpu`) exposes the same probe
+(`webgpu_probe`); the in-browser numbers belong to the web page's run.
+
 ---
 
 ## Stage 3: neon (explicit SIMD), a null result
