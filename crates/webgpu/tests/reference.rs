@@ -4,7 +4,10 @@
 //! f32 stages must match HF logits to 1e-3 and reproduce its greedy
 //! continuation; f16 must keep greedy; Q8 is judged by KL and top-1. The GPU
 //! argmax and the resident loop must pick exactly what a CPU argmax over the
-//! same stage's logits picks. Without weights the tests print SKIP and pass.
+//! same stage's logits picks. Without weights the tests print SKIP and pass,
+//! and stages this GPU can't run (no subgroups / f16) are skipped, unless
+//! `NANOINFER_REQUIRE_WEIGHTS=1` is set: then both are failures, so a run
+//! that tested nothing can't pass.
 
 use nanoinfer_core::Model;
 use nanoinfer_webgpu::gpu::block_on;
@@ -20,12 +23,19 @@ fn root() -> PathBuf {
 }
 fn reference() -> &'static Value {
     static R: OnceLock<Value> = OnceLock::new();
-    R.get_or_init(|| serde_json::from_slice(&std::fs::read(root().join("tests/fixtures/reference.json")).unwrap()).unwrap())
+    R.get_or_init(|| {
+        serde_json::from_slice(&std::fs::read(root().join("tests/fixtures/reference.json")).unwrap()).unwrap()
+    })
+}
+/// `NANOINFER_REQUIRE_WEIGHTS` set: missing weights or unsupported stages fail.
+fn require() -> bool {
+    std::env::var("NANOINFER_REQUIRE_WEIGHTS").is_ok()
 }
 fn model() -> Option<&'static Model> {
     static M: OnceLock<Model> = OnceLock::new();
     let path = root().join("weights/gpt2/model.safetensors");
     if !path.exists() {
+        assert!(!require(), "weights missing: run scripts/fetch_weights.sh");
         eprintln!("SKIP: weights/gpt2 missing (run scripts/fetch_weights.sh)");
         return None;
     }
@@ -36,7 +46,7 @@ fn ids(v: &Value) -> Vec<u32> {
 }
 fn ref_logits(file: &str) -> Vec<f32> {
     let b = std::fs::read(root().join("tests/fixtures").join(file)).unwrap();
-    b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+    b.as_chunks::<4>().0.iter().map(|&c| f32::from_le_bytes(c)).collect()
 }
 fn kl(p: &[f32], q: &[f32]) -> f64 {
     let lse = |l: &[f32]| {
@@ -64,9 +74,17 @@ fn every_webgpu_stage_matches_hf() {
     let gpu = Rc::new(block_on(Gpu::new()).unwrap());
     let now = now();
     let r = reference();
+    let unsupported: Vec<_> = WgpuStage::ALL.iter().filter(|s| !s.supported(&gpu)).collect();
+    if !unsupported.is_empty() {
+        eprintln!(
+            "SKIP {} of {} stages, unsupported on this GPU: {unsupported:?}",
+            unsupported.len(),
+            WgpuStage::ALL.len()
+        );
+        assert!(!require(), "NANOINFER_REQUIRE_WEIGHTS is set and stages are unsupported: {unsupported:?}");
+    }
     for &stage in WgpuStage::ALL {
         if !stage.supported(&gpu) {
-            eprintln!("skip {stage}: unsupported here");
             continue;
         }
         let engine = Rc::new(Engine::new(gpu.clone(), model, stage));
