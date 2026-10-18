@@ -27,6 +27,7 @@
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 pub mod reference;
+pub mod threaded;
 pub mod tiled;
 pub mod unrolled;
 
@@ -128,5 +129,16 @@ impl Kernels for Tiled {
     const NAME: &'static str = "tiled";
     fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: usize, d_in: usize, d_out: usize) {
         tiled::matmul(out, x, w, bias, n, d_in, d_out)
+    }
+}
+
+/// Stage 5: matmuls split across cores (rayon, `threads` feature), over stage 4's kernels.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Threaded;
+
+impl Kernels for Threaded {
+    const NAME: &'static str = "threaded";
+    fn matmul(out: &mut [f32], x: &[f32], w: &[f32], bias: Option<&[f32]>, n: usize, d_in: usize, d_out: usize) {
+        threaded::matmul(out, x, w, bias, n, d_in, d_out)
     }
 }

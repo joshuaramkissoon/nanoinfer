@@ -13,6 +13,7 @@ mod bench;
 mod membw;
 #[cfg(target_os = "macos")]
 mod metal_bench;
+mod pool;
 mod ppl;
 mod report;
 
@@ -28,6 +29,13 @@ struct Cli {
     /// Directory containing model.safetensors, vocab.json and merges.txt.
     #[arg(long, global = true, default_value = "weights/gpt2")]
     weights: PathBuf,
+    /// Worker threads for multithreaded stages (0 = one per core).
+    #[arg(long, global = true, default_value_t = 0)]
+    threads: usize,
+    /// Scheduling class for every thread. macOS: interactive ≈ P-cores first,
+    /// background = E-cores only.
+    #[arg(long, global = true, value_enum, default_value = "interactive")]
+    qos: pool::Qos,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -100,6 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return result;
     }
     let cli = Cli::parse();
+    let pool_threads = pool::init(cli.threads, cli.qos);
     match cli.cmd {
         Cmd::Tokenize { text } => {
             let tok = load_tokenizer(&cli.weights)?;
@@ -109,7 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             println!("{} tokens", ids.len());
         }
-        Cmd::Bench(args) => bench::run(&cli.weights, args)?,
+        Cmd::Bench(args) => bench::run(&cli.weights, args, pool_threads, cli.qos)?,
         Cmd::Membw(args) => membw::run(args)?,
         Cmd::Ppl(args) => ppl::run(&cli.weights, args)?,
         Cmd::Generate { stage, prompt, tokens, temperature, top_k, seed, profile, trace_out, attention } => {

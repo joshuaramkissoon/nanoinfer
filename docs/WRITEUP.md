@@ -303,4 +303,24 @@ so treat the spread as contention.
   (native and browser bars side by side under their ceilings).
 - **Line:** "The same Rust, in a browser tab, matches the native decode speed, and hits a different wall."
 
+### Stage 5: threads (rayon)
+
+- **Hypothesis:** decode is memory-bound and one core can't saturate memory (57 of ~98
+  GB/s), so splitting every matmul across cores should buy up to ~1.7× decode and
+  several × prefill.
+- **Change:** each matmul's weight rows are cut into `threads × 4` chunks and handed to
+  rayon. Each thread streams one contiguous slab. Behind a `threads` cargo feature, so
+  the browser build stays single-threaded.
+- **Result:** prefill **1021 tok/s** at 8 threads (2.1×). Decode only **118 tok/s** (1.3×,
+  58 GB/s, 49% of the spec ceiling). E-cores alone: ~51 tok/s at most (their cluster
+  reads ~25 GB/s).
+- **Aha:** small matmuls got *slower* with more threads (attention projection: 43 µs on 1
+  thread, 62 µs on 4). Waking sleeping worker threads costs tens of µs, and a token has
+  49 matmuls. For a model this small the coordination is the bottleneck, not the math
+  or the memory.
+- **Viz:** thread-count slider → decode/prefill tok/s curves flattening (P-cores, then
+  E-cores), with the membw curve drawn behind as "what memory could give".
+- **Line:** "Ten cooks, one narrow pantry door, and a manager who takes a nap between
+  every order."
+
 ## Open questions / things to verify before publishing

@@ -16,7 +16,7 @@ use std::time::Instant;
 pub struct MembwArgs {
     /// Comma-separated thread counts to test.
     #[arg(long, default_value = "1,2,4,6,8,10")]
-    threads: String,
+    sweep: String,
     /// Buffer size in MB (default ≈ GPT-2 f32 weights; far larger than the 16 MB L2 / ~8 MB SLC).
     #[arg(long, default_value_t = 512)]
     mb: usize,
@@ -73,7 +73,7 @@ pub fn run(a: MembwArgs) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = (n * 8) as f64;
     println!("membw: {} MB buffer, {} passes per thread count (read-only, u64 sum)", a.mb, a.passes);
     println!("{:>7} {:>10} {:>10} {:>10}", "threads", "best GB/s", "median", "min");
-    for t in a.threads.split(',') {
+    for t in a.sweep.split(',') {
         let t: usize = t.trim().parse()?;
         timed_pass(&buf, t); // warm
         let mut gbs: Vec<f64> = (0..a.passes).map(|_| bytes / timed_pass(&buf, t) / 1e9).collect();

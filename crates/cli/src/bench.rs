@@ -149,8 +149,14 @@ fn time_run<T: Trace>(
     Ok((t_prefill, t.elapsed().as_secs_f64()))
 }
 
-pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
-    prefer_performance_cores();
+pub fn run(
+    weights: &Path,
+    a: BenchArgs,
+    pool_threads: usize,
+    qos: crate::pool::Qos,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Only the threaded stages use the pool; everything else is one thread.
+    let threads = if a.stage.multithreaded() { pool_threads } else { 1 };
     let tok = crate::load_tokenizer(weights)?;
     let model = crate::load_model(weights)?;
     let cfg = model.config;
@@ -175,8 +181,13 @@ pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error
     let decode_flops = block_flops + head_flops;
     let prefill_flops = block_flops + head_flops / a.prompt_len as f64;
     eprintln!(
-        "bench: stage={} prompt_len={} tokens={} runs={} (+{} warmup)",
-        a.stage, a.prompt_len, a.tokens, a.runs, a.warmup
+        "bench: stage={} threads={threads} qos={} prompt_len={} tokens={} runs={} (+{} warmup)",
+        a.stage,
+        qos.name(),
+        a.prompt_len,
+        a.tokens,
+        a.runs,
+        a.warmup
     );
     eprintln!(
         "decode ceiling: {:.0} GB/s / {:.1} MB of weights per token = {:.0} tok/s",
@@ -209,7 +220,7 @@ pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error
     let prefill_gflops = pm * prefill_flops / 1e9;
     let decode_gflops = dm * decode_flops / 1e9;
     println!(
-        "{}: prefill {:.2} ± {:.2} tok/s ({:.1} GFLOP/s) | decode {:.3} ± {:.3} tok/s ({:.1} GB/s, {:.1} GFLOP/s) | {:.2}% of {:.0} tok/s ceiling",
+        "{} ({threads}t): prefill {:.2} ± {:.2} tok/s ({:.1} GFLOP/s) | decode {:.3} ± {:.3} tok/s ({:.1} GB/s, {:.1} GFLOP/s) | {:.2}% of {:.0} tok/s ceiling",
         a.stage,
         pm,
         ps,
@@ -230,7 +241,8 @@ pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error
             "kernels": a.stage.kernels(),
             "model": "gpt2-124m",
             "dtype": fmt.name(),
-            "threads": 1,
+            "threads": threads,
+            "qos": qos.name(),
             "prompt_len": a.prompt_len,
             "gen_tokens": a.tokens,
             "runs": a.runs,

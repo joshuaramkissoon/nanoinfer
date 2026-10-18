@@ -58,6 +58,7 @@ of the weights).
 | 2 unrolled (16 accumulators) | 184.8 ± 3.4 | 100.5 ± 2.1 | 41.4% | 5.8× decode, 7.5× prefill |
 | 3 neon (explicit `fmla`) | 182.6 ± 1.8 | 100.3 ± 1.4 | 41.4% | 1.00× (null result) |
 | 4 tiled (4×4 register blocking) | 469 ± 119 (noisy; ~450 in quiet runs) | 101.1 ± 16 | 41.7% | 2.5× prefill |
+| 5 threads (rayon, 8 threads) | 1021 ± 13 | 118.3 ± 1.7 | 48.8% | 2.1× prefill, 1.2× decode |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -750,3 +751,64 @@ Prefill profile (`generate --profile`, 109-token prompt):
   the reason P=512 prefill drops to 355 tok/s. The "<1% elementwise" picture from
   stage 1 is gone once the matmuls are fast.
 - Decode is untouched (same kernel), still ~100 tok/s at the 1-thread memory wall.
+
+---
+
+## Stage 5: threads (rayon)
+
+**Hypothesis.** One core reads ~57 GB/s; all cores ~98 GB/s (membw). Decode is
+memory-bound, so splitting each matmul's weight rows across threads should
+scale decode toward ~1.7× (the bandwidth ratio), and prefill (compute-bound)
+toward the core count, weighted by P (fast) vs E (slow) cores.
+
+**What changed.** `kernels/threaded.rs`: each matmul's output columns are cut
+into `threads × 4` chunks (multiples of 16 columns) and run with rayon's
+`into_par_iter`. A decode chunk is one contiguous slab of weight rows, so one
+sequential stream per thread (stage 3's lesson). Prefill chunks run stage 4's
+tile kernel. Threads come from a new `threads` cargo feature on core
+(`rayon` optional dep); the CLI enables it, and the wasm build doesn't, so there
+the stage runs single-threaded. CLI: global `--threads N` and `--qos
+interactive|utility|background`. macOS has no core pinning, but a thread's QoS
+class steers it: `background` threads stay on E-cores.
+
+**Numbers** (prompt 64, 64 decode, 7 runs; P-cores preferred; Backdrop.app using
+~2 cores throughout, and other agents compiling and benchmarking at times):
+
+| threads | prefill tok/s | prefill GFLOP/s | decode tok/s | decode GB/s |
+|---|---|---|---|---|
+| 1 | 476 ± 23 | 81 | 91.6 ± 4.9 | 45 |
+| 2 | 651 ± 23 | 111 | 95.5 ± 2.5 | 47 |
+| 3 | 771 ± 28 | 132 | 96.5 ± 3.9 | 48 |
+| 4 | 826 ± 25 | 141 | 101.2 ± 5.4 | 50 |
+| 5 | 888 ± 47 | 152 | 115.2 ± 1.8 | 57 |
+| 6 | 947 ± 23 | 162 | 115.8 ± 1.7 | 57 |
+| 8 | **1021 ± 13** | 175 | **118.3 ± 1.7** | 58.5 |
+| 10 | 1013 ± 22 | 173 | 116.4 ± 1.6 | 58 |
+
+E-cores only (`--qos background`):
+
+| threads | prefill | decode | decode GB/s |
+|---|---|---|---|
+| 1 | 97 | 27.2 | 13.4 |
+| 2 | 158 | 43.1 | 21.3 |
+| 4 | 234 | 52.9 | 26.2 |
+| 6 | 243 | 50.6 | 25.0 |
+
+**What surprised me.**
+- **Decode barely scales: 92 → 118 tok/s (1.3×) for 8 threads**, at 58 GB/s
+  against the ~90–98 GB/s membw reaches with the same thread counts. Per-op
+  profile at 4 threads (`generate --profile`): the 154 MB LM head (one matmul)
+  gets 75 GB/s, but the 2.4 MB `attn_proj` takes **62 µs on 4 threads vs 43 µs
+  on 1**. Small matmuls are dominated by fork/join: rayon parks idle workers and
+  waking them costs tens of µs on macOS, × 49 matmuls per token. That's DISTILLED
+  law 6 (overhead dominates small models) showing up for real.
+- **Prefill scales 2.1× (476 → 1021 tok/s)** and peaks at 8 threads. Beyond the
+  4 P-cores, each E-core adds about a fifth of a P-core.
+- **The E-core cluster tops out at ~25 GB/s** (decode ~51 tok/s on 4–6 E-cores),
+  a quarter of the P-cluster. A static even split across P and E cores would run
+  at the E-cores' pace, so we make 4 chunks per thread and let rayon's work
+  stealing rebalance.
+- One run showed "1 thread: 57 tok/s" against 100 for the identical stage 4 code
+  path. Re-running gave 100.6. That was another process hogging a P-core.
+  Lesson: on a shared machine, always re-run the previous stage in the same
+  session before believing a delta.

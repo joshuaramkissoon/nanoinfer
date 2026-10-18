@@ -114,7 +114,7 @@ The ceiling uses `Stage::weight_format().decode_bytes(cfg)` (matrices at the sta
 bits per weight, biases/LayerNorm at f32). Bench also prints achieved decode GB/s
 and prefill/decode GFLOP/s (matmul FLOPs only).
 
-`nanoinfer membw --threads 1,4,10` measures real CPU read bandwidth (each thread
+`nanoinfer membw --sweep 1,4,10` measures real CPU read bandwidth (each thread
 sums its own slice of a 512 MB buffer), which gives the realistic ceiling.
 
 `nanoinfer ppl --stage S --reference unrolled` runs WikiText-2

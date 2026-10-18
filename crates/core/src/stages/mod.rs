@@ -21,7 +21,7 @@ pub mod kv_cache;
 pub mod naive;
 
 use crate::error::{Error, Result};
-use crate::kernels::{Kernels, Neon, Reference, Tiled, Unrolled};
+use crate::kernels::{Kernels, Neon, Reference, Threaded, Tiled, Unrolled};
 use crate::trace::{ForwardInfo, Phase, Trace};
 use crate::weights::Model;
 use std::fmt;
@@ -40,10 +40,13 @@ pub enum Stage {
     Neon,
     /// Stage 4: register-blocked (4×4 tile) matmul so prefill reuses each weight 4× from registers.
     Tiled,
+    /// Stage 5: matmuls split across CPU cores (rayon; single-threaded without the `threads` feature).
+    Threads,
 }
 
 impl Stage {
-    pub const ALL: &'static [Stage] = &[Stage::Naive, Stage::KvCache, Stage::Unrolled, Stage::Neon, Stage::Tiled];
+    pub const ALL: &'static [Stage] =
+        &[Stage::Naive, Stage::KvCache, Stage::Unrolled, Stage::Neon, Stage::Tiled, Stage::Threads];
 
     /// Name of the kernel set this stage runs.
     pub fn kernels(self) -> &'static str {
@@ -52,7 +55,14 @@ impl Stage {
             Stage::Unrolled => Unrolled::NAME,
             Stage::Neon => Neon::NAME,
             Stage::Tiled => Tiled::NAME,
+            Stage::Threads => Threaded::NAME,
         }
+    }
+
+    /// Whether this stage's kernels use more than one thread (with the
+    /// `threads` feature; the thread count is the global rayon pool's).
+    pub fn multithreaded(self) -> bool {
+        matches!(self, Stage::Threads)
     }
 
     /// How this stage stores weight matrices (sets its decode ceiling).
@@ -67,6 +77,7 @@ impl Stage {
             Stage::Unrolled => "unrolled",
             Stage::Neon => "neon",
             Stage::Tiled => "tiled",
+            Stage::Threads => "threads",
         }
     }
 }
@@ -280,6 +291,7 @@ impl Session {
             Stage::Unrolled => kv_cache::forward::<Unrolled, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
             Stage::Neon => kv_cache::forward::<Neon, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
             Stage::Tiled => kv_cache::forward::<Tiled, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
+            Stage::Threads => kv_cache::forward::<Threaded, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
         }
         if T::ENABLED {
             if trace.wants_logits() {
