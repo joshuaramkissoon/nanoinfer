@@ -27,6 +27,7 @@ pub mod kernels;
 // The spin pool spawns OS threads, which wasm can't; wasm threads go through rayon.
 #[cfg(all(feature = "threads", not(target_family = "wasm")))]
 pub mod pool;
+pub mod quant;
 pub mod safetensors;
 pub mod sampler;
 pub mod stages;

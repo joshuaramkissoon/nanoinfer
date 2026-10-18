@@ -170,7 +170,7 @@ pub fn run(
     prompt.truncate(a.prompt_len);
 
     let fmt = a.stage.weight_format();
-    let weight_bytes = fmt.decode_bytes(&cfg);
+    let weight_bytes = a.stage.decode_bytes(&cfg);
     let ceiling = a.bandwidth_gbs * 1e9 / weight_bytes;
     // FLOPs per token (matmuls only; attention is <1% here). Decode runs every
     // matrix once per token; prefill runs the blocks per token but the LM head

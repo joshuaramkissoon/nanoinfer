@@ -24,9 +24,11 @@
 //! compile time per stage (no dynamic dispatch in inner loops) while still being
 //! selectable at runtime through [`crate::Stage`].
 
+pub mod f16;
 pub mod fastops;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
+pub mod packed;
 pub mod reference;
 pub mod spin;
 pub mod threaded;

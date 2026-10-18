@@ -19,8 +19,11 @@
 pub mod blocks;
 pub mod kv_cache;
 pub mod naive;
+pub mod packed;
 
 use crate::error::{Error, Result};
+use crate::kernels::f16::F16Matrix;
+use crate::kernels::packed::SpinPar;
 use crate::kernels::{FastOps, Kernels, Neon, Reference, Spin, Threaded, Tiled, Unrolled};
 use crate::trace::{ForwardInfo, Phase, Trace};
 use crate::weights::Model;
@@ -46,6 +49,8 @@ pub enum Stage {
     SpinPool,
     /// Stage 7: stage 6 + vectorised, parallel GELU, softmax, attention and layernorm.
     FastOps,
+    /// Stage 8: stage 7 with f16 weight matrices (half the bytes), f32 accumulation.
+    F16,
 }
 
 impl Stage {
@@ -58,6 +63,7 @@ impl Stage {
         Stage::Threads,
         Stage::SpinPool,
         Stage::FastOps,
+        Stage::F16,
     ];
 
     /// Name of the kernel set this stage runs.
@@ -70,18 +76,40 @@ impl Stage {
             Stage::Threads => Threaded::NAME,
             Stage::SpinPool => Spin::NAME,
             Stage::FastOps => FastOps::NAME,
+            Stage::F16 => "fast-ops + f16",
         }
     }
 
     /// Whether this stage's kernels use more than one thread (with the
     /// `threads` feature; the thread count is the global rayon pool's).
     pub fn multithreaded(self) -> bool {
-        matches!(self, Stage::Threads | Stage::SpinPool | Stage::FastOps)
+        matches!(self, Stage::Threads | Stage::SpinPool | Stage::FastOps | Stage::F16)
     }
 
     /// How this stage stores weight matrices (sets its decode ceiling).
     pub fn weight_format(self) -> WeightFormat {
-        WeightFormat::F32
+        match self {
+            Stage::F16 => WeightFormat::F16,
+            _ => WeightFormat::F32,
+        }
+    }
+
+    /// Format of the tied LM head. Same as the blocks, except the integer
+    /// stages, which keep it f16 (it is by far the most quantisation-sensitive matrix).
+    pub fn head_format(self) -> WeightFormat {
+        match self.weight_format() {
+            WeightFormat::Q8_0 | WeightFormat::Q4_0 => WeightFormat::F16,
+            f => f,
+        }
+    }
+
+    /// Bytes this stage streams from memory per decoded token (its ceiling's
+    /// denominator): block matrices at `weight_format`, LM head at `head_format`,
+    /// biases / LayerNorm in f32.
+    pub fn decode_bytes(self, cfg: &crate::Config) -> f64 {
+        let head = (cfg.n_vocab * cfg.n_embd) as f64;
+        let (b, h) = (self.weight_format(), self.head_format());
+        b.decode_bytes(cfg) - head * b.bits_per_weight() / 8.0 + head * h.bits_per_weight() / 8.0
     }
 
     pub fn name(self) -> &'static str {
@@ -94,6 +122,7 @@ impl Stage {
             Stage::Threads => "threads",
             Stage::SpinPool => "spin-pool",
             Stage::FastOps => "fast-ops",
+            Stage::F16 => "f16",
         }
     }
 }
@@ -225,12 +254,32 @@ impl KvCache {
 }
 
 /// The state of one generation: tokens so far plus whatever the stage remembers.
+/// A stage's own copy of the weight matrices in a smaller format (stages 8+),
+/// built once per session from the f32 [`Model`].
+enum PackedWeights {
+    None,
+    F16(Box<packed::PackedModel<F16Matrix>>),
+}
+
+impl PackedWeights {
+    fn for_stage(model: &Model, stage: Stage) -> Self {
+        match stage.weight_format() {
+            WeightFormat::F32 => PackedWeights::None,
+            WeightFormat::F16 => PackedWeights::F16(Box::new(packed::PackedModel::new(model))),
+            WeightFormat::Q8_0 | WeightFormat::Q4_0 => unreachable!("no stage uses this format yet"),
+        }
+    }
+}
+
 pub struct Session {
     stage: Stage,
     tokens: Vec<u32>,
     max_seq: usize,
     kv: KvCache,
     acts: Activations,
+    packed: PackedWeights,
+    /// Scratch space for packed-weight kernels (e.g. quantised activations).
+    scratch: crate::kernels::packed::Scratch,
 }
 
 impl Session {
@@ -245,7 +294,16 @@ impl Session {
             Stage::Naive => KvCache::default(),
             _ => KvCache::new(model, max_seq),
         };
-        Session { stage, tokens: Vec::new(), max_seq, kv, acts: Activations::default() }
+        let packed = PackedWeights::for_stage(model, stage);
+        Session {
+            stage,
+            tokens: Vec::new(),
+            max_seq,
+            kv,
+            acts: Activations::default(),
+            packed,
+            scratch: Default::default(),
+        }
     }
 
     pub fn stage(&self) -> Stage {
@@ -310,6 +368,18 @@ impl Session {
             Stage::Threads => kv_cache::forward::<Threaded, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
             Stage::SpinPool => kv_cache::forward::<Spin, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
             Stage::FastOps => kv_cache::forward::<FastOps, T>(model, new_tokens, &mut self.kv, &mut self.acts, trace),
+            Stage::F16 => match &self.packed {
+                PackedWeights::F16(p) => packed::forward::<FastOps, F16Matrix, _, SpinPar, T>(
+                    model,
+                    p,
+                    new_tokens,
+                    &mut self.kv,
+                    &mut self.acts,
+                    &mut self.scratch,
+                    trace,
+                ),
+                _ => unreachable!(),
+            },
         }
         if T::ENABLED {
             if trace.wants_logits() {

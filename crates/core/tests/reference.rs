@@ -5,6 +5,7 @@
 //! weights these tests print a loud SKIP and pass, unless
 //! `NANOINFER_REQUIRE_WEIGHTS=1` is set, in which case they fail.
 
+use nanoinfer_core::stages::WeightFormat;
 use nanoinfer_core::trace::{Clock, Recorder};
 use nanoinfer_core::{sampler, Model, NoTrace, Session, Stage, Tokenizer};
 use serde_json::Value;
@@ -12,6 +13,37 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 const TOL: f32 = 1e-3;
+
+/// Max |logit diff| vs HF allowed per weight format. f32 stages only differ in
+/// summation order; f16 rounds every weight to 11 bits.
+fn tol(stage: Stage) -> f32 {
+    match stage.weight_format() {
+        WeightFormat::F32 => TOL,
+        WeightFormat::F16 => 0.25,
+        WeightFormat::Q8_0 | WeightFormat::Q4_0 => f32::INFINITY, // judged by KL instead
+    }
+}
+
+/// For integer formats a max |logit diff| says little (a single outlier logit
+/// can move by tens while the distribution barely changes), so they're bounded
+/// by KL(HF ‖ stage) of the next-token distribution instead. WikiText-2 numbers
+/// are in docs/LOG.md (`nanoinfer ppl`).
+fn kl_bound(stage: Stage) -> f64 {
+    match stage.weight_format() {
+        WeightFormat::Q8_0 => 0.01,
+        WeightFormat::Q4_0 => 0.1,
+        _ => f64::INFINITY,
+    }
+}
+
+fn kl(p_logits: &[f32], q_logits: &[f32]) -> f64 {
+    let lse = |x: &[f32]| {
+        let m = x.iter().copied().fold(f32::NEG_INFINITY, f32::max) as f64;
+        m + x.iter().map(|&l| (l as f64 - m).exp()).sum::<f64>().ln()
+    };
+    let (lp, lq) = (lse(p_logits), lse(q_logits));
+    p_logits.iter().zip(q_logits).map(|(&a, &b)| (a as f64 - lp).exp() * ((a as f64 - lp) - (b as f64 - lq))).sum()
+}
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -92,8 +124,13 @@ fn last_logits_match_hf_for_every_stage() {
             let logits = s.step(model, &prompt, &mut NoTrace).unwrap();
             let d = max_abs_diff(logits, &expected);
             println!("{stage} {:?}: max |diff| = {d:.2e}", p["text"].as_str().unwrap());
-            assert!(d < TOL, "{stage}: max abs diff {d} >= {TOL}");
-            assert_eq!(sampler::argmax(logits) as u64, p["argmax"].as_u64().unwrap());
+            assert!(d < tol(stage), "{stage}: max abs diff {d} >= {}", tol(stage));
+            let k = kl(&expected, logits);
+            println!("{stage} {:?}: KL(hf || stage) = {k:.2e}", p["text"].as_str().unwrap());
+            assert!(k < kl_bound(stage), "{stage}: KL {k} >= {}", kl_bound(stage));
+            if matches!(stage.weight_format(), WeightFormat::F32 | WeightFormat::F16) {
+                assert_eq!(sampler::argmax(logits) as u64, p["argmax"].as_u64().unwrap());
+            }
         }
     }
 }

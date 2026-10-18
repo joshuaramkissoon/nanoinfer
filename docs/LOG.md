@@ -61,6 +61,7 @@ of the weights).
 | 5 threads (rayon, 8 threads) | 1021 ± 13 | 118.3 ± 1.7 | 48.8% | 2.1× prefill, 1.2× decode |
 | 6 spin-pool (8 threads) | 833 (rayon's 984 better) | 115.0 ± 3.5 (best seen 124) | 47–51% | 1.1–1.2× decode vs rayon |
 | 7 fast-ops (10 threads) | ~1400–1500 (interleaved; 1327 ± 301 recorded) | ~119 (interleaved) | ~49% | 1.75× prefill, 2.2× at P=512 |
+| 8 f16 weights (4–10 threads) | ~1240–1320 | ~180 (4t) | 37% of 485 / 74% of 243 | 1.5× decode |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -1321,3 +1322,51 @@ greedy text ("to read the right, the right, ...").
 the walkthrough's residual stream and logits, per-stage Ladder numbers and race lanes: ~240 KB total in
 `web/public/recorded/`. Op traces are packed as interned op defs + per-forward gaps/durations in 0.1 µs, with shape
 overrides only where an op differs from its decode shape (215 KB → 116 KB for the run).
+
+---
+
+## Stage 8: f16 weights
+
+**Hypothesis.** Decode streams every weight once per token. Halving the bytes
+should come close to doubling decode (ceiling 243 → 485 tok/s at the spec
+120 GB/s; ~400 at the measured ~98). Prefill shouldn't move (compute-bound, f32
+FMAs either way). f16 has an 11-bit significand (relative rounding ≤ 2⁻¹¹), so
+quality should be indistinguishable.
+
+**What changed.** The first stage whose weights differ from `Model`:
+- `quant.rs`: f32 ↔ f16 conversion with round-to-nearest-even, subnormals,
+  inf/NaN (test: every one of the 65536 f16 bit patterns round-trips).
+- `kernels/packed.rs`: a `PackedMatrix` trait (`pack`, `bytes`, `matmul`), the
+  shared driver (columns split on the spin pool, as in stage 6), and the prefill
+  path: dequantise a 4-row weight panel to f32 *once*, then run a stride-general
+  4×4 FMA tile over all prompt rows.
+- `kernels/f16.rs`: decode dot product widening 8 halves at a time with
+  `fcvtl`/`fcvtl2`. Rust's f16 NEON intrinsics (`vcvt_f32_f16`, the `f16`
+  type) are still unstable, so it's two lines of stable inline `asm!`.
+- `stages/packed.rs`: the KV-cache forward over a `PackedModel<M, H>` (blocks in
+  format M, LM head as H). `Session::with_max_seq` builds the packed copy once
+  (so a stage switch costs a repack, not a reload). The public API is unchanged.
+- `Stage::weight_format()` / `head_format()` / `decode_bytes()` give each stage
+  its own ceiling. Bench now reports it per stage.
+
+**Correctness.** HF logits: max |diff| 0.024–0.10 over the 4 prompts (f32 stages:
+< 2e-4). The reference test's tolerance is now per format (f16: 0.25).
+WikiText-2, 4 × 512 tokens: **ppl 37.388 vs 37.378 (+0.03%), mean KL 1.3e-5
+nats, top-1 agreement 99.80%**, max |Δlogit| 0.35.
+
+**Numbers** (stages 8–10 session, interleaved; 7 runs per cell, two rounds at
+10 threads, then a 5-run thread sweep; heavy background load, so ±10–15%):
+
+| threads | fast-ops (f32) decode | f16 decode | f16 prefill |
+|---|---|---|---|
+| 4 | | **180 ± 10** | 946 |
+| 6 | | 169 ± 6 | 1240 |
+| 8 | | 147 ± 13 | 1226 |
+| 10 (round 1 / 2) | 84 ± 11 / 103 ± 7 | 160 ± 24 / 181 ± 6 | 1218 / 1320 |
+
+**Reading it.** Decode **~180 tok/s (1.5–1.75× f32)** at ~45 GB/s, *less*
+bandwidth than f32 fast-ops reached (~60). We're no longer bandwidth-bound.
+At 180 tok/s a token is 5.5 ms, of which the bytes need ~2.7 ms at 90 GB/s. The
+rest is per-token overhead that doesn't shrink with the bytes (next stages).
+And more threads stop helping beyond 4: the extra threads only add dispatch
+cost and E-core stragglers.

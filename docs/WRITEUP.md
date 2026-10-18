@@ -475,4 +475,17 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
 - **Line:** "The matmuls were fixed four stages ago. This stage fixed the arithmetic around
   them, which had become half the work."
 
+### Stage 8: f16 weights
+
+- **Hypothesis:** decode reads every weight per token, so half the bytes ≈ double the speed.
+  f16 keeps 11 significant bits, so nobody should notice.
+- **Change:** weights converted to half precision once when the session starts. The kernel
+  widens 8 halves to floats with one instruction pair (`fcvtl`, via inline assembly
+  because Rust's f16 intrinsics are still unstable) and multiplies in f32.
+- **Result:** decode **~180 tok/s** (1.5–1.75× f32). Perplexity +0.03%, 99.8% same top token.
+- **Aha:** we got 1.6×, not 2×. Halving the bytes exposed costs that don't shrink with the
+  bytes: thread dispatch, attention, the serial bits. Memory-bound is a *moving* target.
+- **Viz:** speed-of-light gauge: switch dtype f32 → f16 and watch the ceiling needle
+  double while the achieved needle moves less.
+
 ## Open questions / things to verify before publishing
