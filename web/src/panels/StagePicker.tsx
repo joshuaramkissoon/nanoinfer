@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { benchKey, useEngine } from "../engine/client";
 import type { StageInfo } from "../engine/types";
-import { FAMILIES, fallback, familyOf, stageLabel, stageWhat, type Family } from "../lib/stages";
+import { FAMILIES, fallback, familyOf, stageDeadEnd, stageLabel, stageWhat, type Family } from "../lib/stages";
 import { latestByStage, useNative } from "../lib/native";
 import { sig } from "../lib/fmt";
 
@@ -29,16 +29,19 @@ function useHereVersion() {
 }
 
 /** Speed in this browser: generated just now, else your Lab benchmark, else the recording. */
-function useBrowserSpeeds(): (name: string) => { v: number; how: "now" | "bench" | "recorded" } | null {
+function useBrowserSpeeds(): (name: string, preferNow?: boolean) => { v: number; how: "now" | "bench" | "recorded" } | null {
   useHereVersion();
   const bench = useEngine((s) => s.bench);
   const build = useEngine((s) => s.build);
   const rec = useEngine((s) => s.recorded);
-  return (name) => {
+  // the list prefers the benchmark (greedy, same shape as the Mac column); the header
+  // prefers what generating here just measured
+  return (name, preferNow = false) => {
     const h = here.get(name);
-    if (h) return { v: h, how: "now" };
+    if (h && preferNow) return { v: h, how: "now" };
     const b = bench[benchKey(build, name)];
     if (b?.tokS) return { v: b.tokS, how: "bench" };
+    if (h) return { v: h, how: "now" };
     const r = rec?.ladder[name];
     if (r?.tokS) return { v: r.tokS, how: "recorded" };
     return null;
@@ -97,7 +100,11 @@ export function StagePicker({ value, onChange, disabled }: { value: string; onCh
 
   const groups = FAMILIES.map((f) => ({ ...f, items: stages.filter((s) => familyOf(s) === f.key) })).filter((g) => g.items.length);
   const famTitle = (k: Family) => FAMILIES.find((f) => f.key === k)!.title;
-  const curSpeed = cur ? browser(cur.name) : null;
+  const curSpeed = cur ? browser(cur.name, true) : null;
+  const wr = rec?.webgpu;
+  const recTitle = wr
+    ? `grey numbers: recorded ${wr.recordedAt.slice(0, 10)} in ${wr.browser ?? "a browser"} on the M4. ${wr.conditions ?? ""}`.trim()
+    : "measured when you generate here, or by the benchmark in the ladder below";
 
   return (
     <div className={`nv-sp${open ? " open" : ""}`}>
@@ -139,10 +146,20 @@ export function StagePicker({ value, onChange, disabled }: { value: string; onCh
       </button>
       {open && (
         <div className="nv-sp-list" id="nv-sp-list" role="radiogroup" aria-label="engine version">
+          <p className="nv-sp-intro">Each version is a real step of the climb: pick one and press Generate, and that engine writes the text.</p>
           <div className="nv-sp-cols" aria-hidden>
-            <span>Each version is a real step of the climb: pick one and press Generate, and that engine writes the text.</span>
-            <span className="nv-sp-num">Mac</span>
-            <span className="nv-sp-num">browser</span>
+            <span>
+              <b>engine version</b>
+              <small>speed: tokens per second, higher is faster</small>
+            </span>
+            <span className="nv-sp-num" title="Native code on the M4 Mac mini, outside any browser (bench/results.jsonl)">
+              <b>Mac</b>
+              <small>native</small>
+            </span>
+            <span className="nv-sp-num" title={recTitle}>
+              <b>this browser</b>
+              <small>in a tab</small>
+            </span>
           </div>
           {groups.map((g) => {
             const folded = g.key === "native" && !showNative && !g.items.some((s) => s.name === value);
@@ -178,6 +195,7 @@ export function StagePicker({ value, onChange, disabled }: { value: string; onCh
                     <span className="nv-sp-name">
                       <b>{stageLabel(s.name)}</b>
                       {s.name === rec1 && <span className="nv-sp-rec">recommended</span>}
+                      {stageDeadEnd(s.name) && <span className="nv-sp-dead">{stageDeadEnd(s.name)}</span>}
                       <code>{s.name}</code>
                       <span className="nv-sp-what">
                         {fb ? (
@@ -189,8 +207,13 @@ export function StagePicker({ value, onChange, disabled }: { value: string; onCh
                         )}
                       </span>
                     </span>
-                    <span className="nv-sp-num">{n ? fmt(n) : "–"}</span>
-                    <span className={`nv-sp-num${b?.how === "recorded" ? " rec" : ""}`} title={b ? (b.how === "now" ? "measured just now, in this tab" : b.how === "bench" ? "your Lab benchmark, this browser" : "recorded on the M4 in a browser engine") : undefined}>
+                    <span className="nv-sp-num" title={n ? (g.key === "gpu" ? "the same WebGPU code run natively on the M4 (wgpu on Metal)" : "native code on the M4 Mac mini") : "no native run of this version"}>
+                      {n ? fmt(n) : "–"}
+                    </span>
+                    <span
+                      className={`nv-sp-num${b?.how === "recorded" ? " rec" : ""}`}
+                      title={b ? (b.how === "now" ? "measured just now, in this tab" : b.how === "bench" ? "your Lab benchmark, this browser" : g.key === "gpu" ? recTitle : "recorded on the M4: the same WebAssembly, run in Node") : "not measured in a browser yet"}
+                    >
                       {b ? fmt(b.v) : "–"}
                     </span>
                   </button>
@@ -200,8 +223,10 @@ export function StagePicker({ value, onChange, disabled }: { value: string; onCh
             );
           })}
           <p className="nv-sp-foot">
-            Decode speed, tokens per second. <b>Mac</b>: native code on the M4 Mac mini (bench/results.jsonl). <b>browser</b>: measured when
-            you generate here, or from your benchmark in the ladder below; grey numbers are a recording. <span className="nv-sp-fb">≈</span> marks
+            Decode speed: tokens written per second for one user, after a 64-token prompt. <b>Mac</b>: native code on the M4 Mac mini
+            (bench/results.jsonl); for the WebGPU versions, the same WebGPU code run natively. <b>this browser</b>: measured when you
+            generate here, or by the benchmark in the ladder below. <i>Grey italic</i> numbers are a recording made on the M4
+            {wr ? ` (WebGPU: ${wr.browser ?? "a browser"}, ${wr.recordedAt.slice(0, 10)})` : ""}, shown until your own replace them. <span className="nv-sp-fb">≈</span> marks
             versions written for the Mac's CPU: a browser can't run their key trick, so here they run simpler code and their speed says
             little about the idea.
           </p>

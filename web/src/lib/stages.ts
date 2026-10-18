@@ -17,11 +17,15 @@ export const FAMILIES: { key: Family; title: string; blurb: string }[] = [
     blurb: "Hand-tuned for the M4's CPU: NEON instructions, OS threads, smaller numbers. A browser can't run most of that code, so these mostly fall back to simpler kernels here.",
   },
   { key: "wasm", title: "Browser CPU (WebAssembly)", blurb: "Rewritten for what a browser tab's CPU can do: WebAssembly SIMD, and threads where the page allows them." },
-  { key: "gpu", title: "Browser GPU (WebGPU)", blurb: "The model on your graphics chip through WebGPU, one bottleneck at a time." },
+  {
+    key: "gpu",
+    title: "Browser GPU (WebGPU)",
+    blurb: "The model on your graphics chip through WebGPU, one bottleneck at a time. Here the Mac column is the same WebGPU code run natively (wgpu on Metal), not in a browser.",
+  },
 ];
 
 /** A short plain-language name and one line on what changed. */
-export const STAGE_NOTES: Record<string, { label: string; what: string }> = {
+export const STAGE_NOTES: Record<string, { label: string; what: string; deadEnd?: string }> = {
   naive: { label: "Starting point", what: "re-reads the whole text for every new token" },
   "kv-cache": { label: "KV cache", what: "remembers past tokens' keys and values: one new row per token" },
   unrolled: { label: "16 running totals", what: "sixteen independent sums, so the CPU can overlap the work (SIMD)" },
@@ -58,10 +62,15 @@ export const STAGE_NOTES: Record<string, { label: string; what: string }> = {
   "webgpu-tiled": { label: "Tiled prompt (GPU)", what: "64×64 tiled multiply for reading the prompt" },
   "webgpu-ln64": { label: "Register LayerNorm", what: "LayerNorm on 64 threads, the row held in registers" },
   "webgpu-q8head": { label: "8-bit vocabulary head", what: "the big 50,257-row output matrix in int8 too" },
-  "webgpu-lnfold": { label: "Folded LayerNorm", what: "LayerNorm folded into the next weights: fewer kernels" },
-  "webgpu-attn4": { label: "4-wide attention", what: "attention with 4-wide loads, the query in registers" },
-  "webgpu-flashdec": { label: "Flash decoding", what: "attention split into chunks of 64 keys, then merged" },
-  "webgpu-kv16": { label: "16-bit KV cache (GPU)", what: "keys and values stored as f16" },
+  "webgpu-lnfold": { label: "Folded LayerNorm", what: "LayerNorm's maths folded into the next multiply: 24 fewer GPU jobs per token" },
+  "webgpu-attn4": { label: "4-wide attention", what: "attention reads 4 numbers per load, with the query held in registers" },
+  "webgpu-flashdec": {
+    label: "Flash decoding",
+    what: "attention split into chunks of 64 keys, then merged. Slower here: one job per layer already kept memory busy",
+    deadEnd: "tried, slower · kept for honesty",
+  },
+  "webgpu-kv16": { label: "16-bit KV cache (GPU)", what: "keys and values stored as 16-bit: half the bytes, which pays off on long texts" },
+  "webgpu-vec": { label: "Wider loads", what: "4 numbers per memory access in the prompt multiply, 16 in the 8-bit decode: prompt reading up to 1.7× faster" },
 };
 
 export function familyOf(s: Pick<StageInfo, "name" | "backend" | "browserOnly">): Family {
@@ -72,6 +81,7 @@ export function familyOf(s: Pick<StageInfo, "name" | "backend" | "browserOnly">)
 }
 
 export const stageLabel = (name: string) => STAGE_NOTES[name]?.label ?? name;
+export const stageDeadEnd = (name: string) => STAGE_NOTES[name]?.deadEnd;
 export const stageWhat = (s: Pick<StageInfo, "name" | "kernels">) => STAGE_NOTES[s.name]?.what ?? s.kernels;
 
 /** A core stage whose wasm build runs some other stage's (or slower) code. */
