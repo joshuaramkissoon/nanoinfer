@@ -47,6 +47,11 @@ pub struct Weights {
     pub layers: Vec<LayerW>,
     pub ln_f_w: wgpu::Buffer,
     pub ln_f_b: wgpu::Buffer,
+    /// ln_1 / ln_2 gains folded into the matrices after them and their biases
+    /// into the matrices' biases (the stored LayerNorm weights are then 1 and 0).
+    /// `attn_b` / `fc_b` then hold [bias'; row sums of the stored matrix]:
+    /// the row sums are the decode matvec's mean correction.
+    pub ln_folded: bool,
     /// bytes uploaded
     pub bytes: u64,
 }
@@ -79,6 +84,46 @@ pub fn quantize_q8_0(w: &[f32]) -> (Vec<u8>, Vec<u8>) {
     (qs, sc)
 }
 
+/// What the GPU will multiply by: `w` rounded through `dtype`.
+pub fn stored_values(w: &[f32], dtype: DType) -> Vec<f32> {
+    match dtype {
+        DType::F32 => w.to_vec(),
+        DType::F16 => w.iter().map(|&v| f16::from_f32(v).to_f32()).collect(),
+        DType::Q8_0 => {
+            let (q, sc) = quantize_q8_0(w);
+            q.iter()
+                .enumerate()
+                .map(|(i, &b)| {
+                    let blk = i / 32;
+                    let d = f16::from_le_bytes([sc[2 * blk], sc[2 * blk + 1]]).to_f32();
+                    b as i8 as f32 * d
+                })
+                .collect()
+        }
+    }
+}
+
+/// Fold a LayerNorm (gain `g`, bias `bl`) into the linear layer after it:
+/// W·(g ⊙ x̂ + bl) + b = (W diag g)·x̂ + (b + W·bl). Returns (W', b').
+pub fn fold_ln(w: &[f32], b: &[f32], g: &[f32], bl: &[f32], rows: usize, cols: usize) -> (Vec<f32>, Vec<f32>) {
+    let mut wf = vec![0.0f32; rows * cols];
+    let mut bf = b.to_vec();
+    for o in 0..rows {
+        let row = &w[o * cols..(o + 1) * cols];
+        let mut acc = 0.0f64;
+        for i in 0..cols {
+            wf[o * cols + i] = row[i] * g[i];
+            acc += row[i] as f64 * bl[i] as f64;
+        }
+        bf[o] += acc as f32;
+    }
+    (wf, bf)
+}
+
+fn row_sums(w: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    (0..rows).map(|o| w[o * cols..(o + 1) * cols].iter().map(|&v| v as f64).sum::<f64>() as f32).collect()
+}
+
 impl Mat {
     pub fn upload(gpu: &Gpu, label: &str, w: &[f32], rows: usize, cols: usize, dtype: DType) -> Mat {
         assert_eq!(w.len(), rows * cols);
@@ -98,7 +143,7 @@ impl Mat {
 }
 
 impl Weights {
-    pub fn upload(gpu: &Gpu, m: &Model, dtype: DType, head_dtype: DType) -> Weights {
+    pub fn upload(gpu: &Gpu, m: &Model, dtype: DType, head_dtype: DType, fold: bool) -> Weights {
         let cfg = m.config;
         let c = cfg.n_embd;
         let v = |label: &str, x: &[f32]| gpu.buffer_init(label, f32_bytes(x));
@@ -122,19 +167,42 @@ impl Weights {
             .enumerate()
             .map(|(i, l)| {
                 let mat = |name: &str, w: &[f32], rows, cols| Mat::upload(gpu, &format!("h{i}.{name}"), w, rows, cols, dtype);
-                let lw = LayerW {
-                    ln_1_w: v("ln_1_w", &l.ln_1_w),
-                    ln_1_b: v("ln_1_b", &l.ln_1_b),
-                    attn: mat("attn", &l.attn_w, 3 * c, c),
-                    attn_b: v("attn_b", &l.attn_b),
-                    proj: mat("proj", &l.proj_w, c, c),
-                    proj_b: v("proj_b", &l.proj_b),
-                    ln_2_w: v("ln_2_w", &l.ln_2_w),
-                    ln_2_b: v("ln_2_b", &l.ln_2_b),
-                    fc: mat("fc", &l.fc_w, 4 * c, c),
-                    fc_b: v("fc_b", &l.fc_b),
-                    fc_proj: mat("fc_proj", &l.fc_proj_w, c, 4 * c),
-                    fc_proj_b: v("fc_proj_b", &l.fc_proj_b),
+                let ones = vec![1.0f32; c];
+                let zeros = vec![0.0f32; c];
+                let lw = if fold {
+                    let (aw, ab) = fold_ln(&l.attn_w, &l.attn_b, &l.ln_1_w, &l.ln_1_b, 3 * c, c);
+                    let (fw, fb) = fold_ln(&l.fc_w, &l.fc_b, &l.ln_2_w, &l.ln_2_b, 4 * c, c);
+                    let ab = [ab, row_sums(&stored_values(&aw, dtype), 3 * c, c)].concat();
+                    let fb = [fb, row_sums(&stored_values(&fw, dtype), 4 * c, c)].concat();
+                    LayerW {
+                        ln_1_w: v("ln_1_w", &ones),
+                        ln_1_b: v("ln_1_b", &zeros),
+                        attn: mat("attn", &aw, 3 * c, c),
+                        attn_b: v("attn_b", &ab),
+                        proj: mat("proj", &l.proj_w, c, c),
+                        proj_b: v("proj_b", &l.proj_b),
+                        ln_2_w: v("ln_2_w", &ones),
+                        ln_2_b: v("ln_2_b", &zeros),
+                        fc: mat("fc", &fw, 4 * c, c),
+                        fc_b: v("fc_b", &fb),
+                        fc_proj: mat("fc_proj", &l.fc_proj_w, c, 4 * c),
+                        fc_proj_b: v("fc_proj_b", &l.fc_proj_b),
+                    }
+                } else {
+                    LayerW {
+                        ln_1_w: v("ln_1_w", &l.ln_1_w),
+                        ln_1_b: v("ln_1_b", &l.ln_1_b),
+                        attn: mat("attn", &l.attn_w, 3 * c, c),
+                        attn_b: v("attn_b", &l.attn_b),
+                        proj: mat("proj", &l.proj_w, c, c),
+                        proj_b: v("proj_b", &l.proj_b),
+                        ln_2_w: v("ln_2_w", &l.ln_2_w),
+                        ln_2_b: v("ln_2_b", &l.ln_2_b),
+                        fc: mat("fc", &l.fc_w, 4 * c, c),
+                        fc_b: v("fc_b", &l.fc_b),
+                        fc_proj: mat("fc_proj", &l.fc_proj_w, c, 4 * c),
+                        fc_proj_b: v("fc_proj_b", &l.fc_proj_b),
+                    }
                 };
                 bytes += lw.attn.bytes() + lw.proj.bytes() + lw.fc.bytes() + lw.fc_proj.bytes();
                 lw
@@ -148,6 +216,7 @@ impl Weights {
             layers,
             ln_f_w: v("ln_f_w", &m.ln_f_w),
             ln_f_b: v("ln_f_b", &m.ln_f_b),
+            ln_folded: fold,
             bytes,
         }
     }

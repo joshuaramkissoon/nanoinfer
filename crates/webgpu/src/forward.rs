@@ -36,6 +36,10 @@ fn wdot_src(d: DType) -> &'static str {
 /// Threads per row in the matvec: ~3 vector loads in flight per thread on a
 /// 768-wide row (the Metal lesson), whatever the load width.
 fn tpr(d: DType) -> u32 {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(t) = std::env::var("NANOINFER_WGPU_TPR").ok().and_then(|v| v.parse().ok()) {
+        return t;
+    }
     match d {
         DType::F32 => 64,
         DType::F16 | DType::Q8_0 => 32,
@@ -47,12 +51,15 @@ pub const MAX_STEPS: usize = 64;
 /// Tokens per submit in the GPU-resident greedy loop.
 pub const RESIDENT_CHUNK: usize = 16;
 const ARGMAX_GROUPS: u32 = 64;
+/// Keys per flash-decoding chunk (attention_fd.wgsl's CH).
+const FD_CHUNK: usize = 64;
 const PARAM_SLOTS: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum MatKind {
     Matvec,
     MatvecSg,
+    MatvecLn,
     Naive,
     Tiled,
 }
@@ -71,14 +78,14 @@ pub struct Engine {
 impl Engine {
     pub fn new(gpu: Rc<Gpu>, model: &Model, stage: WgpuStage) -> Engine {
         let r = stage.recipe();
-        let w = Rc::new(Weights::upload(&gpu, model, r.dtype, r.head_dtype));
+        let w = Rc::new(Weights::upload(&gpu, model, r.dtype, r.head_dtype, r.ln_fold));
         Self::with_weights(gpu, model.config, stage, w)
     }
 
     /// Reuse already-uploaded weights (must match the stage's dtypes).
     pub fn with_weights(gpu: Rc<Gpu>, config: Config, stage: WgpuStage, w: Rc<Weights>) -> Engine {
         let recipe = stage.recipe();
-        assert_eq!((w.dtype, w.head_dtype), (recipe.dtype, recipe.head_dtype), "weights dtype mismatch");
+        assert_eq!((w.dtype, w.head_dtype, w.ln_folded), (recipe.dtype, recipe.head_dtype, recipe.ln_fold), "weights dtype / folding mismatch");
         Engine { gpu, config, stage, recipe, w, kernels: RefCell::new(HashMap::new()) }
     }
 
@@ -103,6 +110,7 @@ impl Engine {
                 // naga takes subgroup builtins without `enable subgroups;` (and rejects
                 // the directive); a browser would need it.
                 MatKind::MatvecSg => (include_str!("shaders/matvec_sg.wgsl"), "matvec_sg", true, if cfg!(target_arch = "wasm32") { "enable subgroups;\n" } else { "" }),
+                MatKind::MatvecLn => (include_str!("shaders/matvec_ln.wgsl"), "matvec_ln", true, ""),
                 MatKind::Naive => (include_str!("shaders/matmul_naive.wgsl"), "matmul_naive", false, ""),
                 MatKind::Tiled => (include_str!("shaders/matmul_tiled.wgsl"), "matmul_tiled", false, ""),
             };
@@ -124,6 +132,14 @@ impl Engine {
         self.cached(format!("embed/{d:?}"), || {
             let src = format!("{COMMON}\n{}\n{}", w_src(d), include_str!("shaders/embed.wgsl"));
             self.gpu.kernel(&format!("embed/{d:?}"), &src, "embed", "rrrrwwwu", &[])
+        })
+    }
+
+    fn attn4_kernel(&self, kv16: bool) -> Rc<Kernel> {
+        self.cached(format!("attention4/{kv16}"), || {
+            let kv = if kv16 { include_str!("shaders/kv_f16.wgsl") } else { include_str!("shaders/kv_f32.wgsl") };
+            let s = format!("{COMMON}\n{kv}\n{}", include_str!("shaders/attention4.wgsl"));
+            self.gpu.kernel(&format!("attention4/{kv16}"), &s, "attn_par4", "rrrwwu", &[])
         })
     }
 
@@ -256,6 +272,14 @@ impl Planner<'_> {
 
     #[allow(clippy::too_many_arguments)]
     fn mat(&mut self, name: &'static str, layer: i32, part: u32, mat: &Mat, x: &wgpu::Buffer, y: &wgpu::Buffer, bias: Option<&wgpu::Buffer>, epi: u32, ldy: u32, y_off: u32, x_last: bool) {
+        self.mat_ln(name, layer, part, mat, x, y, bias, epi, ldy, y_off, x_last, false)
+    }
+
+    /// `mat`; with `ln` (a matrix with a folded LayerNorm, whose bias buffer
+    /// also holds its row sums) a decode matvec takes the raw residual as `x`
+    /// and normalises on the fly.
+    #[allow(clippy::too_many_arguments)]
+    fn mat_ln(&mut self, name: &'static str, layer: i32, part: u32, mat: &Mat, x: &wgpu::Buffer, y: &wgpu::Buffer, bias: Option<&wgpu::Buffer>, epi: u32, ldy: u32, y_off: u32, x_last: bool, ln: bool) {
         let e = self.e;
         let r = e.recipe;
         let n = self.n;
@@ -266,17 +290,19 @@ impl Planner<'_> {
                 Matmul::Tiled => MatKind::Tiled,
             }
         } else {
-            match r.matvec {
-                Matvec::Naive => MatKind::Naive,
-                Matvec::Workgroup => MatKind::Matvec,
-                Matvec::Subgroup => MatKind::MatvecSg,
+            match (r.matvec, ln) {
+                (Matvec::Workgroup, true) => MatKind::MatvecLn,
+                (Matvec::Naive, _) => MatKind::Naive,
+                (Matvec::Workgroup, _) => MatKind::Matvec,
+                (Matvec::Subgroup, _) => MatKind::MatvecSg,
             }
         };
+        assert!(!ln || prefill || kind == MatKind::MatvecLn, "folded LayerNorm needs the workgroup matvec");
         let k = e.mat_kernel(kind, mat.dtype, epi);
         let rows_n = if x_last { 1 } else { n };
         let dims = match kind {
             MatKind::Naive => [(mat.rows as u32).div_ceil(64), rows_n as u32, 1],
-            MatKind::Matvec | MatKind::MatvecSg => [(mat.rows as u32).div_ceil(256 / tpr(mat.dtype)), rows_n as u32, 1],
+            MatKind::Matvec | MatKind::MatvecSg | MatKind::MatvecLn => [(mat.rows as u32).div_ceil(256 / tpr(mat.dtype)), rows_n as u32, 1],
             MatKind::Tiled => [(mat.rows as u32).div_ceil(64), (rows_n as u32).div_ceil(64), 1],
         };
         let c = e.config.n_embd as u32;
@@ -316,37 +342,73 @@ impl Planner<'_> {
         let ln_entry = if ln64 { "layernorm_wg64" } else if par { "layernorm_par" } else { "layernorm_naive" };
         let ln = e.op_kernel("layernorm", ln_src, ln_entry, "rrrwu");
         let ln_dims = if par || ln64 { [nu, 1, 1] } else { [nu.div_ceil(64), 1, 1] };
-        let attn = e.op_kernel("attention", at_src, if par { "attn_par" } else { "attn_naive" }, "rrrwwu");
+        // attn4 is a decode kernel: prefill (many token rows, plenty of
+        // workgroups) is ~5% faster on attn_par.
+        let attn = if r.attn4 && (self.n == 1 || r.kv16) {
+            e.attn4_kernel(r.kv16)
+        } else {
+            e.op_kernel("attention", at_src, if par { "attn_par" } else { "attn_naive" }, "rrrwwu")
+        };
         let h = cfg.n_head as u32;
+        let fd_chunks = self.max_seq.div_ceil(FD_CHUNK) as u32;
+        let fd = (r.flashdec && self.n == 1).then(|| {
+            let src = include_str!("shaders/attention_fd.wgsl");
+            (e.op_kernel("attention_fd", src, "attn_fd_split", "rrrwwu"), e.op_kernel("attention_fd", src, "attn_fd_merge", "rrrwwu"))
+        });
         let attn_dims = if par { [nu, h, 1] } else { [nu.div_ceil(64), h, 1] };
         let kvw = e.op_kernel("kv_write", include_str!("shaders/kv_write.wgsl"), "kv_write", "rwwu");
+        let kvw16 = e.op_kernel("kv_write16", include_str!("shaders/kv_write16.wgsl"), "kv_write16", "rwwu");
+        assert!(!r.kv16 || (r.attn4 && fused && !r.flashdec), "kv16 needs attn4 + fused epilogues");
         let gelu = e.op_kernel("gelu", include_str!("shaders/gelu.wgsl"), "gelu_inplace", "wu");
         let add = e.op_kernel("add", include_str!("shaders/add.wgsl"), "add_inplace", "wru");
         let elem = |len: u32| [(nu * len).div_ceil(256), 1, 1];
         let p1 = |a: u32| [a, 0, 0, 0, 0, 0, 0, 0];
 
+        // Folded LayerNorms: decode skips ln_1/ln_2 (the matvec normalises);
+        // prefill keeps them, with unit gain and zero bias (weights.rs).
+        let fold_dec = r.ln_fold && self.n == 1;
+        assert!(!r.ln_fold || fused, "ln_fold needs fused epilogues");
         for (l, lw) in w.layers.iter().enumerate() {
             let li = l as i32;
             let layer_off = l as u32 * self.max_seq as u32 * c;
-            self.small(&ln, "ln_1", li, &[&b.x, &lw.ln_1_w, &lw.ln_1_b, &b.xn], p1(c), ln_dims);
-            if fused {
-                self.mat("qkv", li, 0, &lw.attn, &b.xn, &b.qkv, Some(&lw.attn_b), 3, 3 * c, 0, false);
+            // f16 KV: qkv writes plain f32 rows and kv_write16 packs K/V.
+            let qkv_epi = if r.kv16 { 0 } else { 3 };
+            if fold_dec {
+                self.mat_ln("qkv", li, 0, &lw.attn, &b.x, &b.qkv, Some(&lw.attn_b), qkv_epi, 3 * c, 0, false, true);
+            } else if fused {
+                self.small(&ln, "ln_1", li, &[&b.x, &lw.ln_1_w, &lw.ln_1_b, &b.xn], p1(c), ln_dims);
+                self.mat("qkv", li, 0, &lw.attn, &b.xn, &b.qkv, Some(&lw.attn_b), qkv_epi, 3 * c, 0, false);
             } else {
+                self.small(&ln, "ln_1", li, &[&b.x, &lw.ln_1_w, &lw.ln_1_b, &b.xn], p1(c), ln_dims);
                 self.mat("qkv", li, 0, &lw.attn, &b.xn, &b.qkv, Some(&lw.attn_b), 0, 3 * c, 0, false);
                 self.small(&kvw, "kv_write", li, &[&b.qkv, &b.kc, &b.vc], [c, layer_off, 0, 0, 0, 0, 0, 0], elem(c));
             }
-            self.small(&attn, "attn", li, &[&b.qkv, &b.kc, &b.vc, &b.att, &b.scores], [c, h, layer_off, self.max_seq as u32, 0, 0, 0, 0], attn_dims);
+            if r.kv16 {
+                self.small(&kvw16, "kv_write", li, &[&b.qkv, &b.kc, &b.vc], [c, layer_off, 0, 0, 0, 0, 0, 0], [(nu * c / 2).div_ceil(256), 1, 1]);
+            }
+            let att_bufs = [&b.qkv, &b.kc, &b.vc, &b.att, &b.scores];
+            if let Some((split, merge)) = &fd {
+                let p = [c, h, layer_off, fd_chunks, 0, 0, 0, 0];
+                self.small(split, "attn", li, &att_bufs, p, [fd_chunks, h, 1]);
+                self.small(merge, "attn_merge", li, &att_bufs, p, [1, h, 1]);
+            } else {
+                self.small(&attn, "attn", li, &att_bufs, [c, h, layer_off, self.max_seq as u32, 0, 0, 0, 0], attn_dims);
+            }
             if fused {
                 self.mat("attn_proj", li, 0, &lw.proj, &b.att, &b.x, Some(&lw.proj_b), 2, c, 0, false);
             } else {
                 self.mat("attn_proj", li, 0, &lw.proj, &b.att, &b.proj, Some(&lw.proj_b), 0, c, 0, false);
                 self.small(&add, "residual", li, &[&b.x, &b.proj], p1(c), elem(c));
             }
-            self.small(&ln, "ln_2", li, &[&b.x, &lw.ln_2_w, &lw.ln_2_b, &b.xn], p1(c), ln_dims);
-            if fused {
+            if fold_dec {
+                self.mat_ln("fc", li, 0, &lw.fc, &b.x, &b.fc, Some(&lw.fc_b), 1, 4 * c, 0, false, true);
+                self.mat("fc_proj", li, 0, &lw.fc_proj, &b.fc, &b.x, Some(&lw.fc_proj_b), 2, c, 0, false);
+            } else if fused {
+                self.small(&ln, "ln_2", li, &[&b.x, &lw.ln_2_w, &lw.ln_2_b, &b.xn], p1(c), ln_dims);
                 self.mat("fc", li, 0, &lw.fc, &b.xn, &b.fc, Some(&lw.fc_b), 1, 4 * c, 0, false);
                 self.mat("fc_proj", li, 0, &lw.fc_proj, &b.fc, &b.x, Some(&lw.fc_proj_b), 2, c, 0, false);
             } else {
+                self.small(&ln, "ln_2", li, &[&b.x, &lw.ln_2_w, &lw.ln_2_b, &b.xn], p1(c), ln_dims);
                 self.mat("fc", li, 0, &lw.fc, &b.xn, &b.fc, Some(&lw.fc_b), 0, 4 * c, 0, false);
                 self.small(&gelu, "gelu", li, &[&b.fc], p1(4 * c), elem(4 * c));
                 self.mat("fc_proj", li, 0, &lw.fc_proj, &b.fc, &b.proj, Some(&lw.fc_proj_b), 0, c, 0, false);
@@ -375,8 +437,15 @@ impl Session {
         let max_seq = if max_seq == 0 { cfg.n_ctx } else { max_seq.min(cfg.n_ctx) };
         let (c, rows, v) = (cfg.n_embd as u64, max_seq as u64, cfg.n_vocab as u64);
         let g = &e.gpu;
-        let kv = (cfg.n_layer as u64) * rows * c * F;
-        let scores = if e.recipe.par { 16 } else { rows * cfg.n_head as u64 * rows * F };
+        let kv = (cfg.n_layer as u64) * rows * c * if e.recipe.kv16 { 2 } else { F };
+        let scores = if e.recipe.flashdec {
+            // (o[64], m, s) per (head, chunk), padded to 17 vec4s
+            cfg.n_head as u64 * (max_seq.div_ceil(FD_CHUNK) as u64) * 17 * 16
+        } else if e.recipe.par {
+            16
+        } else {
+            rows * cfg.n_head as u64 * rows * F
+        };
         let steps = g.uniform("steps", STEP_STRIDE * MAX_STEPS as u64);
         let step_bg = g.step_bind(&steps);
         let ts = g.has(wgpu::Features::TIMESTAMP_QUERY).then(|| {

@@ -118,3 +118,38 @@ fn every_webgpu_stage_matches_hf() {
         }
     }
 }
+
+/// Decode attention variants at a context of 300 (5 flash-decoding chunks):
+/// webgpu-attn4 and webgpu-flashdec share weights and differ only in how
+/// attention is reduced, so their decode logits must agree closely;
+/// webgpu-kv16 also rounds the cache to f16 (small KL, same top-1).
+#[test]
+fn decode_attention_variants_agree_at_long_context() {
+    let Some(model) = model() else { return };
+    let gpu = Rc::new(block_on(Gpu::new()).unwrap());
+    let now = now();
+    let mut seq = vec![];
+    while seq.len() < 300 {
+        seq.extend(ids(&reference()["prompts"][3]["ids"]));
+    }
+    seq.truncate(300);
+    let run = |stage: WgpuStage| {
+        let engine = Rc::new(Engine::new(gpu.clone(), model, stage));
+        let mut s = engine.session(320);
+        block_on(s.step(&seq[..250], &now)).unwrap();
+        let mut last = vec![];
+        for t in &seq[250..] {
+            last = block_on(s.step(std::slice::from_ref(t), &now)).unwrap();
+        }
+        last
+    };
+    let a = run(WgpuStage::Attn4);
+    for (stage, tol) in [(WgpuStage::FlashDec, 1e-2), (WgpuStage::Kv16, 0.5)] {
+        let b = run(stage);
+        let d = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).fold(0.0, f32::max);
+        let k = kl(&a, &b);
+        println!("attn4 vs {stage} at context 300: max |diff| {d:.2e}, KL {k:.2e}");
+        assert!(d < tol && k < 1e-3, "{stage}: max |diff| {d}, KL {k}");
+        assert_eq!(nanoinfer_core::sampler::argmax(&a), nanoinfer_core::sampler::argmax(&b), "{stage}");
+    }
+}

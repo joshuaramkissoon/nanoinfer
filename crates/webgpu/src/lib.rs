@@ -94,6 +94,15 @@ pub struct Recipe {
     pub ln64: bool,
     /// Bias + GELU, residual adds and KV writes fused into the matmul epilogues.
     pub fused: bool,
+    /// ln_1 / ln_2 folded into the qkv / fc weights; decode skips those
+    /// LayerNorm kernels (the matvec computes the row's mean and variance).
+    pub ln_fold: bool,
+    /// Attention with vec4 loads (q in registers, 4 dims per thread in P·V).
+    pub attn4: bool,
+    /// Decode attention split over chunks of 64 keys + a merge (flash-decoding).
+    pub flashdec: bool,
+    /// K/V cache stored as f16 (packed in u32); needs `attn4`.
+    pub kv16: bool,
     /// Argmax on the GPU, written straight into the next forward's input slot.
     pub gpu_argmax: bool,
     /// Greedy decode encodes many forwards into one submit and reads the
@@ -117,6 +126,10 @@ pub enum WgpuStage {
     Tiled,
     Ln64,
     Q8Head,
+    LnFold,
+    Attn4,
+    FlashDec,
+    Kv16,
 }
 
 impl WgpuStage {
@@ -134,6 +147,10 @@ impl WgpuStage {
         WgpuStage::Tiled,
         WgpuStage::Ln64,
         WgpuStage::Q8Head,
+        WgpuStage::LnFold,
+        WgpuStage::Attn4,
+        WgpuStage::FlashDec,
+        WgpuStage::Kv16,
     ];
 
     pub fn name(self) -> &'static str {
@@ -151,6 +168,10 @@ impl WgpuStage {
             WgpuStage::Tiled => "webgpu-tiled",
             WgpuStage::Ln64 => "webgpu-ln64",
             WgpuStage::Q8Head => "webgpu-q8head",
+            WgpuStage::LnFold => "webgpu-lnfold",
+            WgpuStage::Attn4 => "webgpu-attn4",
+            WgpuStage::FlashDec => "webgpu-flashdec",
+            WgpuStage::Kv16 => "webgpu-kv16",
         }
     }
 
@@ -170,6 +191,10 @@ impl WgpuStage {
             WgpuStage::Tiled => "64x64 tiled prefill matmul",
             WgpuStage::Ln64 => "LayerNorm on 64 threads, row in registers (12 barriers, not 16)",
             WgpuStage::Q8Head => "Q8_0 LM head too (half the head's bytes; costs quality)",
+            WgpuStage::LnFold => "LayerNorm gains folded into qkv/fc weights; decode matvec computes mean/var (no LN kernels)",
+            WgpuStage::Attn4 => "attention with vec4 loads: q in registers, 4 dims x 1/16 of the keys per thread in P.V",
+            WgpuStage::FlashDec => "decode attention split over 64-key chunks + merge (flash-decoding)",
+            WgpuStage::Kv16 => "f16 KV cache (half the attention bytes; K/V packed by a kv_write kernel)",
         }
     }
 
@@ -183,6 +208,10 @@ impl WgpuStage {
             par: false,
             ln64: false,
             fused: false,
+            ln_fold: false,
+            attn4: false,
+            flashdec: false,
+            kv16: false,
             gpu_argmax: false,
             resident: false,
         };
@@ -208,6 +237,10 @@ impl WgpuStage {
             WgpuStage::Tiled => Recipe { matmul: Matmul::Tiled, ..resident },
             WgpuStage::Ln64 => Recipe { matmul: Matmul::Tiled, ln64: true, ..resident },
             WgpuStage::Q8Head => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ..resident },
+            WgpuStage::LnFold => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, ..resident },
+            WgpuStage::Attn4 => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, attn4: true, ..resident },
+            WgpuStage::Kv16 => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, attn4: true, kv16: true, ..resident },
+            WgpuStage::FlashDec => Recipe { matmul: Matmul::Tiled, ln64: true, head_dtype: DType::Q8_0, ln_fold: true, attn4: true, flashdec: true, ..resident },
         }
     }
 

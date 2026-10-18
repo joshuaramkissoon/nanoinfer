@@ -27,7 +27,7 @@ struct Slot {
 
 thread_local! {
     static GPU: RefCell<Option<Rc<Gpu>>> = const { RefCell::new(None) };
-    static WEIGHTS: RefCell<HashMap<(DType, DType), Rc<Weights>>> = RefCell::new(HashMap::new());
+    static WEIGHTS: RefCell<HashMap<(DType, DType, bool), Rc<Weights>>> = RefCell::new(HashMap::new());
     static ENGINES: RefCell<HashMap<WgpuStage, Rc<GpuEngine>>> = RefCell::new(HashMap::new());
     static SLOTS: RefCell<HashMap<u32, Slot>> = RefCell::new(HashMap::new());
     static NEXT: Cell<u32> = const { Cell::new(1) };
@@ -107,11 +107,11 @@ fn engine_for(engine: &Engine, stage: WgpuStage) -> Result<Rc<GpuEngine>, JsErro
         return Err(err(format!("{stage} needs a WebGPU feature this browser doesn't expose")));
     }
     let r = stage.recipe();
-    let key = (r.dtype, r.head_dtype);
+    let key = (r.dtype, r.head_dtype, r.ln_fold);
     let w = match WEIGHTS.with(|m| m.borrow().get(&key).cloned()) {
         Some(w) => w,
         None => {
-            let w = Rc::new(Weights::upload(&g, &engine.model, r.dtype, r.head_dtype));
+            let w = Rc::new(Weights::upload(&g, &engine.model, r.dtype, r.head_dtype, r.ln_fold));
             WEIGHTS.with(|m| m.borrow_mut().insert(key, w.clone()));
             w
         }
