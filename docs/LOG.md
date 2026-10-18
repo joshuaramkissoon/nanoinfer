@@ -1291,6 +1291,34 @@ first, non-resident step.
 Re-run (`bench/specdec.json`, gpt2-medium pair, load 3): best 394–397 tok/s
 (list, license, k=7: 2.93–2.94× over 132–135 tok/s).
 
+### Single-stream Metal: what's left (analysis, one dead end)
+
+Profile of metal-lanes (Q4 blocks, Q8 head, f16 KV), one decode step at
+context 65, quiet machine (1.22 ms): lm_head 387 µs (32%, **106 GB/s**:
+at the bandwidth roof), fc 214 µs (74 GB/s), fc_proj 186 µs (86 GB/s), qkv
+182 µs (66 GB/s), attention 150 µs (12%, 24 dispatches: split + merge),
+attn_proj 51 µs, ln_1 + ln_2 51 µs.
+
+- **A cheaper head with exact rescoring (dead end).** The CPU's stage 12
+  rescored a Q8 approximate head against f16. On the GPU the head is already
+  Q8, so the next step down is Q4 + rescore with Q8 (`examples/head_err.rs`,
+  same body, only the head differs, 1024 WikiText positions): Q4 vs Q8 head
+  logit error **p50 10.6, p99 22.6** (max over the vocabulary per position),
+  argmax agreement **26%**. A margin that guarantees the Q8 argmax is a
+  candidate would have to be ~45 logits: thousands of candidates. The
+  ln_f-gain outlier channels make 4-bit head weights unusable, as round 1
+  found for plain Q4.
+- **Fused ln_f + LM head + argmax (not done).** The head runs at 106 GB/s,
+  so fusion can only save the 200 KB logits write, the argmax_partial pass
+  and two dispatches: ~5–10 µs of 1,220 (<1%).
+- **Q4 multi-row**: tried in stage 8a (R = 2 rows per lane): no better than
+  R = 1.
+- Left on the table: the narrow matvecs (qkv at 66 GB/s), short-context
+  attention (12.5 µs per layer for 65 positions: two dependent dispatches),
+  and the LayerNorms (4%). The WebGPU fold (`webgpu-lnfold`) would remove
+  the last one here too, but the lanes kernel has no spare issue slots for
+  the extra sums; not tried.
+
 ### Failures and dead ends (round 2)
 
 - None of the salvaged code had to be fixed; the crash left it building.
