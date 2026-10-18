@@ -175,6 +175,29 @@ chart in this post is the real engine, running in your browser.
   then the attention/layernorm block vanishes.
 - **Line:** "The GPU got 13% faster when I fixed the obvious bottleneck, and 3× faster when
   I fixed the one I hadn't measured."
+
+### GPU stage 4: prefill matmuls (tiled, then simdgroup_matrix)
+
+- **Hypothesis:** prefill reuses each weight n times, so it should be compute-bound, but
+  only if the kernel *actually* reuses it. The naive kernel re-reads every weight for
+  every token.
+- **Change:** (a) classic shared-memory tiling, 32 tokens × 32 outputs per threadgroup;
+  (b) Apple's 8×8 hardware matrix multiply (`simdgroup_float8x8`), 32 × 64 tiles.
+- **Result (512-token prompt):** naive 456 → tiled **2,188** → MMA **5,947 tok/s**, 13× in
+  two steps and ~32× the best single CPU core. The GEMMs hit ~2 TFLOP/s, 45% of the
+  GPU's f32 peak. Decode untouched (126 tok/s).
+- **Aha 1:** prefill and decode want *different kernels*. The same weights, the same maths,
+  but decode wants 32 lanes streaming one row; prefill wants an 8×8 tile held in
+  registers and reused across tokens.
+- **Aha 2:** with fast GEMMs, attention became 28% of prefill. It's O(n²) and our kernel
+  re-reads every key for every query. Next bottleneck, already visible.
+- **Aha 3 (unified memory cuts both ways):** a CPU benchmark running at the same time cut
+  GPU decode from 140 to ~100 tok/s. CPU and GPU share one memory bus; the CPU's 55 GB/s
+  came straight out of the GPU's budget.
+- **Viz:** prefill tok/s vs prompt length for naive / tiled / MMA; a "memory-bound vs
+  compute-bound" dial that swings as the prompt grows.
+- **Line:** "The GPU has a matrix-multiply instruction. Using it made prefill 2.7× faster
+  than my best hand-written tiling."
 ### Stage 3: neon (hand-written SIMD), a null result
 
 - **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per

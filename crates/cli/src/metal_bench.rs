@@ -173,41 +173,15 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     if a.profile {
+        let bpw = a.stage.recipe().dtype.bytes_per_weight();
         let mut s = engine.session();
-        s.step(&prompt)?;
         s.profile = Some(Vec::new());
+        s.step(&prompt)?;
+        let prefill_prof = s.profile.replace(Vec::new()).unwrap_or_default();
         s.step(&[prompt[0]])?;
-        let prof = s.profile.take().unwrap_or_default();
-        {
-            let mut by: Vec<(&str, f64, usize)> = Vec::new();
-            for (name, t) in &prof {
-                match by.iter_mut().find(|e| e.0 == *name) {
-                    Some(e) => {
-                        e.1 += t;
-                        e.2 += 1;
-                    }
-                    None => by.push((name, *t, 1)),
-                }
-            }
-            by.sort_by(|x, y| y.1.total_cmp(&x.1));
-            let total: f64 = by.iter().map(|e| e.1).sum();
-            println!("  GPU time per op (one decode step, context {}; sum {:.3} ms):", prompt.len() + 1, total * 1e3);
-            let bpw = a.stage.recipe().dtype.bytes_per_weight();
-            let weights = |name: &str| -> Option<f64> {
-                let per = match name {
-                    "qkv" => 3 * c * c,
-                    "attn_proj" => c * c,
-                    "fc" | "fc_proj" => 4 * c * c,
-                    "lm_head" => return Some((cfg.n_vocab * c) as f64 * bpw),
-                    _ => return None,
-                };
-                Some((cfg.n_layer * per) as f64 * bpw)
-            };
-            for (name, t, n) in by {
-                let gbs = weights(name).map(|b| format!("{:>6.1} GB/s", b / t / 1e9)).unwrap_or_default();
-                println!("    {name:<11} {:>8.1} us  {:>5.1}%  ({n:>2} dispatches)  {gbs}", t * 1e6, 100.0 * t / total);
-            }
-        }
+        let decode_prof = s.profile.take().unwrap_or_default();
+        print_profile(&format!("one prefill of {} tokens", prompt.len()), &prefill_prof, &cfg, bpw, prompt.len());
+        print_profile(&format!("one decode step, context {}", prompt.len() + 1), &decode_prof, &cfg, bpw, 1);
     }
 
     if !a.no_record {
@@ -250,4 +224,42 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("appended to {}", a.out.display());
     }
     Ok(())
+}
+
+/// Aggregate per-op GPU times by label and print them, with GB/s of weights
+/// for the matrix ops and GFLOP/s when `n` tokens went through them.
+fn print_profile(title: &str, prof: &[(&'static str, f64)], cfg: &nanoinfer_core::Config, bpw: f64, n: usize) {
+    let c = cfg.n_embd;
+    let mut by: Vec<(&str, f64, usize)> = Vec::new();
+    for (name, t) in prof {
+        match by.iter_mut().find(|e| e.0 == *name) {
+            Some(e) => {
+                e.1 += t;
+                e.2 += 1;
+            }
+            None => by.push((name, *t, 1)),
+        }
+    }
+    by.sort_by(|x, y| y.1.total_cmp(&x.1));
+    let total: f64 = by.iter().map(|e| e.1).sum();
+    println!("  GPU time per op ({title}; sum {:.3} ms):", total * 1e3);
+    // Weights per op (all layers), and how many token rows went through it.
+    let weights = |name: &str| -> Option<(f64, usize)> {
+        let per = match name {
+            "qkv" => 3 * c * c,
+            "attn_proj" => c * c,
+            "fc" | "fc_proj" => 4 * c * c,
+            "lm_head" => return Some(((cfg.n_vocab * c) as f64, 1)),
+            _ => return None,
+        };
+        Some(((cfg.n_layer * per) as f64, n))
+    };
+    for (name, t, k) in by {
+        let rate = weights(name)
+            .map(|(params, rows)| {
+                format!("{:>6.1} GB/s {:>7.1} GFLOP/s", params * bpw / t / 1e9, 2.0 * params * rows as f64 / t / 1e9)
+            })
+            .unwrap_or_default();
+        println!("    {name:<11} {:>9.1} us  {:>5.1}%  ({k:>2} dispatches)  {rate}", t * 1e6, 100.0 * t / total);
+    }
 }

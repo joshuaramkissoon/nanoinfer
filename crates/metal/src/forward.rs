@@ -166,7 +166,6 @@ impl<'e> MetalSession<'e> {
         let (d_in, d_out) = (w.cols as u32, w.rows as u32);
         let has_bias = bias.is_some() as u32;
         let bias = bias.unwrap_or(&self.x); // any buffer; unused when has_bias == 0
-        let kernel = if n == 1 { rec.matvec } else { matvec_for(rec.matmul) };
         let args = [
             Arg::Buf(out),
             Arg::BufAt(x, x_off),
@@ -177,20 +176,35 @@ impl<'e> MetalSession<'e> {
             Arg::U32(d_out),
             Arg::U32(has_bias),
         ];
-        match (kernel, rec.dtype) {
-            (Matvec::Naive, DType::F32) => r.dispatch(label, "matmul_naive", &args, n * w.rows, 256),
-            (Matvec::Simd, DType::F32) => {
-                let rows_per_tg = MV_ROWS * MV_SIMDGROUPS;
-                r.dispatch_tg(
-                    label,
-                    MV_KERNEL,
-                    &args,
-                    (w.rows.div_ceil(rows_per_tg), n, 1),
-                    (32 * MV_SIMDGROUPS, 1, 1),
-                    0,
-                )
+        let rows = w.rows;
+        // Decode (and prefill stages without a real matmul) use the matvec.
+        let matmul = if n == 1 { None } else { Some(rec.matmul) };
+        let mv = match matmul {
+            None => Some(rec.matvec),
+            Some(Matmul::Naive) => Some(Matvec::Naive),
+            Some(Matmul::Matvec) => Some(Matvec::Simd),
+            Some(_) => None,
+        };
+        if let Some(mv) = mv {
+            match (mv, rec.dtype) {
+                (Matvec::Naive, DType::F32) => r.dispatch(label, "matmul_naive", &args, n * rows, 256),
+                (Matvec::Simd, dtype) => {
+                    let (kernel, rows_per_sg, nsg) = matvec_kernel(dtype);
+                    let groups = (rows.div_ceil(rows_per_sg * nsg), n, 1);
+                    r.dispatch_tg(label, kernel, &args, groups, (32 * nsg, 1, 1), 0)
+                }
+                other => unimplemented!("matvec {other:?}"),
             }
-            other => unimplemented!("linear {other:?}"),
+            return;
+        }
+        match (rec.matmul, rec.dtype) {
+            (Matmul::Tiled, DType::F32) => {
+                r.dispatch_tg(label, "matmul_tiled", &args, (rows.div_ceil(32), n.div_ceil(32), 1), (256, 1, 1), 0)
+            }
+            (Matmul::SimdMatrix, DType::F32) => {
+                r.dispatch_tg(label, "matmul_mma", &args, (rows.div_ceil(64), n.div_ceil(32), 1), (128, 1, 1), 0)
+            }
+            other => unimplemented!("matmul {other:?}"),
         }
     }
 
@@ -327,11 +341,11 @@ impl<'e> MetalSession<'e> {
     }
 }
 
-/// Which matvec-family kernel a prefill matmul choice runs on (until real
-/// matmul kernels exist, prefill reuses the decode kernel per row).
-fn matvec_for(m: Matmul) -> Matvec {
-    match m {
-        Matmul::Naive => Matvec::Naive,
-        Matmul::Matvec | Matmul::Tiled | Matmul::SimdMatrix => Matvec::Simd,
+/// The SIMD-group matvec kernel for a weight dtype: (name, rows per
+/// SIMD-group, SIMD-groups per threadgroup).
+fn matvec_kernel(dtype: DType) -> (&'static str, usize, usize) {
+    match dtype {
+        DType::F32 => (MV_KERNEL, MV_ROWS, MV_SIMDGROUPS),
+        other => unimplemented!("matvec for {other:?}"),
     }
 }

@@ -117,10 +117,15 @@ pub enum MetalStage {
     Simd,
     /// + threadgroup-parallel layernorm and attention.
     Par,
+    /// + shared-memory tiled matmul for prefill.
+    Tiled,
+    /// + simdgroup_matrix (8x8 hardware MMA) matmul for prefill.
+    Mma,
 }
 
 impl MetalStage {
-    pub const ALL: &'static [MetalStage] = &[MetalStage::Naive, MetalStage::OneCb, MetalStage::Simd, MetalStage::Par];
+    pub const ALL: &'static [MetalStage] =
+        &[MetalStage::Naive, MetalStage::OneCb, MetalStage::Simd, MetalStage::Par, MetalStage::Tiled, MetalStage::Mma];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -128,6 +133,8 @@ impl MetalStage {
             MetalStage::OneCb => "metal-onecb",
             MetalStage::Simd => "metal-simd",
             MetalStage::Par => "metal-par",
+            MetalStage::Tiled => "metal-tiled",
+            MetalStage::Mma => "metal-mma",
         }
     }
 
@@ -142,13 +149,14 @@ impl MetalStage {
             fused: false,
             gpu_argmax: false,
         };
+        let par = Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, norm: Par::Simd, attn: Par::Simd, ..naive };
         match self {
             MetalStage::Naive => naive,
             MetalStage::OneCb => Recipe { sync: Sync::PerForward, ..naive },
             MetalStage::Simd => Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, ..naive },
-            MetalStage::Par => {
-                Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, norm: Par::Simd, attn: Par::Simd, ..naive }
-            }
+            MetalStage::Par => par,
+            MetalStage::Tiled => Recipe { matmul: Matmul::Tiled, ..par },
+            MetalStage::Mma => Recipe { matmul: Matmul::SimdMatrix, ..par },
         }
     }
 

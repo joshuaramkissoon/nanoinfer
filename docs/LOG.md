@@ -487,6 +487,74 @@ of 1. Decode is now ~97% weight streaming.
 Next for decode: fewer bytes (f16 halves them), and cut the per-token fixed
 costs (fusion, GPU argmax). For prefill: real matmuls (stage 4).
 
+**Contention surprise (unified memory cuts both ways).** While the CPU agent
+ran a 1-thread decode bench, metal-par decode measured **96–102 tok/s**;
+uncontended, **140**. One CPU core streaming weights at ~55 GB/s takes that
+bandwidth out of the same DRAM the GPU reads. From here on, Metal benches are
+recorded through a wrapper that waits until no other `nanoinfer` process is
+running and flags runs where one started mid-bench. Even uncontended, decode
+drifted 118–140 tok/s across the session for unchanged kernels (the desktop
+wallpaper app); compare stages measured back to back, not across hours.
+
+### Metal stage 4: prefill matmuls (metal-tiled, metal-mma)
+
+Up to now prefill used `matmul_naive`: one thread per output, re-reading
+weights from DRAM/L2 for every token. Prefill is compute-bound in principle
+(each weight is reused n times) but only if the kernel actually reuses it.
+Decode is unchanged in both stages (n = 1 still takes the SIMD matvec).
+
+**4a, metal-tiled.** Textbook shared-memory tiling: a 256-thread threadgroup
+computes a 32 × 32 output tile (32 tokens × 32 outputs), each thread a 1 × 4
+strip; K is walked in steps of 32 with X[32×32] and W[32×32] staged in
+threadgroup memory (padded +1 column against bank conflicts). Each weight is
+fetched from memory once per 32 tokens instead of once per token.
+
+**4b, metal-mma.** `simdgroup_float8x8` hardware matrix multiply-accumulate. A
+128-thread threadgroup (4 SIMD-groups) computes 32 tokens × 64 outputs; each
+SIMD-group owns a 32 × 16 slab = 4 × 2 accumulator matrices. X[32×32] and
+W[64×32] tiles are staged with float4 loads; W is read with
+`simdgroup_load(..., transpose = true)` so the MMA sees X · Wᵀ directly. The
+result goes through threadgroup memory so ragged edges (n not a multiple of
+32: fixture prompts are 5–27 tokens) are handled by a bounds-checked copy.
+
+**Correctness.** Both match HF to ≤ 5.0e-4 (f32 accumulate in a different
+order), same top-1, greedy equal.
+
+**Numbers** (5 runs each, uncontended):
+
+| stage | prefill P=64 | prefill P=512 | GFLOP/s (P=512) | decode (P=64, 64 steps) |
+|---|---|---|---|---|
+| metal-par (naive matmul) | 436 | 456 | 78 | 140 / 126 (drift) |
+| **metal-tiled** | 1964 ± 51 | 2188 ± 14 | 372 | 122 |
+| **metal-mma** | 3292 ± 296 | **5947 ± 133** | **1011** | 126 |
+
+(CPU best at this point: ~185 tok/s prefill on one core.)
+
+Prefill profile at P = 512 (`--profile`, each op timed alone):
+
+| op | metal-tiled | metal-mma |
+|---|---|---|
+| qkv | 49.9 ms, 436 GFLOP/s | 11.1 ms, **1961 GFLOP/s** |
+| fc | 66.3 ms, 437 | 14.8 ms, 1958 |
+| fc_proj | 65.8 ms, 441 | 20.5 ms, 1413 |
+| attn_proj | 16.7 ms, 435 | 4.0 ms, 1825 |
+| attention (`attention_simd`) | 21.5 ms | 21.7 ms (**28%**) |
+| sum of ops | 225 ms | 76.8 ms |
+
+**What surprised me.**
+- **Hardware MMA is 4.5× the hand-tiled kernel** on the same tile sizes, and
+  reaches ~2 TFLOP/s, 45% of the ~4.3 TFLOPS f32 peak, with no tuning
+  (no double buffering, no register-resident X fragments across K steps).
+- fc_proj (K = 3072, only 768 outputs) is the slowest GEMM per FLOP: 12 × 16 =
+  192 threadgroups for 10 cores is too few to hide the K loop's latency. A
+  split-K or smaller-N tile would fix it.
+- **Attention is now 28% of prefill**: `attention_simd` is a decode kernel (one
+  threadgroup per (query, head), re-reading all previous keys for every
+  query: O(n²) memory traffic, no reuse). Flash-attention-style tiling is the
+  next prefill lever.
+- P = 64 prefill is much worse than P = 512 per token (3.3k vs 5.9k): 64
+  tokens = 2 row tiles, so most GEMMs launch only 2 × 36 threadgroups.
+
 ---
 
 ## Stage 3: neon (explicit SIMD), a null result
