@@ -62,6 +62,9 @@ pub struct MetalSession<'e> {
     att_part: Buf,
     k_cache: Buf,
     v_cache: Buf,
+    /// Q8 KV cache scales, f32 [n_layer][n_ctx][n_head] (16 bytes unless `kv_q8`).
+    k_scale: Buf,
+    v_scale: Buf,
     /// Counters for the most recent `step`.
     pub last: RunStats,
     /// Set to `Some(vec![])` to collect per-op GPU times (PerOp sync only).
@@ -89,7 +92,8 @@ impl<'e> MetalSession<'e> {
         let cfg = e.config;
         let (c, rows, v) = (cfg.n_embd, cfg.n_ctx, cfg.n_vocab);
         let g = &e.gpu;
-        let kv = cfg.n_layer * cfg.n_ctx * c * if e.recipe.kv_f16 { 2 } else { F };
+        let kv = cfg.n_layer * cfg.n_ctx * c * if e.recipe.kv_q8 { 1 } else if e.recipe.kv_f16 { 2 } else { F };
+        let kv_scales = if e.recipe.kv_q8 { cfg.n_layer * cfg.n_ctx * cfg.n_head * F } else { 16 };
         let scores = if e.recipe.attn == Attn::Naive { rows * cfg.n_head * cfg.n_ctx * F } else { 16 };
         MetalSession {
             e,
@@ -111,6 +115,8 @@ impl<'e> MetalSession<'e> {
             att_part: g.buffer(cfg.n_head * cfg.n_ctx.div_ceil(ATT_CHUNK) * (cfg.head_dim() + 2) * F),
             k_cache: g.buffer(kv),
             v_cache: g.buffer(kv),
+            k_scale: g.buffer(kv_scales),
+            v_scale: g.buffer(kv_scales),
             last: RunStats::default(),
             profile: None,
         }
@@ -354,6 +360,8 @@ impl<'e> MetalSession<'e> {
                     Arg::U32(n as u32),
                     Arg::U32(self.pos as u32),
                     Arg::U32(cfg.n_head as u32),
+                    Arg::BufAt(&self.k_scale, self.kv_scale_off(l)),
+                    Arg::BufAt(&self.v_scale, self.kv_scale_off(l)),
                 ],
                 (n.div_ceil(32), cfg.n_head, 1),
                 (128, 1, 1),
@@ -381,11 +389,45 @@ impl<'e> MetalSession<'e> {
     /// Byte offset of layer `l` in the K/V cache buffers.
     fn kv_layer_off(&self, l: usize) -> usize {
         let cfg = &self.e.config;
-        l * cfg.n_ctx * cfg.n_embd * if self.e.recipe.kv_f16 { 2 } else { F }
+        l * cfg.n_ctx * cfg.n_embd * if self.e.recipe.kv_q8 { 1 } else if self.e.recipe.kv_f16 { 2 } else { F }
     }
 
     /// The f16-KV variant of a kernel that reads or writes the cache.
+    /// Byte offset of layer `l` in the Q8 scale buffers.
+    fn kv_scale_off(&self, l: usize) -> usize {
+        let cfg = &self.e.config;
+        l * cfg.n_ctx * cfg.n_head * F
+    }
+
+    /// Q8 KV: quantise the K/V rows of `qkv` (n tokens from pos0) into the cache.
+    fn kv_quant8(&self, r: &mut Runner, l: usize, pos0: usize, n: usize) {
+        let cfg = &self.e.config;
+        r.dispatch_tg(
+            "kv_write",
+            "kv_quant8",
+            &[
+                Arg::BufAt(&self.k_cache, self.kv_layer_off(l)),
+                Arg::BufAt(&self.v_cache, self.kv_layer_off(l)),
+                Arg::BufAt(&self.k_scale, self.kv_scale_off(l)),
+                Arg::BufAt(&self.v_scale, self.kv_scale_off(l)),
+                Arg::Buf(&self.qkv),
+                Arg::U32(pos0 as u32),
+                Arg::U32(cfg.n_head as u32),
+            ],
+            (n * cfg.n_head, 2, 1),
+            (64, 1, 1),
+            4 * F,
+        );
+    }
+
     fn kv_kernel(&self, name: &'static str) -> &'static str {
+        if self.e.recipe.kv_q8 {
+            return match name {
+                "attn_prefill_flash" => "attn_prefill_flash_q8",
+                "attn_decode_split" => "attn_decode_split_q8",
+                other => unimplemented!("{other} has no Q8-KV variant"),
+            };
+        }
         if !self.e.recipe.kv_f16 {
             return name;
         }
@@ -415,6 +457,8 @@ impl<'e> MetalSession<'e> {
                 Arg::U32(n_kv as u32),
                 Arg::U32(cfg.n_head as u32),
                 Arg::U32(max_chunks),
+                Arg::BufAt(&self.k_scale, self.kv_scale_off(l)),
+                Arg::BufAt(&self.v_scale, self.kv_scale_off(l)),
             ],
             (cfg.n_head, chunks, 1),
             (256, 1, 1),
@@ -616,6 +660,16 @@ impl<'e> MetalSession<'e> {
             let layer_off = self.kv_layer_off(l);
             let kv = Some((Arg::BufAt(&self.k_cache, layer_off), Arg::BufAt(&self.v_cache, layer_off)));
             self.layernorm(r, "ln_1", 0, &lw.ln1_w, &lw.ln1_b, 1);
+            if self.e.recipe.kv_q8 {
+                self.epi(r, "qkv", "mve", &self.qkv, &self.xn, &lw.attn_w, Some(&lw.attn_b), None);
+                self.kv_quant8(r, l, self.pos, 1);
+                self.attention(r, l, 1);
+                self.epi(r, "attn_proj", "mve_resid", &self.x, &self.att, &lw.proj_w, Some(&lw.proj_b), None);
+                self.layernorm(r, "ln_2", 0, &lw.ln2_w, &lw.ln2_b, 1);
+                self.epi(r, "fc", "mve_gelu", &self.fc, &self.xn, &lw.fc_w, Some(&lw.fc_b), None);
+                self.epi(r, "fc_proj", "mve_resid", &self.x, &self.fc, &lw.fcp_w, Some(&lw.fcp_b), None);
+                continue;
+            }
             self.epi(
                 r,
                 "qkv",
@@ -709,20 +763,24 @@ impl<'e> MetalSession<'e> {
             let layer_off = self.kv_layer_off(l);
             self.layernorm(r, "ln_1", 0, &lw.ln1_w, &lw.ln1_b, n);
             self.linear(r, "qkv", &self.qkv, &self.xn, 0, &lw.attn_w, Some(&lw.attn_b), n);
-            r.dispatch(
-                "kv_write",
-                self.kv_kernel("kv_write"),
-                &[
-                    Arg::BufAt(&self.k_cache, layer_off),
-                    Arg::BufAt(&self.v_cache, layer_off),
-                    Arg::Buf(&self.qkv),
-                    Arg::U32(pos),
-                    Arg::U32(cu),
-                    Arg::U32(nu),
-                ],
-                n * c,
-                256,
-            );
+            if self.e.recipe.kv_q8 {
+                self.kv_quant8(r, l, self.pos, n);
+            } else {
+                r.dispatch(
+                    "kv_write",
+                    self.kv_kernel("kv_write"),
+                    &[
+                        Arg::BufAt(&self.k_cache, layer_off),
+                        Arg::BufAt(&self.v_cache, layer_off),
+                        Arg::Buf(&self.qkv),
+                        Arg::U32(pos),
+                        Arg::U32(cu),
+                        Arg::U32(nu),
+                    ],
+                    n * c,
+                    256,
+                );
+            }
             self.attention(r, l, n);
             self.linear(r, "attn_proj", &self.proj, &self.att, 0, &lw.proj_w, Some(&lw.proj_b), n);
             self.residual(r, "residual_1", n * c);

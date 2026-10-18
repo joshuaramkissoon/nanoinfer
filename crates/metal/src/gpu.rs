@@ -36,6 +36,7 @@ pub const SHADER_SOURCE: &str = concat!(
     include_str!("shaders/lanes.metal"),
     include_str!("shaders/attn.metal"),
     include_str!("shaders/batch.metal"),
+    include_str!("shaders/kv8.metal"),
     include_str!("shaders/probe.metal"),
 );
 

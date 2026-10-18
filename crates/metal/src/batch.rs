@@ -37,6 +37,8 @@ const ATT_CHUNK: usize = 64;
 const F: usize = 4;
 /// SIMD-groups per threadgroup in the batched matvec (4 rows each).
 const MVB_NSG: usize = 4;
+/// Rows from which `gemm` uses the 64 x 64-tile `matmul_mma2` kernels.
+pub const GEMM2_MIN_ROWS: usize = 128;
 
 /// Sizes and policies of a [`Batch`].
 #[derive(Debug, Clone, Copy)]
@@ -544,13 +546,20 @@ impl<'e> Batch<'e> {
             Arg::U32(w.rows as u32),
             Arg::U32(has_bias),
         ];
-        let kernel = match w.dtype {
-            DType::F32 => "matmul_mma",
-            DType::F16 => "matmul_mma_f16",
-            DType::Q8_0 => "matmul_mma_q8_0",
-            DType::Q4_0 => "matmul_mma_q4_0",
+        // From 128 rows the 64 x 64-tile GEMM with a half weight tile is 5-15%
+        // faster (examples/gemm_sweep.rs); below it, half its tile is padding.
+        let big = n >= GEMM2_MIN_ROWS && w.dtype != DType::F32;
+        let kernel = match (w.dtype, big) {
+            (DType::F32, _) => "matmul_mma",
+            (DType::F16, false) => "matmul_mma_f16",
+            (DType::Q8_0, false) => "matmul_mma_q8_0",
+            (DType::Q4_0, false) => "matmul_mma_q4_0",
+            (DType::F16, true) => "matmul_mma2_f16",
+            (DType::Q8_0, true) => "matmul_mma2_q8_0",
+            (DType::Q4_0, true) => "matmul_mma2_q4_0",
         };
-        r.dispatch_tg(label, kernel, &args, (w.rows.div_ceil(64), n.div_ceil(32), 1), (128, 1, 1), 0);
+        let bm = if big { 64 } else { 32 };
+        r.dispatch_tg(label, kernel, &args, (w.rows.div_ceil(64), n.div_ceil(bm), 1), (128, 1, 1), 0);
     }
 
     fn attention(&self, r: &mut Runner, l: usize, n: usize, step: usize, max_pos: usize) {

@@ -1,488 +1,17 @@
 {
   "decode_steps": 64,
-  "git_sha": "de71338-dirty",
+  "git_sha": "e5dae4e-dirty",
   "machine": "Apple M4",
   "model": "gpt2-124m",
-  "note": "",
+  "note": "metal round 2 re-run: mma2 GEMM from 128 rows; load 4.16 4.11 4.78",
   "prompt_len": 64,
   "series": [
-    {
-      "dtype": "q4_0",
-      "gemm_min_rows": "32",
-      "kv_bytes_per_position": 36864.0,
-      "label": "q4_0",
-      "points": [
-        {
-          "agg_tok_s": 657.0515791854848,
-          "agg_tok_s_std": 29.38395415695904,
-          "batch": 1,
-          "bytes_per_step": 92809776.0,
-          "flops_per_step": 247064064.0,
-          "gbs": 60.98080988465111,
-          "gflops": 162.3338334111837,
-          "gpu_ms_per_step": 1.5128827944863588,
-          "per_stream_tok_s": 657.0515791854848,
-          "step_ms": 1.52195053125
-        },
-        {
-          "agg_tok_s": 1193.7036756710097,
-          "agg_tok_s_std": 30.29108676352226,
-          "batch": 2,
-          "bytes_per_step": 96348720.0,
-          "flops_per_step": 494128128.0,
-          "gbs": 57.505910605098464,
-          "gflops": 294.9212813230176,
-          "gpu_ms_per_step": 1.6695690137567,
-          "per_stream_tok_s": 596.8518378355049,
-          "step_ms": 1.6754576875
-        },
-        {
-          "agg_tok_s": 1819.36630576101,
-          "agg_tok_s_std": 54.41280189401056,
-          "batch": 4,
-          "bytes_per_step": 103426608.0,
-          "flops_per_step": 988256256.0,
-          "gbs": 47.04272142858802,
-          "gflops": 449.5000334059817,
-          "gpu_ms_per_step": 2.191462932387367,
-          "per_stream_tok_s": 454.8415764402525,
-          "step_ms": 2.198567703125
-        },
-        {
-          "agg_tok_s": 2234.4966790775065,
-          "agg_tok_s_std": 12.547614740166404,
-          "batch": 8,
-          "bytes_per_step": 117582384.0,
-          "flops_per_step": 1976512512.0,
-          "gbs": 32.84218082075202,
-          "gflops": 552.0638305273926,
-          "gpu_ms_per_step": 3.5734316625166684,
-          "per_stream_tok_s": 279.3120848846883,
-          "step_ms": 3.5802246093749996
-        },
-        {
-          "agg_tok_s": 2584.9531407444456,
-          "agg_tok_s_std": 4.092588602851385,
-          "batch": 16,
-          "bytes_per_step": 145893936.0,
-          "flops_per_step": 3953025024.0,
-          "gbs": 23.57056175492307,
-          "gflops": 638.6490282018867,
-          "gpu_ms_per_step": 6.182176439324394,
-          "per_stream_tok_s": 161.55957129652785,
-          "step_ms": 6.189667328125
-        },
-        {
-          "agg_tok_s": 3703.6049114358298,
-          "agg_tok_s_std": 27.261252181493056,
-          "batch": 32,
-          "bytes_per_step": 202517040.0,
-          "flops_per_step": 7906050048.0,
-          "gbs": 23.4388469997952,
-          "gflops": 915.0276808696962,
-          "gpu_ms_per_step": 8.631727861938998,
-          "per_stream_tok_s": 115.73765348236968,
-          "step_ms": 8.64023046875
-        },
-        {
-          "agg_tok_s": 4606.159409215883,
-          "agg_tok_s_std": 33.910694795535115,
-          "batch": 64,
-          "bytes_per_step": 315763248.0,
-          "flops_per_step": 15812100096.0,
-          "gbs": 22.72587274780888,
-          "gflops": 1138.0164630727152,
-          "gpu_ms_per_step": 13.886458255001344,
-          "per_stream_tok_s": 71.97124076899817,
-          "step_ms": 13.894438796875
-        },
-        {
-          "agg_tok_s": 4785.665086099512,
-          "agg_tok_s_std": 106.55266749441527,
-          "batch": 128,
-          "bytes_per_step": 542255664.0,
-          "flops_per_step": 31624200192.0,
-          "gbs": 20.27385936675397,
-          "gflops": 1182.3658651146554,
-          "gpu_ms_per_step": 26.739365901448764,
-          "per_stream_tok_s": 37.38800848515244,
-          "step_ms": 26.746543625
-        },
-        {
-          "agg_tok_s": 4985.946024410639,
-          "agg_tok_s_std": 49.73601460123452,
-          "batch": 256,
-          "bytes_per_step": 995240496.0,
-          "flops_per_step": 63248400384.0,
-          "gbs": 19.383653884233095,
-          "gflops": 1231.848087675536,
-          "gpu_ms_per_step": 51.33413802832365,
-          "per_stream_tok_s": 19.47635165785406,
-          "step_ms": 51.344318359375
-        }
-      ],
-      "weight_bytes": 89270832.0,
-      "note": "metal stage 9: batched matvec below 32 rows, simdgroup-matrix GEMM from 32"
-    },
-    {
-      "dtype": "f16",
-      "gemm_min_rows": "32",
-      "kv_bytes_per_position": 36864.0,
-      "label": "f16",
-      "points": [
-        {
-          "agg_tok_s": 268.25725558961983,
-          "agg_tok_s_std": 14.83078240674696,
-          "batch": 1,
-          "bytes_per_step": 251088384.0,
-          "flops_per_step": 247064064.0,
-          "gbs": 67.35628080227261,
-          "gflops": 66.27672776345818,
-          "gpu_ms_per_step": 3.715481157996692,
-          "per_stream_tok_s": 268.25725558961983,
-          "step_ms": 3.72776496875
-        },
-        {
-          "agg_tok_s": 573.460644583205,
-          "agg_tok_s_std": 52.16836306566393,
-          "batch": 2,
-          "bytes_per_step": 254627328.0,
-          "flops_per_step": 494128128.0,
-          "gbs": 73.00937582168957,
-          "gflops": 141.6815173947862,
-          "gpu_ms_per_step": 3.47812102700118,
-          "per_stream_tok_s": 286.7303222916025,
-          "step_ms": 3.48759765625
-        },
-        {
-          "agg_tok_s": 1047.034944684939,
-          "agg_tok_s_std": 55.780736536726714,
-          "batch": 4,
-          "bytes_per_step": 261705216.0,
-          "flops_per_step": 988256256.0,
-          "gbs": 68.50362658958002,
-          "gflops": 258.68470858387633,
-          "gpu_ms_per_step": 3.814691342995502,
-          "per_stream_tok_s": 261.75873617123483,
-          "step_ms": 3.82031184375
-        },
-        {
-          "agg_tok_s": 1829.427339219421,
-          "agg_tok_s_std": 35.219168463977404,
-          "batch": 8,
-          "bytes_per_step": 275860992.0,
-          "flops_per_step": 1976512512.0,
-          "gbs": 63.08345507362373,
-          "gflops": 451.98575322025664,
-          "gpu_ms_per_step": 4.366249297163449,
-          "per_stream_tok_s": 228.6784174024276,
-          "step_ms": 4.372953125
-        },
-        {
-          "agg_tok_s": 2538.0115687623497,
-          "agg_tok_s_std": 20.05490945061134,
-          "batch": 16,
-          "bytes_per_step": 304172544.0,
-          "flops_per_step": 3953025024.0,
-          "gbs": 48.24958972324218,
-          "gflops": 627.0514526574417,
-          "gpu_ms_per_step": 6.298744177911431,
-          "per_stream_tok_s": 158.62572304764686,
-          "step_ms": 6.30414778125
-        },
-        {
-          "agg_tok_s": 2976.736073575381,
-          "agg_tok_s_std": 38.84973691783615,
-          "batch": 32,
-          "bytes_per_step": 360795648.0,
-          "flops_per_step": 7906050048.0,
-          "gbs": 33.56229439345641,
-          "gflops": 735.4445117929365,
-          "gpu_ms_per_step": 10.73944993549958,
-          "per_stream_tok_s": 93.02300229923064,
-          "step_ms": 10.750029296875
-        },
-        {
-          "agg_tok_s": 4001.615398208237,
-          "agg_tok_s_std": 41.27613986977391,
-          "batch": 64,
-          "bytes_per_step": 474041856.0,
-          "flops_per_step": 15812100096.0,
-          "gbs": 29.63958109945018,
-          "gflops": 988.6553628463053,
-          "gpu_ms_per_step": 15.985236270353198,
-          "per_stream_tok_s": 62.525240597003695,
-          "step_ms": 15.993541015625
-        },
-        {
-          "agg_tok_s": 4068.6532247804,
-          "agg_tok_s_std": 73.46299676112706,
-          "batch": 128,
-          "bytes_per_step": 700534272.0,
-          "flops_per_step": 31624200192.0,
-          "gbs": 22.26742988157805,
-          "gflops": 1005.2180007209512,
-          "gpu_ms_per_step": 31.452022070880048,
-          "per_stream_tok_s": 31.786353318596877,
-          "step_ms": 31.460041671875
-        },
-        {
-          "agg_tok_s": 4891.5881197331755,
-          "agg_tok_s_std": 30.669881846985938,
-          "batch": 256,
-          "bytes_per_step": 1153519104.0,
-          "flops_per_step": 63248400384.0,
-          "gbs": 22.041173222701783,
-          "gflops": 1208.5356402753969,
-          "gpu_ms_per_step": 52.32100652938243,
-          "per_stream_tok_s": 19.107766092707717,
-          "step_ms": 52.334741546875
-        }
-      ],
-      "weight_bytes": 247549440.0,
-      "note": "metal stage 9: batched matvec below 32 rows, simdgroup-matrix GEMM from 32"
-    },
-    {
-      "dtype": "q8_0",
-      "gemm_min_rows": "32",
-      "kv_bytes_per_position": 36864.0,
-      "label": "q8_0",
-      "points": [
-        {
-          "agg_tok_s": 487.6380887253693,
-          "agg_tok_s_std": 28.121889522810623,
-          "batch": 1,
-          "bytes_per_step": 135277104.0,
-          "flops_per_step": 247064064.0,
-          "gbs": 65.966268442863,
-          "gflops": 120.4778479616823,
-          "gpu_ms_per_step": 2.0433398167369887,
-          "per_stream_tok_s": 487.6380887253693,
-          "step_ms": 2.050701171875
-        },
-        {
-          "agg_tok_s": 923.172069717522,
-          "agg_tok_s_std": 24.405800712083835,
-          "batch": 2,
-          "bytes_per_step": 138816048.0,
-          "flops_per_step": 494128128.0,
-          "gbs": 64.07554917108344,
-          "gflops": 228.0826433157023,
-          "gpu_ms_per_step": 2.160194024327211,
-          "per_stream_tok_s": 461.586034858761,
-          "step_ms": 2.1664433593749997
-        },
-        {
-          "agg_tok_s": 1593.737527914375,
-          "agg_tok_s_std": 39.81501398237241,
-          "batch": 4,
-          "bytes_per_step": 145893936.0,
-          "flops_per_step": 988256256.0,
-          "gbs": 58.12916022458452,
-          "gflops": 393.75527059583897,
-          "gpu_ms_per_step": 2.5040332548087463,
-          "per_stream_tok_s": 398.43438197859376,
-          "step_ms": 2.5098235625
-        },
-        {
-          "agg_tok_s": 2139.0605163490713,
-          "agg_tok_s_std": 14.337583072966236,
-          "batch": 8,
-          "bytes_per_step": 160049712.0,
-          "flops_per_step": 1976512512.0,
-          "gbs": 42.79450244903002,
-          "gflops": 528.48498431114,
-          "gpu_ms_per_step": 3.734112673555501,
-          "per_stream_tok_s": 267.3825645436339,
-          "step_ms": 3.739959640625
-        },
-        {
-          "agg_tok_s": 2499.049482624519,
-          "agg_tok_s_std": 14.57860584130662,
-          "batch": 16,
-          "bytes_per_step": 188361264.0,
-          "flops_per_step": 3953025024.0,
-          "gbs": 29.42025745910628,
-          "gflops": 617.4253213143111,
-          "gpu_ms_per_step": 6.396300828782842,
-          "per_stream_tok_s": 156.19059266403244,
-          "step_ms": 6.40243425
-        },
-        {
-          "agg_tok_s": 3457.8164592779335,
-          "agg_tok_s_std": 19.32073539109518,
-          "batch": 32,
-          "bytes_per_step": 244984368.0,
-          "flops_per_step": 7906050048.0,
-          "gbs": 26.47221812300632,
-          "gflops": 854.3021869952968,
-          "gpu_ms_per_step": 9.248191403457897,
-          "per_stream_tok_s": 108.05676435243542,
-          "step_ms": 9.2543951875
-        },
-        {
-          "agg_tok_s": 4533.439301296417,
-          "agg_tok_s_std": 41.056189513146805,
-          "batch": 64,
-          "bytes_per_step": 358230576.0,
-          "flops_per_step": 15812100096.0,
-          "gbs": 25.375258940069585,
-          "gflops": 1120.0499376756134,
-          "gpu_ms_per_step": 14.105435519013554,
-          "per_stream_tok_s": 70.83498908275652,
-          "step_ms": 14.117317062500002
-        },
-        {
-          "agg_tok_s": 4807.379491834695,
-          "agg_tok_s_std": 22.26837248125806,
-          "batch": 128,
-          "bytes_per_step": 584722992.0,
-          "flops_per_step": 31624200192.0,
-          "gbs": 21.960822813632987,
-          "gflops": 1187.7307144429346,
-          "gpu_ms_per_step": 26.61343822546769,
-          "per_stream_tok_s": 37.55765227995855,
-          "step_ms": 26.625732421875
-        },
-        {
-          "agg_tok_s": 4915.605722298865,
-          "agg_tok_s_std": 56.44097355861573,
-          "batch": 256,
-          "bytes_per_step": 1037707824.0,
-          "flops_per_step": 63248400384.0,
-          "gbs": 19.925634834877748,
-          "gflops": 1214.469526772813,
-          "gpu_ms_per_step": 52.06726431788411,
-          "per_stream_tok_s": 19.20158485272994,
-          "step_ms": 52.0790345
-        }
-      ],
-      "weight_bytes": 131738160.0,
-      "note": "metal stage 9: batched matvec below 32 rows, simdgroup-matrix GEMM from 32"
-    },
-    {
-      "dtype": "f32",
-      "gemm_min_rows": "32",
-      "kv_bytes_per_position": 36864.0,
-      "label": "f32",
-      "points": [
-        {
-          "agg_tok_s": 133.7328834472765,
-          "agg_tok_s_std": 5.939735836540968,
-          "batch": 1,
-          "bytes_per_step": 498152448.0,
-          "flops_per_step": 247064064.0,
-          "gbs": 66.61936326735946,
-          "gflops": 33.040589674922465,
-          "gpu_ms_per_step": 7.467321498552337,
-          "per_stream_tok_s": 133.7328834472765,
-          "step_ms": 7.477592453125
-        },
-        {
-          "agg_tok_s": 249.41026893198088,
-          "agg_tok_s_std": 6.72926479239917,
-          "batch": 2,
-          "bytes_per_step": 501691392.0,
-          "flops_per_step": 494128128.0,
-          "gbs": 62.56349249978992,
-          "gflops": 61.62031464566814,
-          "gpu_ms_per_step": 7.900320386397652,
-          "per_stream_tok_s": 124.70513446599044,
-          "step_ms": 8.018916015625
-        },
-        {
-          "agg_tok_s": 490.072795432177,
-          "agg_tok_s_std": 6.056568696235089,
-          "batch": 4,
-          "bytes_per_step": 508769280.0,
-          "flops_per_step": 988256256.0,
-          "gbs": 62.333495819903995,
-          "gflops": 121.07937649531428,
-          "gpu_ms_per_step": 8.15245311241597,
-          "per_stream_tok_s": 122.51819885804424,
-          "step_ms": 8.162052734375
-        },
-        {
-          "agg_tok_s": 938.7681454691942,
-          "agg_tok_s_std": 25.694305306649692,
-          "batch": 8,
-          "bytes_per_step": 522925056.0,
-          "flops_per_step": 1976512512.0,
-          "gbs": 61.36317313006181,
-          "gflops": 231.9358731733623,
-          "gpu_ms_per_step": 8.51363998663146,
-          "per_stream_tok_s": 117.34601818364928,
-          "step_ms": 8.521805984375
-        },
-        {
-          "agg_tok_s": 1320.0753558829051,
-          "agg_tok_s_std": 16.696696390032,
-          "batch": 16,
-          "bytes_per_step": 551236608.0,
-          "flops_per_step": 3953025024.0,
-          "gbs": 45.479616342580336,
-          "gflops": 326.1431822106768,
-          "gpu_ms_per_step": 12.10513936530333,
-          "per_stream_tok_s": 82.50470974268157,
-          "step_ms": 12.120520187500002
-        },
-        {
-          "agg_tok_s": 2241.179186273515,
-          "agg_tok_s_std": 241.52241233218624,
-          "batch": 32,
-          "bytes_per_step": 607859712.0,
-          "flops_per_step": 7906050048.0,
-          "gbs": 42.57257920964417,
-          "gflops": 553.7148379129476,
-          "gpu_ms_per_step": 14.26995760994032,
-          "per_stream_tok_s": 70.03684957104734,
-          "step_ms": 14.278197921874998
-        },
-        {
-          "agg_tok_s": 3372.172108798243,
-          "agg_tok_s_std": 86.81475880859709,
-          "batch": 64,
-          "bytes_per_step": 721105920.0,
-          "flops_per_step": 15812100096.0,
-          "gbs": 37.99520735802027,
-          "gflops": 833.142545707144,
-          "gpu_ms_per_step": 18.968762989970855,
-          "per_stream_tok_s": 52.690189199972544,
-          "step_ms": 18.978865234375
-        },
-        {
-          "agg_tok_s": 3838.4101341209566,
-          "agg_tok_s_std": 161.3128294839895,
-          "batch": 128,
-          "bytes_per_step": 947598336.0,
-          "flops_per_step": 31624200192.0,
-          "gbs": 28.41618012483246,
-          "gflops": 948.3332070347086,
-          "gpu_ms_per_step": 33.33687242411543,
-          "per_stream_tok_s": 29.987579172819977,
-          "step_ms": 33.34713996875
-        },
-        {
-          "agg_tok_s": 4146.259052207651,
-          "agg_tok_s_std": 26.760321750239974,
-          "batch": 256,
-          "bytes_per_step": 1400583168.0,
-          "flops_per_step": 63248400384.0,
-          "gbs": 22.68429936988152,
-          "gflops": 1024.3916118352104,
-          "gpu_ms_per_step": 61.730471992632374,
-          "per_stream_tok_s": 16.196324422686136,
-          "step_ms": 61.742403640625
-        }
-      ],
-      "weight_bytes": 494613504.0,
-      "note": "metal stage 9: batched matvec below 32 rows, simdgroup-matrix GEMM from 32"
-    },
     {
       "dtype": "q4_0",
       "gemm_min_rows": "never",
       "kv_bytes_per_position": 36864.0,
       "label": "q4_0 matvec",
+      "note": "metal stage 9: batched matvec only (no GEMM switch)",
       "points": [
         {
           "agg_tok_s": 517.4815077376786,
@@ -506,7 +35,7 @@
           "gflops": 251.88405228568152,
           "gpu_ms_per_step": 1.9555728358682245,
           "per_stream_tok_s": 509.754531289669,
-          "step_ms": 1.9617285156250002
+          "step_ms": 1.961728515625
         },
         {
           "agg_tok_s": 1733.8040755882228,
@@ -521,16 +50,16 @@
           "step_ms": 2.30706575
         },
         {
-          "agg_tok_s": 2021.2604065105238,
+          "agg_tok_s": 2021.260406510524,
           "agg_tok_s_std": 9.688307620675651,
           "batch": 8,
           "bytes_per_step": 117582384.0,
           "flops_per_step": 1976512512.0,
-          "gbs": 29.708077160289566,
+          "gbs": 29.70807716028957,
           "gflops": 499.3808104347821,
           "gpu_ms_per_step": 3.940169874113053,
           "per_stream_tok_s": 252.65755081381548,
-          "step_ms": 3.9579264375000003
+          "step_ms": 3.9579264375
         },
         {
           "agg_tok_s": 2448.536005497193,
@@ -554,11 +83,11 @@
           "gflops": 653.7709916309383,
           "gpu_ms_per_step": 12.084398418664932,
           "per_stream_tok_s": 82.69249342740035,
-          "step_ms": 12.092996093750001
+          "step_ms": 12.09299609375
         },
         {
           "agg_tok_s": 2576.478661547113,
-          "agg_tok_s_std": 9.458173958031713,
+          "agg_tok_s_std": 9.458173958031711,
           "batch": 64,
           "bytes_per_step": 315763248.0,
           "flops_per_step": 15812100096.0,
@@ -566,13 +95,484 @@
           "gflops": 636.5552889311102,
           "gpu_ms_per_step": 24.830502035911195,
           "per_stream_tok_s": 40.25747908667364,
-          "step_ms": 24.840104812499998
+          "step_ms": 24.8401048125
         }
       ],
-      "weight_bytes": 89270832.0,
-      "note": "metal stage 9: batched matvec only (no GEMM switch)"
+      "weight_bytes": 89270832.0
+    },
+    {
+      "dtype": "q4_0",
+      "gemm_min_rows": "32",
+      "kv_bytes_per_position": 36864.0,
+      "label": "q4_0",
+      "note": "metal round 2 re-run: mma2 GEMM from 128 rows; load 4.16 4.11 4.78",
+      "points": [
+        {
+          "agg_tok_s": 788.3266074087304,
+          "agg_tok_s_std": 2.1166039142475115,
+          "batch": 1,
+          "bytes_per_step": 92809776.0,
+          "flops_per_step": 247064064.0,
+          "gbs": 73.16441584844421,
+          "gflops": 194.76717538573345,
+          "gpu_ms_per_step": 1.263671223952656,
+          "per_stream_tok_s": 788.3266074087304,
+          "step_ms": 1.268509765625
+        },
+        {
+          "agg_tok_s": 1411.8905873479182,
+          "agg_tok_s_std": 5.875462605684259,
+          "batch": 2,
+          "bytes_per_step": 96348720.0,
+          "flops_per_step": 494128128.0,
+          "gbs": 68.01692543551005,
+          "gflops": 348.8274264335236,
+          "gpu_ms_per_step": 1.4113613281310222,
+          "per_stream_tok_s": 705.9452936739591,
+          "step_ms": 1.416540359375
+        },
+        {
+          "agg_tok_s": 2188.133158980148,
+          "agg_tok_s_std": 17.61144717004216,
+          "batch": 4,
+          "bytes_per_step": 103426608.0,
+          "flops_per_step": 988256256.0,
+          "gbs": 56.57779762141036,
+          "gflops": 540.6090708307935,
+          "gpu_ms_per_step": 1.823183593756994,
+          "per_stream_tok_s": 547.033289745037,
+          "step_ms": 1.8280423125
+        },
+        {
+          "agg_tok_s": 2447.867767330647,
+          "agg_tok_s_std": 8.625913762202849,
+          "batch": 8,
+          "bytes_per_step": 117582384.0,
+          "flops_per_step": 1976512512.0,
+          "gbs": 35.97826597493685,
+          "gflops": 604.7801587313161,
+          "gpu_ms_per_step": 3.262604817734882,
+          "per_stream_tok_s": 305.9834709163309,
+          "step_ms": 3.268150390625
+        },
+        {
+          "agg_tok_s": 2857.615272614125,
+          "agg_tok_s_std": 24.723320829842503,
+          "batch": 16,
+          "bytes_per_step": 145893936.0,
+          "flops_per_step": 3953025024.0,
+          "gbs": 26.056796230961726,
+          "gflops": 706.0140426005136,
+          "gpu_ms_per_step": 5.593602864571778,
+          "per_stream_tok_s": 178.6009545383828,
+          "step_ms": 5.59907421875
+        },
+        {
+          "agg_tok_s": 4004.550412869636,
+          "agg_tok_s_std": 8.528714436358305,
+          "batch": 32,
+          "bytes_per_step": 202517040.0,
+          "flops_per_step": 7906050048.0,
+          "gbs": 25.34342800453552,
+          "gflops": 989.3804994964502,
+          "gpu_ms_per_step": 7.985682942731387,
+          "per_stream_tok_s": 125.14220040217612,
+          "step_ms": 7.990909515625001
+        },
+        {
+          "agg_tok_s": 5110.943248846068,
+          "agg_tok_s_std": 64.59629192238611,
+          "batch": 64,
+          "bytes_per_step": 315763248.0,
+          "flops_per_step": 15812100096.0,
+          "gbs": 25.21637563436417,
+          "gflops": 1262.730409933273,
+          "gpu_ms_per_step": 12.517106770857822,
+          "per_stream_tok_s": 79.85848826321981,
+          "step_ms": 12.522150390625
+        },
+        {
+          "agg_tok_s": 6041.695960785593,
+          "agg_tok_s_std": 121.20064183968132,
+          "batch": 128,
+          "bytes_per_step": 542255664.0,
+          "flops_per_step": 31624200192.0,
+          "gbs": 25.59487386642117,
+          "gflops": 1492.6859575240733,
+          "gpu_ms_per_step": 21.18086393230811,
+          "per_stream_tok_s": 47.20074969363745,
+          "step_ms": 21.186104171875
+        },
+        {
+          "agg_tok_s": 6452.8489793381395,
+          "agg_tok_s_std": 7.715394159834247,
+          "batch": 256,
+          "bytes_per_step": 995240496.0,
+          "flops_per_step": 63248400384.0,
+          "gbs": 25.08647116722494,
+          "gflops": 1594.2670932135327,
+          "gpu_ms_per_step": 39.66580859376023,
+          "per_stream_tok_s": 25.206441325539608,
+          "step_ms": 39.672399093749995
+        }
+      ],
+      "weight_bytes": 89270832.0
+    },
+    {
+      "dtype": "q8_0",
+      "gemm_min_rows": "32",
+      "kv_bytes_per_position": 36864.0,
+      "label": "q8_0",
+      "note": "metal round 2 re-run: mma2 GEMM from 128 rows; load 4.16 4.11 4.78",
+      "points": [
+        {
+          "agg_tok_s": 628.892964137133,
+          "agg_tok_s_std": 3.676088390289459,
+          "batch": 1,
+          "bytes_per_step": 135277104.0,
+          "flops_per_step": 247064064.0,
+          "gbs": 85.07481891444722,
+          "gflops": 155.37685154072634,
+          "gpu_ms_per_step": 1.5844876301898123,
+          "per_stream_tok_s": 628.892964137133,
+          "step_ms": 1.590095703125
+        },
+        {
+          "agg_tok_s": 1173.1817973511756,
+          "agg_tok_s_std": 5.374649673007657,
+          "batch": 2,
+          "bytes_per_step": 138816048.0,
+          "flops_per_step": 494128128.0,
+          "gbs": 81.42823034691352,
+          "gflops": 289.8510626644059,
+          "gpu_ms_per_step": 1.699585286438321,
+          "per_stream_tok_s": 586.5908986755878,
+          "step_ms": 1.7047656249999998
+        },
+        {
+          "agg_tok_s": 2044.9108104960865,
+          "agg_tok_s_std": 17.754103636171646,
+          "batch": 4,
+          "bytes_per_step": 145893936.0,
+          "flops_per_step": 988256256.0,
+          "gbs": 74.58502172805603,
+          "gflops": 505.223975358697,
+          "gpu_ms_per_step": 1.950484375001338,
+          "per_stream_tok_s": 511.2277026240216,
+          "step_ms": 1.95607553125
+        },
+        {
+          "agg_tok_s": 2349.15411548493,
+          "agg_tok_s_std": 10.659468409179636,
+          "batch": 8,
+          "bytes_per_step": 160049712.0,
+          "flops_per_step": 1976512512.0,
+          "gbs": 46.99767995337222,
+          "gflops": 580.3915627340323,
+          "gpu_ms_per_step": 3.3996998697958247,
+          "per_stream_tok_s": 293.64426443561626,
+          "step_ms": 3.405481125
+        },
+        {
+          "agg_tok_s": 2810.6023793632025,
+          "agg_tok_s_std": 1.6468947568428831,
+          "batch": 16,
+          "bytes_per_step": 188361264.0,
+          "flops_per_step": 3953025024.0,
+          "gbs": 33.08803854864127,
+          "gflops": 694.3988461335426,
+          "gpu_ms_per_step": 5.688067708355504,
+          "per_stream_tok_s": 175.66264871020016,
+          "step_ms": 5.692729828125
+        },
+        {
+          "agg_tok_s": 3983.432840574911,
+          "agg_tok_s_std": 15.610660203353724,
+          "batch": 32,
+          "bytes_per_step": 244984368.0,
+          "flops_per_step": 7906050048.0,
+          "gbs": 30.496211778709043,
+          "gflops": 984.1631062635016,
+          "gpu_ms_per_step": 8.027842447951627,
+          "per_stream_tok_s": 124.48227626796596,
+          "step_ms": 8.033272125
+        },
+        {
+          "agg_tok_s": 5161.411189094681,
+          "agg_tok_s_std": 43.48914777221866,
+          "batch": 64,
+          "bytes_per_step": 358230576.0,
+          "flops_per_step": 15812100096.0,
+          "gbs": 28.890239113159883,
+          "gflops": 1275.1992243528043,
+          "gpu_ms_per_step": 12.39433528646572,
+          "per_stream_tok_s": 80.64704982960438,
+          "step_ms": 12.399709624999998
+        },
+        {
+          "agg_tok_s": 6047.5476653097485,
+          "agg_tok_s_std": 14.784680363724618,
+          "batch": 128,
+          "bytes_per_step": 584722992.0,
+          "flops_per_step": 31624200192.0,
+          "gbs": 27.626095040019766,
+          "gflops": 1494.131703425138,
+          "gpu_ms_per_step": 21.158928385425213,
+          "per_stream_tok_s": 47.24646613523241,
+          "step_ms": 21.16560415625
+        },
+        {
+          "agg_tok_s": 6402.190852217332,
+          "agg_tok_s_std": 13.467933191707155,
+          "batch": 256,
+          "bytes_per_step": 1037707824.0,
+          "flops_per_step": 63248400384.0,
+          "gbs": 25.951576320652944,
+          "gflops": 1581.7512904524374,
+          "gpu_ms_per_step": 39.97994401045446,
+          "per_stream_tok_s": 25.008558016473952,
+          "step_ms": 39.98631185937499
+        }
+      ],
+      "weight_bytes": 131738160.0
+    },
+    {
+      "dtype": "f16",
+      "gemm_min_rows": "32",
+      "kv_bytes_per_position": 36864.0,
+      "label": "f16",
+      "note": "metal round 2 re-run: mma2 GEMM from 128 rows; load 4.16 4.11 4.78",
+      "points": [
+        {
+          "agg_tok_s": 371.80903249044513,
+          "agg_tok_s_std": 0.5819358988734813,
+          "batch": 1,
+          "bytes_per_step": 251088384.0,
+          "flops_per_step": 247064064.0,
+          "gbs": 93.35692912462936,
+          "gflops": 91.8606505989974,
+          "gpu_ms_per_step": 2.6813899739792646,
+          "per_stream_tok_s": 371.80903249044513,
+          "step_ms": 2.6895527343750003
+        },
+        {
+          "agg_tok_s": 719.5897776088116,
+          "agg_tok_s_std": 4.833339869154704,
+          "batch": 2,
+          "bytes_per_step": 254627328.0,
+          "flops_per_step": 494128128.0,
+          "gbs": 91.61361116432296,
+          "gflops": 177.78477486888917,
+          "gpu_ms_per_step": 2.773406901091846,
+          "per_stream_tok_s": 359.7948888044058,
+          "step_ms": 2.7793613281250003
+        },
+        {
+          "agg_tok_s": 1268.2975767960995,
+          "agg_tok_s_std": 7.75827397639043,
+          "batch": 4,
+          "bytes_per_step": 261705216.0,
+          "flops_per_step": 988256256.0,
+          "gbs": 82.98002282192496,
+          "gflops": 313.35075368459644,
+          "gpu_ms_per_step": 3.143751302104647,
+          "per_stream_tok_s": 317.0743941990249,
+          "step_ms": 3.153833984375
+        },
+        {
+          "agg_tok_s": 2204.659430584007,
+          "agg_tok_s_std": 42.568207417026215,
+          "batch": 8,
+          "bytes_per_step": 275860992.0,
+          "flops_per_step": 1976512512.0,
+          "gbs": 76.02244219288242,
+          "gflops": 544.6921186560107,
+          "gpu_ms_per_step": 3.622352213582758,
+          "per_stream_tok_s": 275.5824288230009,
+          "step_ms": 3.628678375
+        },
+        {
+          "agg_tok_s": 2921.730647888521,
+          "agg_tok_s_std": 1.9888869812761003,
+          "batch": 16,
+          "bytes_per_step": 304172544.0,
+          "flops_per_step": 3953025024.0,
+          "gbs": 55.54439025318873,
+          "gflops": 721.854647780691,
+          "gpu_ms_per_step": 5.470046223905456,
+          "per_stream_tok_s": 182.60816549303257,
+          "step_ms": 5.476206375
+        },
+        {
+          "agg_tok_s": 3397.841300653168,
+          "agg_tok_s_std": 50.9445488997432,
+          "batch": 32,
+          "bytes_per_step": 360795648.0,
+          "flops_per_step": 7906050048.0,
+          "gbs": 38.31019855844758,
+          "gflops": 839.4844805664175,
+          "gpu_ms_per_step": 9.41247005214052,
+          "per_stream_tok_s": 106.18254064541148,
+          "step_ms": 9.417744140625
+        },
+        {
+          "agg_tok_s": 4637.453408580619,
+          "agg_tok_s_std": 13.093452365691029,
+          "batch": 64,
+          "bytes_per_step": 474041856.0,
+          "flops_per_step": 15812100096.0,
+          "gbs": 34.349172201829425,
+          "gflops": 1145.7480857345802,
+          "gpu_ms_per_step": 13.795397135403675,
+          "per_stream_tok_s": 72.46020950907217,
+          "step_ms": 13.800677734375
+        },
+        {
+          "agg_tok_s": 5927.0283471960165,
+          "agg_tok_s_std": 123.42553289964374,
+          "batch": 128,
+          "bytes_per_step": 700534272.0,
+          "flops_per_step": 31624200192.0,
+          "gbs": 32.438175690049405,
+          "gflops": 1464.3557109014507,
+          "gpu_ms_per_step": 21.58861002605761,
+          "per_stream_tok_s": 46.30490896246888,
+          "step_ms": 21.595982421875
+        },
+        {
+          "agg_tok_s": 6178.225244087316,
+          "agg_tok_s_std": 43.45619874278313,
+          "batch": 256,
+          "bytes_per_step": 1153519104.0,
+          "flops_per_step": 63248400384.0,
+          "gbs": 27.83867518699134,
+          "gflops": 1526.4174371116044,
+          "gpu_ms_per_step": 41.42938346355152,
+          "per_stream_tok_s": 24.13369235971608,
+          "step_ms": 41.43584765625
+        }
+      ],
+      "weight_bytes": 247549440.0
+    },
+    {
+      "dtype": "f32",
+      "gemm_min_rows": "32",
+      "kv_bytes_per_position": 36864.0,
+      "label": "f32",
+      "note": "metal round 2 re-run: mma2 GEMM from 128 rows; load 4.16 4.11 4.78",
+      "points": [
+        {
+          "agg_tok_s": 197.56892487525909,
+          "agg_tok_s_std": 2.081790788622076,
+          "batch": 1,
+          "bytes_per_step": 498152448.0,
+          "flops_per_step": 247064064.0,
+          "gbs": 98.4194435753384,
+          "gflops": 48.8121814997922,
+          "gpu_ms_per_step": 5.056341145831311,
+          "per_stream_tok_s": 197.56892487525909,
+          "step_ms": 5.061524734374999
+        },
+        {
+          "agg_tok_s": 389.85973845625927,
+          "agg_tok_s_std": 5.258718815254636,
+          "batch": 2,
+          "bytes_per_step": 501691392.0,
+          "flops_per_step": 494128128.0,
+          "gbs": 97.79463743543832,
+          "gflops": 96.3203313729805,
+          "gpu_ms_per_step": 5.12040364585431,
+          "per_stream_tok_s": 194.92986922812963,
+          "step_ms": 5.1300501249999995
+        },
+        {
+          "agg_tok_s": 732.516446253231,
+          "agg_tok_s_std": 9.960846155398112,
+          "batch": 4,
+          "bytes_per_step": 508769280.0,
+          "flops_per_step": 988256256.0,
+          "gbs": 93.17046623710375,
+          "gflops": 180.97849015816084,
+          "gpu_ms_per_step": 5.4548613281042435,
+          "per_stream_tok_s": 183.12911156330776,
+          "step_ms": 5.46062825
+        },
+        {
+          "agg_tok_s": 1380.4414961425532,
+          "agg_tok_s_std": 10.514038944553498,
+          "batch": 8,
+          "bytes_per_step": 522925056.0,
+          "flops_per_step": 1976512512.0,
+          "gbs": 90.23343083438354,
+          "gflops": 341.0574861512195,
+          "gpu_ms_per_step": 5.789977213552788,
+          "per_stream_tok_s": 172.55518701781915,
+          "step_ms": 5.79524740625
+        },
+        {
+          "agg_tok_s": 1815.3678690524098,
+          "agg_tok_s_std": 19.95379848848183,
+          "batch": 16,
+          "bytes_per_step": 551236608.0,
+          "flops_per_step": 3953025024.0,
+          "gbs": 62.54357665053992,
+          "gflops": 448.51216338310826,
+          "gpu_ms_per_step": 8.808470703094429,
+          "per_stream_tok_s": 113.46049181577561,
+          "step_ms": 8.813640625
+        },
+        {
+          "agg_tok_s": 3157.3707635690644,
+          "agg_tok_s_std": 15.160263849888098,
+          "batch": 32,
+          "bytes_per_step": 607859712.0,
+          "flops_per_step": 7906050048.0,
+          "gbs": 59.97620259438474,
+          "gflops": 780.0728524021562,
+          "gpu_ms_per_step": 10.12931315104737,
+          "per_stream_tok_s": 98.66783636153326,
+          "step_ms": 10.135014984375
+        },
+        {
+          "agg_tok_s": 4609.823617411651,
+          "agg_tok_s_std": 3.9191485451990666,
+          "batch": 64,
+          "bytes_per_step": 721105920.0,
+          "flops_per_step": 15812100096.0,
+          "gbs": 51.94017344798995,
+          "gflops": 1138.9217572409038,
+          "gpu_ms_per_step": 13.877785807324017,
+          "per_stream_tok_s": 72.02849402205705,
+          "step_ms": 13.883394531249998
+        },
+        {
+          "agg_tok_s": 4995.428201428188,
+          "agg_tok_s_std": 16.00192842643537,
+          "batch": 128,
+          "bytes_per_step": 947598336.0,
+          "flops_per_step": 31624200192.0,
+          "gbs": 36.98171446313144,
+          "gflops": 1234.190792865059,
+          "gpu_ms_per_step": 25.61717122398477,
+          "per_stream_tok_s": 39.02678282365772,
+          "step_ms": 25.623429031249998
+        },
+        {
+          "agg_tok_s": 5607.453205020958,
+          "agg_tok_s_std": 37.01831476685706,
+          "batch": 256,
+          "bytes_per_step": 1400583168.0,
+          "flops_per_step": 63248400384.0,
+          "gbs": 30.678533493359403,
+          "gflops": 1385.400177522303,
+          "gpu_ms_per_step": 45.64832552081555,
+          "per_stream_tok_s": 21.904114082113118,
+          "step_ms": 45.65352409375001
+        }
+      ],
+      "weight_bytes": 494613504.0
     }
   ],
-  "timestamp": "2026-10-18T15:57:26Z",
+  "timestamp": "2026-10-18T18:11:02Z",
   "what": "Batched greedy decode on the M4 GPU: B sequences per forward. agg_tok_s = B * steps / wall; per_stream_tok_s = one sequence's speed; step_ms = per-token latency every stream sees."
 }

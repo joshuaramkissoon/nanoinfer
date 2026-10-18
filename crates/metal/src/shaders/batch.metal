@@ -487,3 +487,86 @@ kernel void b_argmax_rows(device const float* logits [[buffer(0)]],
         }
     }
 }
+
+// ----- GEMM v2: 64 x 64 tiles, weights staged as half -----------------------
+//
+// matmul_mma_q stages 32 tokens x 64 outputs per threadgroup with every
+// operand in f32: each K step moves 8 KB of weights through threadgroup
+// memory for 32 x 64 x 32 MACs. Here a threadgroup owns 64 tokens x 64
+// outputs (4 SIMD-groups as 2 x 2, each 32 x 32 = 4 x 4 accumulators), and
+// the dequantised weight tile is stored as half (exact for Q4_0/Q8_0 values
+// times an f16 scale up to rounding; f16 weights are exact). Activations stay
+// f32, accumulation f32 (mixed half x float MMA, as llama.cpp does).
+template <typename L>
+kernel void matmul_mma2(device float* out [[buffer(0)]],
+                        device const float* x [[buffer(1)]],
+                        device const uchar* w [[buffer(2)]],
+                        device const float* bias [[buffer(3)]],
+                        constant uint& n [[buffer(4)]],
+                        constant uint& d_in [[buffer(5)]],
+                        constant uint& d_out [[buffer(6)]],
+                        constant uint& has_bias [[buffer(7)]],
+                        uint2 tg [[threadgroup_position_in_grid]],
+                        uint tid [[thread_index_in_threadgroup]],
+                        uint sg [[simdgroup_index_in_threadgroup]]) {
+    const uint BM = 64, BN = 64, BK = 32;
+    threadgroup float xs[BM * BK];   // 8 KB
+    threadgroup half ws[BN * BK];    // 4 KB
+    threadgroup float* cs = xs;      // output staging reuses xs + more: see below
+    threadgroup float cs_extra[BM * BN - BM * BK];
+    uint row0 = tg.y * BM, col0 = tg.x * BN;
+    uint sm = sg / 2, sn = sg % 2;   // this SIMD-group's 32 x 32 quadrant
+    simdgroup_float8x8 acc[4][4];
+    for (uint i = 0; i < 4; i++)
+        for (uint j = 0; j < 4; j++) acc[i][j] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+    for (uint k0 = 0; k0 < d_in; k0 += BK) {
+        for (uint e = tid; e < BM * BK / 4; e += 128) {
+            uint r = e / (BK / 4), k4 = e % (BK / 4);
+            uint gr = row0 + r;
+            float4 v = gr < n ? *((device const float4*)(x + gr * d_in + k0) + k4) : float4(0.0f);
+            *((threadgroup float4*)(xs + r * BK) + k4) = v;
+        }
+        for (uint e = tid; e < BN * BK / 4; e += 128) {
+            uint r = e / (BK / 4), k4 = e % (BK / 4);
+            uint gc = col0 + r;
+            float4 v = gc < d_out ? L::load(w, gc, k0 / 4 + k4, d_in, d_out) : float4(0.0f);
+            *((threadgroup half4*)(ws + r * BK) + k4) = half4(v);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (uint kk = 0; kk < BK; kk += 8) {
+            simdgroup_float8x8 a[4];
+            simdgroup_half8x8 b[4];
+            for (uint i = 0; i < 4; i++) simdgroup_load(a[i], xs + (sm * 32 + i * 8) * BK + kk, BK);
+            for (uint j = 0; j < 4; j++)
+                simdgroup_load(b[j], ws + (sn * 32 + j * 8) * BK + kk, BK, ulong2(0, 0), true);
+            for (uint i = 0; i < 4; i++)
+                for (uint j = 0; j < 4; j++) simdgroup_multiply_accumulate(acc[i][j], a[i], b[j], acc[i][j]);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    // Stage the 64 x 64 result: rows 0..31 in xs (as [32][64]), 32..63 in cs_extra.
+    for (uint i = 0; i < 4; i++)
+        for (uint j = 0; j < 4; j++) {
+            uint r = sm * 32 + i * 8, c = sn * 32 + j * 8;
+            threadgroup float* base = r < 32 ? cs + r * BN : cs_extra + (r - 32) * BN;
+            simdgroup_store(acc[i][j], base + c, BN);
+        }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint e = tid; e < BM * BN; e += 128) {
+        uint r = e / BN, c = e % BN;
+        uint gr = row0 + r, gc = col0 + c;
+        float v = r < 32 ? cs[e] : cs_extra[e - 32 * BN];
+        if (gr < n && gc < d_out) out[gr * d_out + gc] = v + (has_bias ? bias[gc] : 0.0f);
+    }
+}
+
+struct LoadF32 {
+    static float4 load(device const uchar* w, uint row, uint k4, uint d_in, uint rows) {
+        return ((device const float4*)((device const float*)w + row * d_in))[k4];
+    }
+};
+
+template [[host_name("matmul_mma2_f32")]] kernel void matmul_mma2<LoadF32>(MMA_ARGS);
+template [[host_name("matmul_mma2_f16")]] kernel void matmul_mma2<LoadF16>(MMA_ARGS);
+template [[host_name("matmul_mma2_q8_0")]] kernel void matmul_mma2<LoadQ8>(MMA_ARGS);
+template [[host_name("matmul_mma2_q4_0")]] kernel void matmul_mma2<LoadQ4>(MMA_ARGS);

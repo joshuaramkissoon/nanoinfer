@@ -143,6 +143,9 @@ pub struct Recipe {
     /// Decode matvecs give each row 8 lanes (4 rows per SIMD-group at once)
     /// instead of a whole SIMD-group (needs `Fusion::Epilogue`).
     pub lanes: bool,
+    /// K/V cache stored as int8 with one f32 scale per (position, head)
+    /// (needs `Attn::Flash` and `Fusion::Epilogue`; overrides `kv_f16`).
+    pub kv_q8: bool,
 }
 
 /// The Metal hillclimb, in order.
@@ -186,6 +189,8 @@ pub enum MetalStage {
     Kv16,
     /// + 8 lanes per row in the decode matvecs (more loads in flight on narrow rows).
     Lanes,
+    /// metal-lanes with a Q8 KV cache.
+    Kv8,
 }
 
 impl MetalStage {
@@ -209,6 +214,7 @@ impl MetalStage {
         MetalStage::Flash,
         MetalStage::Kv16,
         MetalStage::Lanes,
+        MetalStage::Kv8,
     ];
 
     pub fn name(self) -> &'static str {
@@ -232,6 +238,7 @@ impl MetalStage {
             MetalStage::Flash => "metal-flash",
             MetalStage::Kv16 => "metal-kv16",
             MetalStage::Lanes => "metal-lanes",
+            MetalStage::Kv8 => "metal-kv8",
         }
     }
 
@@ -249,6 +256,7 @@ impl MetalStage {
             pipelined: false,
             kv_f16: false,
             lanes: false,
+            kv_q8: false,
         };
         let par = Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, norm: Par::Simd, attn: Attn::Simd, ..naive };
         let mma = Recipe { matmul: Matmul::SimdMatrix, ..par };
@@ -274,6 +282,7 @@ impl MetalStage {
             MetalStage::Flash => Recipe { attn: Attn::Flash, ..pipelined },
             MetalStage::Kv16 => Recipe { attn: Attn::Flash, kv_f16: true, ..pipelined },
             MetalStage::Lanes => Recipe { attn: Attn::Flash, kv_f16: true, lanes: true, ..pipelined },
+            MetalStage::Kv8 => Recipe { attn: Attn::Flash, lanes: true, kv_q8: true, ..pipelined },
         }
     }
 

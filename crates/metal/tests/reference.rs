@@ -215,3 +215,41 @@ fn split_and_flash_attention_match_simd_at_long_context() {
         assert!(dp < tol && dd < tol, "{attn:?} kv_f16={kv_f16}: {dp} {dd}");
     }
 }
+
+/// Q8 KV cache (metal-kv8) at a context of 300 tokens, f32 weights so only the
+/// KV quantisation differs: small KL vs the f32 cache, same top-1.
+#[test]
+fn q8_kv_cache_close_to_f32_at_long_context() {
+    let Some(model) = model() else { return };
+    let mut seq = vec![];
+    while seq.len() < 300 {
+        seq.extend(ids(&reference()["prompts"][3]["ids"]));
+    }
+    seq.truncate(300);
+    let run = |kv_q8: bool| {
+        let recipe = nanoinfer_metal::Recipe {
+            dtype: DType::F32,
+            head_dtype: DType::F32,
+            kv_q8,
+            kv_f16: false,
+            ..MetalStage::Kv8.recipe()
+        };
+        let engine = MetalEngine::with_recipe(model, MetalStage::Kv8, recipe).unwrap();
+        let mut s = engine.session();
+        s.step(&seq[..100]).unwrap();
+        let prefill = s.step(&seq[100..250]).unwrap().to_vec();
+        for &t in &seq[250..299] {
+            s.step(&[t]).unwrap();
+        }
+        (prefill, s.step(&seq[299..]).unwrap().to_vec())
+    };
+    let (p0, d0) = run(false);
+    let (p, d) = run(true);
+    for (name, a, b) in [("prefill", &p, &p0), ("decode", &d, &d0)] {
+        let diff = a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).fold(0.0, f32::max);
+        let k = kl(b, a);
+        println!("Q8 KV vs f32 KV at context 300, {name}: max |diff| {diff:.3e}, KL {k:.2e}");
+        assert!(k < 0.01, "{name}: KL {k}");
+        assert_eq!(nanoinfer_core::sampler::argmax(a), nanoinfer_core::sampler::argmax(b), "{name} top-1");
+    }
+}

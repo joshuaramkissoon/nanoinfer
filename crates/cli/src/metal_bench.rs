@@ -11,6 +11,8 @@
 pub mod metal_batch;
 #[path = "metal_serve.rs"]
 pub mod metal_serve;
+#[path = "metal_spec.rs"]
+pub mod metal_spec;
 
 use crate::bench::{git_sha, machine, median, prefer_performance_cores, stddev, timestamp, BENCH_TEXT};
 use clap::Parser;
@@ -56,6 +58,7 @@ pub fn intercept() -> Option<Result<(), Box<dyn std::error::Error>>> {
     match argv.get(1).map(String::as_str) {
         Some("metal-batch") => return Some(metal_batch::run(metal_batch::BatchArgs::parse_from(&argv[1..]))),
         Some("metal-serve") => return Some(metal_serve::run(metal_serve::ServeArgs::parse_from(&argv[1..]))),
+        Some("metal-spec") => return Some(metal_spec::run(metal_spec::SpecArgs::parse_from(&argv[1..]))),
         _ => {}
     }
     let is_bench = argv.iter().skip(1).any(|a| a == "bench");
