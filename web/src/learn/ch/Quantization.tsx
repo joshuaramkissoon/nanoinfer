@@ -127,8 +127,9 @@ export default function Quantization() {
       </p>
       <Climb upto={4} n="15.2" />
       <p>
-        Notice the limit line no longer applies: with 4-bit weights the limit is 8× higher, around 1,200. The engine is now
-        far below its new limit, because the fixed costs per token (waking threads, the small operations) don't shrink with
+        Each step now has its own limit. The 4-bit stage reads about 97 MB per token instead of 495 (each block of 32 weights
+        carries a scale, and the scoring matrix stays at 8 bits), so its limit is about 5× higher: 120 GB/s ÷ 97 MB ≈ 1,240
+        tokens per second. 497 is 40% of that. The engine is now far below its new limit, because the fixed costs per token (waking threads, the small operations) don't shrink with
         the bytes. That's where the GPU comes in.
       </p>
       <Idea>Decode reads every weight, so smaller weights mean faster decode. Every halving of the bits buys speed, and costs some accuracy.</Idea>

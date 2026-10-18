@@ -74,6 +74,9 @@ function FourWays({ STEPS }: { STEPS: Step[] }) {
   );
 }
 
+// MB read per decoded token by metal-lanes: Q4_0 blocks + Q8_0 scoring matrix (docs/LOG.md, Metal Q4 table)
+const Q4_MB = 89.3;
+
 export default function Gpu() {
   const d = useLearnData();
   const h = d?.headline;
@@ -84,8 +87,8 @@ export default function Gpu() {
     <>
       <h2 style={{ marginTop: "2.2rem" }}>The bottleneck</h2>
       <p>
-        A CPU has a handful of strong cores. A <G k="GPU" /> has thousands of small, simple ones, built to do the same
-        arithmetic on lots of numbers at once. That's exactly what prefill needs. On our Mac it reads the same shared memory
+        A CPU has a handful of strong cores. A <G k="GPU" /> has thousands of simple arithmetic lanes, built to do the
+        same arithmetic on lots of numbers at once. That's exactly what prefill needs. On our Mac it reads the same shared memory
         as the CPU (about {h ? h.gpuReadGBs : "…"} GB/s in practice), so for decode it should at least keep up. It should win easily.
       </p>
       <p>
@@ -105,7 +108,10 @@ export default function Gpu() {
         Decode <span className="k">{best ? Math.round(best.decode).toLocaleString("en-GB") : "…"} tokens per second</span> (4-bit
         weights), {best && first ? Math.round(best.decode / first) : "…"}× the first GPU version and the fastest single-user
         number in the project. That's each token in {best ? (1000 / best.decode).toFixed(2) : "…"} ms, reading 89 MB of
-        weights at close to the {h ? h.gpuReadGBs : "…"} GB/s the GPU can read at all. Prefill, which can keep thousands of GPU
+        weights: {best ? Math.round((Q4_MB / 1000) * best.decode) : "…"} GB/s averaged over the whole token,{" "}
+        {best && h ? Math.round(((Q4_MB / 1000) * best.decode * 100) / h.gpuReadGBs) : "…"}% of the {h ? h.gpuReadGBs : "…"} GB/s the GPU
+        can read at all. The biggest matrix, the scoring matrix, reads at the full 106 GB/s. The others manage 66–86 GB/s,
+        and attention adds time without adding many bytes. Prefill, which can keep thousands of GPU
         threads busy, reads a 64-token prompt at <b>{best ? best.prefill.toLocaleString("en-GB") : "…"} tokens per second</b> using the
         GPU's built-in matrix-multiply hardware.
       </p>

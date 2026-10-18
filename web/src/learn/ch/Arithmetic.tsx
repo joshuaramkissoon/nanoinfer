@@ -146,7 +146,8 @@ export default function Arithmetic() {
       </p>
       <h2>The result</h2>
       <p>
-        Sixteen variables instead of one: decode <span className="k">19 → 100 tokens per second</span>, 5.8× faster. Every
+        Sixteen variables instead of one: decode <span className="k">19 → 100 tokens per second</span>, 5.3× the KV-cache
+        step (fig 13.2). Run back to back in one session, the two stages measured 17.3 and 101.6: 5.9×. Every
         matrix now read about 55 GB/s, essentially all that one core can pull from memory (57). Decode had become truly
         memory-bound.
       </p>

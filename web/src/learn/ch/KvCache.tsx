@@ -52,14 +52,16 @@ export default function KvCache() {
       <h2>The result</h2>
       <p>
         Same maths, same answers, decimal for decimal. Decode went from 0.37 to <span className="k">18.95 tokens per second</span>,
-        51× faster, and the cost per token stopped growing with the text: flat, not rising.
+        51× faster. The big matrix multiplies now cost the same for every token, however long the text. Attention still
+        grows: each new token reads the key and value of every earlier token from the cache, so the cost per token rises
+        slowly with the text instead of steeply.
       </p>
       <Climb upto={1} n="12.2" />
       <p>
         But 19 is still only 8% of the speed limit. If decode is meant to be waiting on memory, it should be reading 120 GB/s.
         It was reading 10. Something else is slow, and it's the next chapter.
       </p>
-      <Idea>Old tokens' keys and values never change, so store them. Each new token then costs one token's work instead of the whole text's.</Idea>
+      <Idea>Old tokens' keys and values never change, so store them. Each new token then costs one token's work, plus a read of the cache, instead of the whole text's.</Idea>
       <Deeper title="The cache isn't free: it's memory">
         <p>
           For every token of text the cache holds a key and a value (768 numbers each) for each of the 12 layers: 73.7 KB at

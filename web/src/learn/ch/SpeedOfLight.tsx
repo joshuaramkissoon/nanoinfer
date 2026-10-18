@@ -169,7 +169,7 @@ export default function SpeedOfLight() {
           bigger those fixed costs loom.
         </p>
         <p>
-          The limit also moves. Store each weight in 4 bits instead of 32, and there are 8× fewer bytes to read. Serve 64
+          The limit also moves. Store each weight in 4 bits instead of 32, and there are about 7× fewer bytes to read (8×, less the scale each block of 32 carries). Serve 64
           users at once and each weight read does 64 users' work. Part three does both.
         </p>
       </Deeper>
