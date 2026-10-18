@@ -20,7 +20,7 @@ function Ring() {
   const doneChunks = step <= n - 1 ? (step === n - 1 ? 1 : 0) : 1 + (step - (n - 1));
   return (
     <Fig
-      n="18.1"
+      n="19.1"
       title="Passing dishes round a table"
       prov="toy"
       caption={

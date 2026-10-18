@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { boot } from "../engine/client";
 import { CHAPTERS, PARTS, chapterHref, type Chapter } from "./chapters";
+import { climbFactor } from "./Climb";
+import { useLearnData } from "./kit";
 import { Journey } from "../site/Journey";
 import { linkTo, navigate, usePath } from "./router";
 import { TopBar } from "../site/TopBar";
@@ -172,6 +174,7 @@ function ChapterPage({ ch, idx }: { ch: Chapter; idx: number }) {
 function Index() {
   const [visited] = useState(readVisited);
   const firstUnseen = CHAPTERS.find((c) => !visited.has(c.slug)) ?? CHAPTERS[0];
+  const factor = climbFactor(useLearnData());
   return (
     <div className="lr-index" data-askable data-ask-title="The course: contents">
       <header className="nv-col lr-ihero" data-ask-section>
@@ -181,7 +184,7 @@ function Index() {
         </h1>
         <p className="nv-lead">
           One idea per page, each with a figure you can poke. Start with a machine that guesses the next word; end knowing
-          why it's slow, what made our engine 1,700× faster, and how to work out the speed limit of any model on any computer.
+          why it's slow, what made our engine {factor ? `${factor}×` : "thousands of times"} faster, and how to work out the speed limit of any model on any computer.
           No maths beyond multiplying and adding.
         </p>
         <div className="lr-start">

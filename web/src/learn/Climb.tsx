@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useWidth } from "../ui/Figure";
 import { usePalette } from "../ui/theme";
 import { log } from "../lib/fmt";
-import { chartColors, Fig, Seg, useFrame } from "./kit";
+import { chartColors, Fig, Seg, useFrame, useLearnData, type LearnData } from "./kit";
 
 export interface Milestone {
   key: string;
@@ -16,16 +16,42 @@ export interface Milestone {
   total?: boolean;
 }
 
-// Decode tokens per second, GPT-2 124M on the M4 Mac mini (docs/LOG.md, docs/WRITEUP.md, bench/batching.json).
-export const MILESTONES: Milestone[] = [
+// Decode tokens per second, GPT-2 124M on the M4 Mac mini. The CPU steps are from
+// docs/LOG.md; the GPU and batching steps come from the bench files via
+// public/learn/data.json (re-measured on a quiet machine), so they never go stale.
+const CPU_STEPS: Milestone[] = [
   { key: "naive", label: "first version", tokS: 0.37, what: "recomputes the whole text for every token · 1 core" },
   { key: "kv", label: "+ KV cache", tokS: 18.95, what: "remembers past tokens' keys and values · 1 core" },
   { key: "arith", label: "+ faster arithmetic", tokS: 100.5, what: "16 running totals, SIMD · 1 core" },
   { key: "threads", label: "+ many cores", tokS: 146, what: "6 threads that don't sleep, vectorised small ops" },
   { key: "quant", label: "+ smaller numbers", tokS: 497, what: "4-bit weights, 16-bit KV cache · CPU, 4 threads" },
-  { key: "gpu", label: "+ the GPU", tokS: 641, what: "Metal kernels, no waiting, 4-bit · M4 GPU" },
-  { key: "batch", label: "+ batching", tokS: 6453, what: "256 users at once: 25 tok/s each · M4 GPU", total: true },
 ];
+
+/** The best batched point for 4-bit weights: [users, total tok/s, per-user tok/s]. */
+export function bestBatch(d: LearnData): [number, number, number] {
+  const q4 = d.batching.series.find((s) => s.label === "q4_0") ?? d.batching.series[0];
+  const p = q4.points.reduce((a, b) => (b[1] > a[1] ? b : a));
+  return [p[0], p[1], p[2]];
+}
+
+export function milestones(d: LearnData | null): Milestone[] {
+  const gpu = d?.headline.gpu.decode ?? NaN;
+  const [B, total, per] = d ? bestBatch(d) : [256, NaN, NaN];
+  return [
+    { ...CPU_STEPS[0], tokS: d?.headline.naive.decode ?? CPU_STEPS[0].tokS },
+    ...CPU_STEPS.slice(1),
+    { key: "gpu", label: "+ the GPU", tokS: gpu, what: "Metal kernels shaped for the GPU, never waiting, 4-bit · M4 GPU · quiet machine" },
+    { key: "batch", label: "+ batching", tokS: total, what: `${B} users at once: ${Math.round(per)} tok/s each · M4 GPU`, total: true },
+  ];
+}
+
+/** "N× faster": best single-user decode over the first version, rounded to two figures. */
+export function climbFactor(d: LearnData | null): string | null {
+  if (!d) return null;
+  const x = d.headline.gpu.decode / d.headline.naive.decode;
+  const p = 10 ** Math.max(0, Math.floor(Math.log10(x)) - 1);
+  return (Math.round(x / p) * p).toLocaleString("en-GB");
+}
 
 const LIMIT_F32 = 243; // 120 GB/s ÷ 494.6 MB of f32 weights per token
 
@@ -33,13 +59,15 @@ const LIMIT_F32 = 243; // 120 GB/s ÷ 494.6 MB of f32 weights per token
 export function Climb({ upto, n }: { upto: number; n: string }) {
   const pal = usePalette();
   const cc = chartColors(pal.dark);
+  const d = useLearnData();
+  const MILESTONES = milestones(d);
   const [ref, w] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const W = Math.max(300, w);
   const labelW = Math.min(150, W * 0.36);
   const row = 30, bar = 16, top = 8;
   const H = top + MILESTONES.length * row + 30;
-  const x = log(0.1, 10000, labelW + 4, W - 44);
+  const x = log(0.1, 10000, labelW + 4, W - (upto >= 6 ? 84 : 44));
   const cur = MILESTONES[upto];
   const prev = upto > 0 ? MILESTONES[upto - 1] : null;
   const shown = hover ?? upto;
@@ -53,12 +81,14 @@ export function Climb({ upto, n }: { upto: number; n: string }) {
           How fast the engine writes, after each optimisation: tokens per second for one user, on our M4 Mac mini. The scale is
           logarithmic: each gridline is 10× the last, so equal steps mean equal multiples. Grey bars are earlier steps, the
           ember bar is this chapter's. The dashed line is the speed limit for 32-bit weights (chapter 10).
+          {upto >= 5 &&
+            " The GPU and batching bars were measured on a quiet machine (64-token prompt, then 64 tokens). An earlier GPU run, with other benchmarks competing for memory, gave about three quarters as much."}
           {MILESTONES[upto].total && " The batching bar counts every user's tokens together, so it's allowed past the line: it's a different measure."}
         </>
       }
     >
       <div ref={ref} onMouseLeave={() => setHover(null)}>
-        {w > 0 && (
+        {w > 0 && (upto < 5 || d) && (
           <svg width={W} height={H} role="img" aria-label="decode speed after each optimisation">
             {[0.1, 1, 10, 100, 1000, 10000].map((t) => (
               <g key={t}>

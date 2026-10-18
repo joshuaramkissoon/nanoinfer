@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { boot, claim, decodeTokens, engine, loadModel, release, useEngine, weightLabel } from "../engine/client";
-import { Seg, bestStage, useRecorded } from "../learn/kit";
+import { Seg, bestStage, useLearnData, useRecorded } from "../learn/kit";
+import { climbFactor } from "../learn/Climb";
 import { CHAPTERS, chapterHref } from "../learn/chapters";
 import { linkTo } from "../learn/router";
 import { Journey } from "./Journey";
@@ -183,6 +184,7 @@ export default function Landing() {
     void boot();
   }, []);
   const first = CHAPTERS[0];
+  const factor = climbFactor(useLearnData());
   return (
     <main className="nv lr ld" data-askable data-ask-title="nanoinfer: home">
       <TopBar here="home" />
@@ -194,7 +196,7 @@ export default function Landing() {
         <p className="nv-lead">
           Below, GPT-2 is writing, run by nanoinfer: a small engine written from scratch in Rust, compiled to run in your
           browser. The course starts from nothing and builds up to why this is slow, then follows the engine as it gets
-          1,700× faster, one measured step at a time.
+          {factor ? ` ${factor}× faster for one user` : " thousands of times faster"}, one measured step at a time.
         </p>
       </header>
       <div className="nv-col">

@@ -19,6 +19,7 @@ import Threads from "./ch/Threads";
 import Quantization from "./ch/Quantization";
 import Gpu from "./ch/Gpu";
 import Batching from "./ch/Batching";
+import SpecDecode from "./ch/SpecDecode";
 import ManyGpus from "./ch/ManyGpus";
 
 export interface Chapter {
@@ -53,8 +54,9 @@ export const CHAPTERS: Chapter[] = [
   { slug: "faster-arithmetic", part: 2, title: "Faster arithmetic", q: "Why would sixteen running totals beat one?", Component: Arithmetic },
   { slug: "many-cores", part: 2, title: "Many cores", q: "Ten cores: ten times faster?", Component: Threads },
   { slug: "smaller-numbers", part: 2, title: "Smaller numbers", q: "What if every weight took fewer bytes?", Component: Quantization },
-  { slug: "the-gpu", part: 2, title: "The GPU", q: "Why was the first GPU version slower than one CPU core?", Component: Gpu },
+  { slug: "the-gpu", part: 2, title: "The GPU", q: "Why was the first GPU version no faster than one CPU core?", Component: Gpu },
   { slug: "batching", part: 2, title: "Batching", q: "How do you serve many people with one copy of the model?", Component: Batching },
+  { slug: "speculative-decoding", part: 2, title: "Guess ahead", q: "Can a small model do some of a big model's writing, without changing a word?", Component: SpecDecode },
   { slug: "many-gpus", part: 2, title: "Many GPUs (a teaser)", q: "What happens when the model doesn't fit on one chip?", Component: ManyGpus },
 ];
 

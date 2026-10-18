@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useEngine } from "../../engine/client";
 import { usePalette } from "../../ui/theme";
-import { chartColors, Deeper, Fig, G, Idea, Seg } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, useLearnData, type LearnData } from "../kit";
 
 type Fmt = 32 | 16 | 8 | 4;
 const BYTES_PER_WEIGHT: Record<Fmt, number> = { 32: 4, 16: 2, 8: 1.0625, 4: 0.5625 }; // 8/4-bit: blocks of 32 + a 16-bit scale
@@ -15,16 +15,26 @@ const MODELS = [
 const MACHINES = [
   { v: "m4", label: "M4 Mac mini (spec)", bw: 120, mem: 24e9, note: "Apple's spec figure for the base M4" },
   { v: "core", label: "one M4 core", bw: 57, mem: 24e9, note: "measured: what one CPU core can stream" },
-  { v: "gpu", label: "M4 GPU", bw: 80, mem: 24e9, note: "measured: the GPU's practical read speed" },
+  { v: "gpu", label: "M4 GPU", bw: 105, mem: 24e9, note: "measured: the GPU's practical read speed, on a quiet machine" },
   { v: "h100", label: "datacentre GPU", bw: 3350, mem: 80e9, note: "NVIDIA H100's spec (HBM3), 80 GB" },
 ] as const;
 
 // Our best measured decode for GPT-2 on the M4 (docs/LOG.md), by machine and format.
-const MEASURED: Record<string, Partial<Record<Fmt, number>>> = {
+// The GPU row and its read speed come from the bench files (public/learn/data.json):
+// one user through the batched path (bench/batching.json, B = 1) and the single-stream
+// best (bench/results.jsonl), both on a quiet machine.
+const MEASURED_CPU: Record<string, Partial<Record<Fmt, number>>> = {
   m4: { 32: 146, 16: 249, 8: 425, 4: 497 },
   core: { 32: 100.5 },
-  gpu: { 32: 140, 16: 284, 8: 517, 4: 641 },
 };
+const DT_BITS: Record<string, Fmt> = { f32: 32, f16: 16, q8_0: 8, q4_0: 4 };
+function measuredGpu(d: LearnData | null): Partial<Record<Fmt, number>> {
+  if (!d) return {};
+  const out: Partial<Record<Fmt, number>> = {};
+  for (const s of d.batching.series) if (DT_BITS[s.label]) out[DT_BITS[s.label]] = s.points[0][1];
+  out[4] = Math.max(out[4] ?? 0, d.headline.gpu.decode);
+  return out;
+}
 
 function Calculator() {
   const pal = usePalette();
@@ -33,12 +43,14 @@ function Calculator() {
   const [fmt, setFmt] = useState<Fmt>(32);
   const [mach, setMach] = useState<(typeof MACHINES)[number]["v"]>("m4");
   const tabBw = useEngine((s) => (s.source === "live" ? s.bandwidthGBs : null));
+  const d = useLearnData();
   const M = MODELS.find((m) => m.v === model)!;
-  const C = MACHINES.find((m) => m.v === mach)!;
+  const C0 = MACHINES.find((m) => m.v === mach)!;
+  const C = C0.v === "gpu" && d ? { ...C0, bw: d.headline.gpuReadGBs } : C0;
   const bytes = M.params * BYTES_PER_WEIGHT[fmt];
   const limit = (C.bw * 1e9) / bytes;
   const fits = bytes <= C.mem;
-  const meas = model === "gpt2" ? MEASURED[mach]?.[fmt] : undefined;
+  const meas = model === "gpt2" ? (mach === "gpu" ? measuredGpu(d)[fmt] : MEASURED_CPU[mach]?.[fmt]) : undefined;
   const fmtBytes = (b: number) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${(b / 1e6).toFixed(0)} MB`);
   const fmtTok = (x: number) => (x >= 100 ? Math.round(x).toLocaleString() : x >= 10 ? x.toFixed(0) : x.toFixed(1));
   return (
@@ -151,7 +163,7 @@ export default function SpeedOfLight() {
       <Deeper title="Why can't we ever quite reach it?">
         <p>
           The spec figure is a best case; real programs get 70–90% of it. Our CPU cores together can stream about 98 GB/s
-          (82% of spec), the GPU about 80. On top of that, each token has fixed costs that don't shrink with the bytes:
+          (82% of spec), the GPU about 105 (88%) when nothing else is running, and much less when something is. On top of that, each token has fixed costs that don't shrink with the bytes:
           starting threads, waiting for the GPU, the small operations between the big ones. The faster the model gets, the
           bigger those fixed costs loom.
         </p>

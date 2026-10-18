@@ -56,7 +56,75 @@ export interface LearnData {
   };
   corner: number[][];
   batching: { machine: string; series: { label: string; points: [number, number, number, number][] }[] };
-  serving: Record<string, Record<string, { throughput: number; ttft_p50_ms: number; ttft_p99_ms: number; makespan: number; gantt: [number, number, number, number][] }>>;
+  serving: Record<string, ServingRate>;
+  headline: {
+    naive: BenchBest;
+    gpu: BenchBest;
+    /** GPU read bandwidth, GB/s (Metal probe, quiet machine) */
+    gpuReadGBs: number;
+    gpuSteps: { label: string; stage: string; tokS: number; work: number; idle: number; note: string }[];
+    conditions: string;
+  };
+  webgpu: { what: string; stages: { stage: string; decode: number; prefill: number; metal: string | null; metalDecode: number | null }[] };
+  spec: Record<string, SpecPair>;
+}
+
+export interface BenchBest {
+  stage: string;
+  decode: number;
+  prefill: number;
+  note: string;
+  when: string;
+}
+
+export interface ServingRun {
+  throughput: number;
+  ttft_p50_ms: number;
+  ttft_p99_ms: number;
+  makespan: number;
+  /** [arrival, admitted, first token, finished] in seconds, then output tokens */
+  gantt: [number, number, number, number, number][];
+}
+export interface ServingRate {
+  static: ServingRun;
+  continuous: ServingRun;
+  note: string;
+  requests: number;
+  maxBatch: number;
+  kv: {
+    pages: number;
+    pageTokens: number;
+    stats: { avg_live_seqs: number; avg_pages_per_seq: number; internal_fragmentation: number; snapshots: number };
+    staticPeak: number;
+    contPeak: number;
+    /** each live request: [id, length in tokens, page ids in position order] */
+    snapshots: { iter: number; seqs: [number, number, number[]][] }[];
+  };
+}
+
+export interface SpecPrompt {
+  prompt: string;
+  text: string;
+  target: number;
+  draft: number;
+  c: number;
+  alpha: number;
+  bestK: number;
+  best: number;
+  bestTokS: number;
+  /** [k, speedup, alpha] */
+  perK: [number, number, number][];
+  /** k = 4: [token text, 1 = a draft guess the big model accepted, 0 = written by the big model] */
+  playback: [string, number][];
+  k4: { speedup: number; tokS: number; perForward: number };
+}
+export interface SpecPair {
+  target: string;
+  targetDtype: string;
+  draft: string;
+  draftDtype: string;
+  note: string;
+  prompts: SpecPrompt[];
 }
 
 let dataP: Promise<LearnData | null> | null = null;
@@ -346,6 +414,9 @@ export const GLOSSARY: Record<string, string> = {
   thread: "One independent stream of work. A CPU core runs one at a time; a GPU runs thousands.",
   GPU: "A chip with thousands of small, simple cores built to do the same arithmetic on lots of numbers at once.",
   batch: "Several requests processed together in one forward pass, so each weight read from memory is used for all of them.",
+  "speculative decoding": "A small, fast model guesses the next few tokens; the big model checks all the guesses in one pass and keeps the ones it agrees with.",
+  "time to first token": "How long a user waits, after sending a request, before the first word of the answer appears.",
+  page: "A fixed-size block of KV-cache memory (here 16 tokens' worth). A request gets pages as it grows and hands them back when it's done.",
   GB: "Gigabyte: a billion bytes. A byte is 8 bits; one 32-bit number takes 4 bytes.",
 };
 

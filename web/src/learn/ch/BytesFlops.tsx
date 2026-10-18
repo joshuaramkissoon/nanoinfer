@@ -160,7 +160,7 @@ function Roofline() {
   const [stage, setStage] = useState(4);
   const [P, setP] = useState(64);
   const [ref, w] = useWidth<HTMLDivElement>();
-  const bw = m === "tab" ? liveBw ?? 59 : 80;
+  const bw = m === "tab" ? liveBw ?? 59 : 105;
   const peak = m === "tab" ? livePk ?? 97 : 4300;
   const W = Math.max(300, w), H = 280, pl = 52, pb = 34;
   const x = log(0.1, 1000, pl, W - 10);
@@ -178,7 +178,7 @@ function Roofline() {
           The truck-and-factory story as engineers draw it (a “roofline”). Across: work per byte. Up: arithmetic per second
           you can actually get. Both axes are logarithmic. You're capped by the blue slanted roof (memory) or the ember flat
           one (compute), whichever is lower. Decode sits at 0.5 operations per byte; prefill moves right as the prompt grows.
-          {m === "gpu" && " GPU numbers: ~80 GB/s measured on our M4; ~4.3 trillion operations per second is Apple's spec figure."}
+          {m === "gpu" && " GPU numbers: ~105 GB/s measured on our M4 (quiet machine); ~4.3 trillion operations per second is Apple's spec figure."}
         </>
       }
       tryit={<>Step through 1 → 4. Then drag the prompt length and find where prefill hits the flat roof.</>}
