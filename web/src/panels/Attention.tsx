@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { claim, engine, release, showToken, tokenText, useEngine } from "../engine/client";
-import { NeedsEngine, fitCanvas, useInView, useWidth } from "../ui/Figure";
+import { NeedsEngine, Tip, fitCanvas, useFigureSource, useInView, useWidth } from "../ui/Figure";
 import { css, heatAt, heatLut, rgb, usePalette, type Palette } from "../ui/theme";
 import { fmtMs } from "../lib/fmt";
 
@@ -54,7 +54,10 @@ export default function Attention() {
   const cells = useRef<(HTMLCanvasElement | null)[]>([]);
   const big = useRef<HTMLCanvasElement>(null);
   const [bigRef, bw] = useWidth<HTMLDivElement>();
+  const [cell, setCell] = useState<{ i: number; j: number; x: number; y: number } | null>(null);
+  const rec = useEngine((s) => s.recorded);
   const L = cfg?.nLayer ?? 12, Hh = cfg?.nHead ?? 12;
+  const ready = status === "ready";
 
   const source = useMemo(() => (run?.done ? run.tokens.slice(0, MAX_T).map((t) => t.id) : null), [run]);
 
@@ -83,48 +86,102 @@ export default function Attention() {
 
   // Compute automatically once the figure is on screen and a run has finished.
   useEffect(() => {
-    if (inView && source && !busy && !computing && (!data || data.tokens.join() !== source.join())) void compute();
+    if (ready && inView && source && !busy && !computing && (!data || data.tokens.join() !== source.join())) void compute();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inView, source, busy]);
 
-  const T = data?.tokens.length ?? 0;
+  // Recorded maps until this tab has its own.
+  const shown = data ?? (!ready && rec ? rec.attention : null);
+  useFigureSource(data ? "live" : shown ? "recorded" : "none");
+  // first time the recording shows, start on its clearest previous-token head
   useEffect(() => {
-    if (!data) return;
-    cells.current.forEach((c, i) => c && paint(c, data.maps, i, T, pal, null));
-  }, [data, pal, T]);
+    if (data || !shown) return;
+    const n = shown.tokens.length;
+    let best = 0, bestScore = -1;
+    for (let hIdx = 0; hIdx < shown.maps.length / (n * n); hIdx++) {
+      let sc = 0;
+      for (let i = 1; i < n; i++) sc += shown.maps[hIdx * n * n + i * n + i - 1];
+      if (sc > bestScore) [best, bestScore] = [hIdx, sc];
+    }
+    setSel([Math.floor(best / Hh), best % Hh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown === rec?.attention]);
 
-  // Big view: the selected head, with the selected query's row highlighted.
+  const T = shown?.tokens.length ?? 0;
+  useEffect(() => {
+    if (!shown) return;
+    cells.current.forEach((c, i) => c && paint(c, shown.maps, i, T, pal, null));
+  }, [shown, pal, T]);
+
+  // Big view: the selected head with token labels on both axes, and the
+  // selected query's row outlined.
+  const GL = bw > 420 ? 84 : 56; // left gutter (query labels)
+  const GT = bw > 420 ? 64 : 44; // top gutter (key labels)
+  const size = Math.max(0, bw - GL);
   useEffect(() => {
     const c = big.current;
-    if (!c || !data || !bw) return;
-    const size = bw;
-    const ctx = fitCanvas(c, size, size);
+    if (!c || !shown || !bw) return;
+    const ctx = fitCanvas(c, bw, size + GT);
     const off = document.createElement("canvas");
-    paint(off, data.maps, sel[0] * Hh + sel[1], T, pal, q);
+    paint(off, shown.maps, sel[0] * Hh + sel[1], T, pal, q);
+    ctx.clearRect(0, 0, bw, size + GT);
     ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, size, size);
-    ctx.drawImage(off, 0, 0, size, size);
+    ctx.drawImage(off, GL, GT, size, size);
+    const cellPx = size / T;
+    const every = Math.max(1, Math.ceil(10 / cellPx));
+    ctx.font = `${Math.min(11, Math.max(8, cellPx * 0.8))}px JetBrains Mono, monospace`;
+    ctx.textBaseline = "middle";
+    const lab = (id: number) => {
+      const t = showToken(id);
+      const max = GL > 60 ? 10 : 6;
+      return t.length > max ? t.slice(0, max - 1) + "…" : t;
+    };
+    for (let i = 0; i < T; i += 1) {
+      if (i % every && i !== q && i !== cell?.j) continue;
+      ctx.fillStyle = i === q ? pal.accent : i === cell?.j ? pal.fg : pal.muted;
+      ctx.textAlign = "right";
+      ctx.fillText(lab(shown.tokens[i]), GL - 5, GT + (i + 0.5) * cellPx);
+      ctx.save();
+      ctx.translate(GL + (i + 0.5) * cellPx, GT - 5);
+      ctx.rotate(-Math.PI / 3);
+      ctx.textAlign = "left";
+      ctx.fillStyle = i === cell?.j ? pal.fg : pal.muted;
+      ctx.fillText(lab(shown.tokens[i]), 0, 0);
+      ctx.restore();
+    }
     if (q != null) {
       ctx.strokeStyle = pal.accent;
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(0.75, (q * size) / T, size - 1.5, size / T);
+      ctx.strokeRect(GL + 0.75, GT + q * cellPx, size - 1.5, cellPx);
     }
-  }, [data, sel, pal, q, bw, T, Hh]);
+    if (cell) {
+      ctx.strokeStyle = pal.fg;
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(GL + cell.j * cellPx, GT + cell.i * cellPx, cellPx, cellPx);
+    }
+  }, [shown, sel, pal, q, bw, T, Hh, GL, GT, size, cell]);
 
-  if (status !== "ready") return <NeedsEngine>Where every head of every layer looks, on the text GPT-2 just wrote.</NeedsEngine>;
+  if (!shown && !ready) return <NeedsEngine>Where every head of every layer looks, on the text GPT-2 just wrote.</NeedsEngine>;
 
   const qi = q ?? T - 1;
-  const row = data ? data.maps.subarray((sel[0] * Hh + sel[1]) * T * T + qi * T, (sel[0] * Hh + sel[1]) * T * T + qi * T + T) : null;
+  const head = sel[0] * Hh + sel[1];
+  const rowOf = (i: number) => (shown ? shown.maps.subarray(head * T * T + i * T, head * T * T + i * T + T) : null);
+  const row = rowOf(qi);
   const rmax = row ? Math.max(...row) : 1;
+  const topOf = (i: number) => {
+    const r = rowOf(i);
+    if (!r) return [];
+    return Array.from(r.subarray(0, i + 1), (p, j) => ({ j, p })).sort((a, b) => b.p - a.p).slice(0, 3);
+  };
 
   return (
     <div ref={viewRef}>
-      {!data ? (
+      {!shown ? (
         <div className="nv-empty">{computing ? "running an analysis pass over the text…" : source ? "waiting for the engine…" : "Generate text in fig. 1 first; this figure analyses it."}</div>
       ) : (
         <div className="nv-attn">
           <div>
-            <div className="nv-heads" onPointerLeave={() => {}}>
+            <div className="nv-heads">
               <span />
               {Array.from({ length: Hh }, (_, h) => (
                 <span key={h} className="lab">h{h}</span>
@@ -144,27 +201,43 @@ export default function Attention() {
               ])}
             </div>
             <div className="nv-muted" style={{ fontSize: "0.7rem", marginTop: "0.6rem" }}>
-              {L * Hh} heads × {T}×{T} · one analysis pass in {fmtMs(data.ms)} · rows = query token, columns = the tokens it reads · colour = attention vs. spreading evenly
+              {L * Hh} heads × {T}×{T} · one analysis pass in {fmtMs(shown.ms)} · rows = query token, columns = the tokens it reads · colour = attention vs. spreading evenly · click a head
             </div>
           </div>
           <div>
             <div style={{ fontSize: "0.78rem", marginBottom: "0.5rem" }}>
               <b>layer {sel[0]}, head {sel[1]}</b>
-              <span className="nv-muted"> · query “{showToken(data.tokens[qi])}” at {qi}</span>
+              <span className="nv-muted"> · query “{showToken(shown.tokens[qi])}” at {qi} looks most at </span>
+              {topOf(qi).map((t, k) => (
+                <span key={k} className="nv-chip" style={{ marginRight: 4 }}>
+                  {showToken(shown.tokens[t.j])} <span className="nv-muted">{(t.p * 100).toFixed(0)}%</span>
+                </span>
+              ))}
             </div>
-            <div ref={bigRef}>
+            <div ref={bigRef} style={{ position: "relative" }} onPointerLeave={() => setCell(null)}>
               <canvas
                 ref={big}
                 className="nv-canvas"
-                style={{ borderRadius: 4, cursor: "crosshair", imageRendering: "pixelated" }}
+                style={{ cursor: "crosshair" }}
                 onPointerMove={(e) => {
                   const r = e.currentTarget.getBoundingClientRect();
-                  setQ(Math.min(T - 1, Math.max(0, Math.floor(((e.clientY - r.top) / r.height) * T))));
+                  const px = e.clientX - r.left - GL, py = e.clientY - r.top - GT;
+                  if (px < 0 || py < 0 || px > size || py > size) return setCell(null);
+                  const i = Math.min(T - 1, Math.floor((py / size) * T));
+                  const j = Math.min(T - 1, Math.floor((px / size) * T));
+                  setQ(i);
+                  setCell({ i, j: Math.min(i, j), x: e.clientX - r.left, y: e.clientY - r.top });
                 }}
               />
+              {cell && (
+                <Tip x={Math.min(Math.max(cell.x, 120), bw - 120)} y={cell.y - 14}>
+                  “{showToken(shown.tokens[cell.i])}” → “{showToken(shown.tokens[cell.j])}” ·{" "}
+                  <b>{((rowOf(cell.i)?.[cell.j] ?? 0) * 100).toFixed(1)}%</b> of its attention
+                </Tip>
+              )}
             </div>
             <div className="nv-attn-tokens" style={{ marginTop: "0.8rem" }}>
-              {data.tokens.map((id, j) => {
+              {shown.tokens.map((id, j) => {
                 const v = row && j <= qi ? row[j] / (rmax || 1) : 0;
                 return (
                   <span

@@ -672,3 +672,404 @@ canvas.nv-canvas {
   font-size: 0.75rem;
   color: var(--m-muted);
 }
+
+/* ---- recorded vs live ----------------------------------------------------------- */
+.nv-dot.rec {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--m-muted);
+}
+.nv-prov-rec {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem 0.7rem;
+}
+.nv-live-btn {
+  border: 1px solid color-mix(in srgb, var(--m-accent) 55%, var(--m-rule));
+  background: color-mix(in srgb, var(--m-accent) 8%, transparent);
+  color: var(--m-accent);
+  border-radius: 999px;
+  padding: 0.15rem 0.7rem 0.18rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.nv-live-btn:hover:not(:disabled) {
+  background: var(--m-accent);
+  color: var(--m-bg);
+}
+.nv-live-btn:hover:not(:disabled) .nv-muted {
+  color: inherit;
+  opacity: 0.8;
+}
+.nv-live-btn.busy {
+  cursor: default;
+  animation: nv-pulse 1.2s ease-in-out infinite;
+}
+
+/* ---- shared chips ---------------------------------------------------------------- */
+.nv-chip {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: baseline;
+  padding: 0.05rem 0.45rem;
+  border-radius: 4px;
+  background: var(--m-code-bg);
+  font-size: 0.75rem;
+  white-space: pre;
+}
+.nv-chip.next {
+  box-shadow: inset 0 0 0 1.5px var(--nv-cool);
+}
+.nv-tokchip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.02rem 0.45rem;
+  border-radius: 5px;
+  background: var(--m-code-bg);
+  border: 1px solid var(--m-rule);
+  white-space: pre;
+  font-weight: 700;
+}
+.nv-tokchip.big {
+  font-size: 1.25rem;
+  padding: 0.25rem 0.75rem;
+  letter-spacing: -0.02em;
+}
+.nv-tokchip small {
+  font-size: 0.65rem;
+  font-weight: 400;
+  color: var(--m-muted);
+  letter-spacing: 0;
+}
+.nv-tokchip.accent {
+  border-color: var(--m-accent);
+  color: var(--m-accent);
+  background: color-mix(in srgb, var(--m-accent) 9%, transparent);
+}
+
+/* ---- logit lens -------------------------------------------------------------------- */
+.nv-lens-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.3rem;
+  -webkit-overflow-scrolling: touch;
+}
+.nv-lens-grid {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  min-width: 46rem;
+  font-size: 0.68rem;
+}
+.nv-lens-lab {
+  font-size: 0.65rem;
+  color: var(--m-muted);
+  align-self: center;
+  text-align: right;
+  padding-right: 6px;
+}
+.nv-lens-cell {
+  border: 0;
+  border-radius: 2px;
+  padding: 0 3px;
+  font: inherit;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: clip;
+  cursor: pointer;
+  position: relative;
+  transition: outline-color 0.1s;
+  outline: 1px solid transparent;
+}
+.nv-lens-cell.hit::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.75;
+}
+.nv-lens-cell.sel {
+  outline: 1.5px solid var(--m-fg);
+  outline-offset: -1px;
+  z-index: 1;
+}
+.nv-lens-cell:hover {
+  outline-color: var(--m-accent);
+}
+.nv-lens-tok {
+  border: 0;
+  background: none;
+  font: inherit;
+  white-space: pre;
+  overflow: hidden;
+  color: var(--m-sub);
+  padding: 0.3rem 2px 0;
+  cursor: pointer;
+  border-top: 2px solid transparent;
+}
+.nv-lens-tok.sel {
+  color: var(--m-fg);
+  font-weight: 700;
+  border-top-color: var(--m-fg);
+}
+.nv-lens-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 2rem;
+  margin-top: 1.4rem;
+}
+@media (max-width: 760px) {
+  .nv-lens-detail {
+    grid-template-columns: 1fr;
+  }
+}
+.nv-lens-rows {
+  display: grid;
+  gap: 3px;
+}
+.nv-lens-row {
+  display: grid;
+  grid-template-columns: 2.4rem 1fr;
+  align-items: center;
+  font-size: 0.72rem;
+}
+.nv-lens-row .chips {
+  display: flex;
+  gap: 0.3rem;
+  overflow: hidden;
+}
+
+/* ---- inside one token (scrollytelling) ----------------------------------------------- */
+.nv-scrolly {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 2.4rem;
+  align-items: start;
+}
+.nv-scrolly-graphic {
+  position: sticky;
+  top: 6vh;
+  min-height: 0;
+}
+.nv-walk {
+  border: 1px solid var(--m-rule);
+  border-radius: 10px;
+  background: var(--nv-panel);
+  padding: 1.1rem 1.2rem 1.2rem;
+  display: grid;
+  gap: 0.9rem;
+}
+.nv-walk-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+.nv-walk-arrow {
+  flex: 1;
+  height: 2px;
+  background: var(--m-rule);
+  position: relative;
+  border-radius: 1px;
+}
+.nv-walk-arrow i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--p) * 100%);
+  background: var(--m-accent);
+  border-radius: 1px;
+}
+.nv-walk-arrow::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: -4px;
+  border: 5px solid transparent;
+  border-left: 7px solid var(--m-rule);
+  border-right: 0;
+}
+.nv-walk-out {
+  opacity: 0.12;
+  filter: blur(2px);
+  transition: opacity 0.4s, filter 0.4s;
+}
+.nv-walk-out.on {
+  opacity: 1;
+  filter: none;
+}
+.nv-walk-counters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+.nv-walk-counters .nv-stat .v {
+  font-size: 1.05rem;
+}
+.nv-walk-op {
+  font-size: 0.74rem;
+  color: var(--m-sub);
+  min-height: 2.4em;
+  border-top: 1px solid var(--m-rule);
+  padding-top: 0.55rem;
+}
+.nv-walk-op b {
+  color: var(--m-fg);
+}
+.nv-walk-lens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: baseline;
+  font-size: 0.72rem;
+}
+.nv-scrolly-steps {
+  padding-bottom: 20vh;
+}
+.nv-step {
+  display: flex;
+  align-items: center;
+}
+.nv-step-card {
+  max-width: 28rem;
+  opacity: 0.32;
+  transition: opacity 0.35s;
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+.nv-step.on .nv-step-card {
+  opacity: 1;
+}
+.nv-step-card h3 {
+  font-size: 0.95rem;
+  margin: 0.2rem 0 0.6rem;
+}
+.nv-step-card p {
+  margin: 0 0 0.8rem;
+  color: var(--m-sub);
+}
+.nv-step-card p b,
+.nv-step-card p i {
+  color: var(--m-fg);
+}
+.nv-step-n {
+  font-size: 0.7rem;
+  color: var(--m-accent);
+}
+@media (max-width: 860px) {
+  .nv-scrolly {
+    display: block;
+  }
+  .nv-scrolly-graphic {
+    top: 0.5rem;
+    z-index: 2;
+  }
+  .nv-walk {
+    padding: 0.8rem;
+    gap: 0.6rem;
+    box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.5);
+  }
+  .nv-walk-counters .nv-stat .v {
+    font-size: 0.9rem;
+  }
+  .nv-walk-barcode,
+  .nv-walk-lanes .nv-legend {
+    display: none;
+  }
+  .nv-step-card {
+    background: var(--m-bg);
+    border: 1px solid var(--m-rule);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+    position: relative;
+    z-index: 3;
+  }
+  .nv-step {
+    align-items: flex-end;
+  }
+}
+
+/* ---- stage race ---------------------------------------------------------------------- */
+.nv-race-clock {
+  font-size: 0.78rem;
+}
+.nv-race-clock b {
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+.nv-race {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 1rem;
+}
+.nv-race-lane {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr) 12.5rem;
+  gap: 0.8rem;
+  align-items: center;
+  font-size: 0.78rem;
+}
+.nv-race-lane .nm {
+  font-weight: 700;
+}
+.nv-race-lane .tx {
+  position: relative;
+  height: 1.75rem;
+  background: var(--m-code-bg);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 0.6rem;
+  white-space: pre;
+  /* overflow clips at the start, so the newest words stay visible */
+  justify-content: flex-end;
+}
+.nv-race-lane .tx bdi {
+  position: relative;
+  flex-shrink: 0;
+}
+.nv-race-lane .bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  opacity: 0.2;
+}
+.nv-race-lane .st {
+  text-align: right;
+  color: var(--m-sub);
+}
+.nv-race-lane.fin .nm {
+  color: var(--m-accent);
+}
+.nv-race-lane .nv-caret {
+  height: 0.95em;
+  width: 0.45em;
+}
+@media (max-width: 640px) {
+  .nv-race-lane {
+    grid-template-columns: 1fr auto;
+    gap: 0.2rem 0.6rem;
+  }
+  .nv-race-lane .tx {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+.nv-walk-size {
+  height: 3px;
+  margin-top: 4px;
+  background: var(--m-rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.nv-walk-size i {
+  display: block;
+  height: 100%;
+  background: var(--m-sub);
+  transition: width 0.25s;
+}

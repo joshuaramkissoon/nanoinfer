@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { decodes, useEngine } from "../engine/client";
-import { NeedsEngine, Tip, useWidth } from "../ui/Figure";
+import { decodes, useEngine, useRunSource } from "../engine/client";
+import { useFigureSource, NeedsEngine, Tip, useWidth } from "../ui/Figure";
 import { kindColor, usePalette } from "../ui/theme";
 import { fmtBytes, pct } from "../lib/fmt";
 
@@ -67,6 +67,7 @@ const DT = [
 
 /** What one decode step reads from memory, op by op, from the trace's byte counts. */
 export default function ByteBudget() {
+  useFigureSource(useRunSource());
   const run = useEngine((s) => s.run);
   const pal = usePalette();
   const [ref, w] = useWidth<HTMLDivElement>();

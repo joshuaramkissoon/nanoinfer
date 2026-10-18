@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { claim, decodeTokens, engine, release, useEngine } from "../engine/client";
-import { NeedsEngine, fitCanvas, useWidth } from "../ui/Figure";
+import { LiveButton, NeedsEngine, fitCanvas, useFigureSource, useWidth } from "../ui/Figure";
 import { usePalette } from "../ui/theme";
 import { fmtBytes, fmtMs, linear, sig } from "../lib/fmt";
 
@@ -37,6 +37,29 @@ export default function KvRace() {
   const stop = useRef(false);
   const [ref, w] = useWidth<HTMLDivElement>();
   const grid = useRef<HTMLCanvasElement>(null);
+  const rec = useEngine((s) => s.recorded);
+  const ready = status === "ready";
+  // Before anything live: the recorded race (naive vs kv-cache, same prompt, greedy).
+  const recLanes = useMemo<Lane[] | null>(() => {
+    const r = rec?.race;
+    if (!r) return null;
+    const pick = (st: string) => r.lanes.find((l) => l.stage === st);
+    const a0 = pick("naive"), b0 = pick("kv-cache");
+    if (!a0 || !b0) return null;
+    return [a0, b0].map((l, i) => ({
+      stage: l.stage,
+      slot: -1,
+      tokens: l.tokens,
+      ms: l.ms,
+      pos: l.tokens.map((_, j) => r.prompt.length + j + 1),
+      rows: i === 0 ? l.tokens.reduce((acc, _, j) => acc + r.prompt.length + j + 1, 0) : l.tokens.length,
+      used: l.ms.reduce((x, y) => x + y, 0),
+      kvLen: i === 0 ? -1 : r.prompt.length + l.tokens.length,
+    }));
+  }, [rec]);
+  const shownLanes = lanes ?? (ready ? null : recLanes);
+  const promptText = lanes || !rec?.race ? PROMPT : rec.race.text;
+  useFigureSource(lanes ? "live" : shownLanes ? "recorded" : "none");
 
   useEffect(() => {
     if (!stages.length) return;
@@ -93,7 +116,7 @@ export default function KvRace() {
   };
 
   // KV grid: layers x positions, filling as the cached lane writes
-  const kvLane = lanes?.find((l) => l.kvLen >= 0);
+  const kvLane = shownLanes?.find((l) => l.kvLen >= 0);
   useEffect(() => {
     const c = grid.current;
     if (!c || !w || !cfg) return;
@@ -118,18 +141,18 @@ export default function KvRace() {
     ctx.globalAlpha = 1;
   }, [kvLane?.kvLen, w, cfg, pal, target]);
 
-  if (status !== "ready") return <NeedsEngine>Race two stages on the same prompt and watch one of them drown in recomputation.</NeedsEngine>;
+  if (!ready && !shownLanes) return <NeedsEngine>Race two stages on the same prompt and watch one of them drown in recomputation.</NeedsEngine>;
 
   const H = 220;
   const m = { l: 44, r: 12, t: 10, b: 28 };
-  const maxPos = Math.max(target + 6, ...(lanes?.flatMap((l) => l.pos) ?? [0]));
-  const maxMs = Math.max(10, ...(lanes?.flatMap((l) => l.ms) ?? [0]));
+  const maxPos = Math.max(lanes ? target + 6 : 0, ...(shownLanes?.flatMap((l) => l.pos) ?? [0]));
+  const maxMs = Math.max(10, ...(shownLanes?.flatMap((l) => l.ms) ?? [0]));
   const x = linear(0, maxPos, m.l, (w || 1) - m.r);
   const y = linear(0, maxMs * 1.08, H - m.b, m.t);
   const colors = [pal.up, pal.cool];
   const same =
-    lanes && lanes.length === 2
-      ? lanes[0].tokens.every((t, i) => i >= lanes[1].tokens.length || lanes[1].tokens[i] === t)
+    shownLanes && shownLanes.length === 2
+      ? shownLanes[0].tokens.every((t, i) => i >= shownLanes[1].tokens.length || shownLanes[1].tokens[i] === t)
       : true;
 
   return (
@@ -137,8 +160,10 @@ export default function KvRace() {
       <div className="nv-controls">
         {running ? (
           <button className="nv-btn" onClick={() => (stop.current = true)}>■ Stop</button>
-        ) : (
+        ) : ready ? (
           <button className="nv-btn" onClick={race} disabled={!!busy}>▶ Race</button>
+        ) : (
+          <LiveButton label="race them in your tab" />
         )}
         {[
           [a, setA],
@@ -160,13 +185,13 @@ export default function KvRace() {
       </div>
 
       <div style={{ display: "grid", gap: "0.6rem", marginTop: "1.2rem" }}>
-        {(lanes ?? [a, b].map((s) => ({ stage: s, tokens: [], used: 0, rows: 0 }) as unknown as Lane)).map((l, i) => (
+        {(shownLanes ?? [a, b].map((s) => ({ stage: s, tokens: [], used: 0, rows: 0 }) as unknown as Lane)).map((l, i) => (
           <div key={i} style={{ display: "grid", gridTemplateColumns: "6.5rem 1fr 9rem", gap: "0.8rem", alignItems: "center", fontSize: "0.78rem" }}>
             <span style={{ color: colors[i], fontWeight: 700 }}>{l.stage}</span>
             <div style={{ position: "relative", height: "1.6rem", background: pal.code, borderRadius: 4, overflow: "hidden" }}>
-              <div style={{ position: "absolute", inset: 0, width: `${(100 * l.tokens.length) / target}%`, background: colors[i], opacity: 0.22, transition: "width 0.2s" }} />
+              <div style={{ position: "absolute", inset: 0, width: `${(100 * l.tokens.length) / (lanes ? target : 40)}%`, background: colors[i], opacity: 0.22, transition: "width 0.2s" }} />
               <div style={{ position: "absolute", inset: "0 0.5rem", display: "flex", alignItems: "center", whiteSpace: "pre", overflow: "hidden", direction: "rtl", color: pal.fg }}>
-                <bdi>{PROMPT}{l.tokens.length ? decodeTokens(l.tokens) : ""}</bdi>
+                <bdi>{promptText}{l.tokens.length ? decodeTokens(l.tokens) : ""}</bdi>
               </div>
             </div>
             <span className="nv-num nv-sub" style={{ textAlign: "right" }}>
@@ -188,7 +213,7 @@ export default function KvRace() {
           {[0, 0.25, 0.5, 0.75, 1].map((f) => (
             <text key={f} x={x(maxPos * f)} y={H - m.b + 13} textAnchor="middle">{Math.round(maxPos * f)}</text>
           ))}
-          {lanes?.map((l, i) => (
+          {shownLanes?.map((l, i) => (
             <g key={i}>
               <polyline fill="none" stroke={colors[i]} strokeWidth={2} points={l.pos.map((p, j) => `${x(p)},${y(l.ms[j])}`).join(" ")} />
               {l.pos.length > 0 && <circle cx={x(l.pos.at(-1)!)} cy={y(l.ms.at(-1)!)} r={3.5} fill={colors[i]} />}
@@ -207,9 +232,9 @@ export default function KvRace() {
         <canvas ref={grid} className="nv-canvas" />
       </div>
 
-      {lanes && lanes.every((l) => l.tokens.length > 0) && (
+      {shownLanes && shownLanes.every((l) => l.tokens.length > 0) && (
         <div className="nv-stats" style={{ marginTop: "1.2rem" }}>
-          {lanes.map((l, i) => (
+          {shownLanes.map((l, i) => (
             <div className="nv-stat" key={i}>
               <span className="k" style={{ color: colors[i] }}>{l.stage}: rows pushed through the network</span>
               <span className="v">{l.rows.toLocaleString()}<small>for {l.tokens.length} tokens</small></span>
@@ -219,12 +244,12 @@ export default function KvRace() {
             <span className="k">same tokens out?</span>
             <span className="v" style={{ color: same ? pal.down : pal.up }}>{same ? "identical" : "diverged"}</span>
           </div>
-          {lanes[0].tokens.length > 2 && lanes[1].tokens.length > 2 && (
+          {shownLanes[0].tokens.length > 2 && shownLanes[1].tokens.length > 2 && (
             <div className="nv-stat">
               <span className="k">speed-up so far</span>
               <span className="v nv-accent">
-                {sig(Math.max(lanes[0].tokens.length / lanes[0].used, lanes[1].tokens.length / lanes[1].used) /
-                  Math.min(lanes[0].tokens.length / lanes[0].used, lanes[1].tokens.length / lanes[1].used), 3)}×
+                {sig(Math.max(shownLanes[0].tokens.length / shownLanes[0].used, shownLanes[1].tokens.length / shownLanes[1].used) /
+                  Math.min(shownLanes[0].tokens.length / shownLanes[0].used, shownLanes[1].tokens.length / shownLanes[1].used), 3)}×
               </span>
             </div>
           )}

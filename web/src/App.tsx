@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { boot, loadModel, useEngine, engine, setState, WEIGHTS_BASE } from "./engine/client";
+import { boot, loadModel, useEngine, engine, setState, WEIGHTS_BASE, weightLabel } from "./engine/client";
 import { Figure } from "./ui/Figure";
 import { PANELS } from "./panels/registry";
 import { fmtBytes, fmtMs, sig } from "./lib/fmt";
@@ -77,8 +77,9 @@ export default function App() {
       ))}
 
       <footer className="nv-col nv-footer">
-        nanoinfer · GPT-2 124M weights by OpenAI (MIT) · engine, kernels and tokenizer written from scratch · single-threaded
-        wasm with SIMD128 for now; threads, f16/int8 and WebGPU are later rungs of the ladder.
+        nanoinfer · GPT-2 124M weights by OpenAI (MIT) · engine, kernels and tokenizer written from scratch · three wasm builds
+        (simd128, relaxed-SIMD, threads), picked by what your browser supports · weights downloaded as f16 and widened to f32
+        on load · WebGPU is a later rung of the ladder.
       </footer>
     </main>
   );
@@ -112,7 +113,7 @@ function EngineCard() {
         </span>
         {(s.status === "idle" || s.status === "error") && (
           <button className="nv-btn" onClick={() => loadModel()}>
-            Load GPT-2 · f32 · 548 MB · runs locally
+            Load GPT-2 · {weightLabel()} · runs locally
           </button>
         )}
       </div>
@@ -123,9 +124,14 @@ function EngineCard() {
       )}
       <div className="nv-engine-row nv-muted" style={{ fontSize: "0.72rem" }}>
         <span>stages: {s.stages.map((x) => x.name).join(" → ") || "…"}</span>
+        <span>
+          wasm build: {s.build ?? "…"}
+          {s.threads > 1 ? ` · ${s.threads} workers` : ""}
+          {s.builds.length > 1 ? ` (this browser can run: ${s.builds.join(", ")})` : ""}
+        </span>
         <span>{s.isolated ? "cross-origin isolated" : "not isolated"} · timer {s.timerResUs ? sig(s.timerResUs, 2) : "?"} µs</span>
-        {s.bandwidthGBs != null && <span>stream read {sig(s.bandwidthGBs, 3)} GB/s</span>}
-        {s.peakGflops != null && <span>simd peak {sig(s.peakGflops, 3)} GFLOP/s</span>}
+        {s.bandwidthGBs != null && <span>stream read {sig(s.bandwidthGBs, 3)} GB/s{s.source === "recorded" ? " (recorded)" : ""}</span>}
+        {s.peakGflops != null && <span>simd peak {sig(s.peakGflops, 3)} GFLOP/s{s.source === "recorded" ? " (recorded)" : ""}</span>}
         {s.load && (
           <span>
             loaded in {fmtMs(s.load.ms)} {s.load.fromCache ? "(from OPFS cache)" : ""}{" "}
@@ -141,7 +147,10 @@ function EngineCard() {
             </button>
           </span>
         )}
-        <span>weights from {WEIGHTS_BASE}</span>
+        <span>
+          weights from {WEIGHTS_BASE} as {s.dtype}
+          {s.dtype === "f16" ? " (rounded to f16 for the download, widened to f32 on load)" : ""}
+        </span>
       </div>
     </div>
   );

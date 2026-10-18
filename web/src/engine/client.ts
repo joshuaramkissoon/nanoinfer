@@ -2,7 +2,8 @@
 // One engine, one store: the run you trigger in the hero drives every figure.
 
 import { useSyncExternalStore } from "react";
-import type { ForwardTrace, InitResult, LoadProgress, LoadResult, ModelConfig, Req, StageInfo } from "./types";
+import type { BuildName, ForwardTrace, InitResult, LoadProgress, LoadResult, ModelConfig, Req, StageInfo } from "./types";
+import { loadRecorded, type Recorded } from "../lib/recorded";
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; onEvent?: (m: any) => void };
 
@@ -25,6 +26,13 @@ class Rpc {
       } else p.onEvent?.(m);
     };
     this.worker.onerror = (e) => {
+      // An uncaught error with nothing in flight (seen once at startup from
+      // the threads build's worker pool) leaves the engine usable: log it.
+      if (!this.pending.size) {
+        console.warn("engine worker:", e.message);
+        e.preventDefault();
+        return;
+      }
       const err = new Error(e.message || "engine worker crashed");
       for (const p of this.pending.values()) p.reject(err);
       this.pending.clear();
@@ -65,6 +73,9 @@ export interface Run {
 
 export interface BrowserBench {
   stage: string;
+  /** wasm build it was measured on */
+  build?: BuildName;
+  prefillTokS?: number;
   tokS: number;
   msPerTok: number;
   promptLen: number;
@@ -87,10 +98,21 @@ export interface State {
   run: Run | null;
   /** which panel currently drives the engine (others wait) */
   busy: string | null;
+  /** browser benchmarks, keyed `${build}/${stage}` */
   bench: Record<string, BrowserBench>;
+  /** where the shared figures' data comes from right now */
+  source: "none" | "recorded" | "live";
+  recorded: Recorded | null;
+  build: BuildName | null;
+  builds: BuildName[];
+  threads: number;
+  peakKind: string;
+  /** which checkpoint to download: f16 (half the bytes, widened to f32 on load) or f32 */
+  dtype: "f16" | "f32";
+  f16Available: boolean;
 }
 
-const BENCH_KEY = "nanoinfer-browser-bench-v1";
+const BENCH_KEY = "nanoinfer-browser-bench-v2";
 function loadBench(): Record<string, BrowserBench> {
   try {
     return JSON.parse(localStorage.getItem(BENCH_KEY) ?? "{}");
@@ -113,6 +135,14 @@ let state: State = {
   run: null,
   busy: null,
   bench: loadBench(),
+  source: "none",
+  recorded: null,
+  build: null,
+  builds: [],
+  threads: 1,
+  peakKind: "mul+add",
+  dtype: "f16",
+  f16Available: false,
 };
 const listeners = new Set<() => void>();
 
@@ -146,18 +176,22 @@ let vocabBlob = new Uint8Array();
 let vocabOffs = new Uint32Array();
 const utf8 = new TextDecoder("utf-8", { fatal: false });
 
+// Until the live vocab arrives, tokens decode from the recorded subset.
+const EMPTY = new Uint8Array();
 export function tokenBytes(id: number): Uint8Array {
+  if (!vocabOffs.length) return state.recorded?.vocab.get(id) ?? EMPTY;
   return vocabBlob.subarray(vocabOffs[id], vocabOffs[id + 1]);
 }
 /** One token as text (a lone partial UTF-8 byte shows as U+FFFD). */
 export function tokenText(id: number): string {
-  if (!vocabOffs.length) return `#${id}`;
-  return utf8.decode(tokenBytes(id));
+  const b = tokenBytes(id);
+  if (!b.length && !vocabOffs.length) return `#${id}`;
+  return utf8.decode(b);
 }
 /** Several tokens decoded together (so multi-token characters come out right). */
 export function decodeTokens(ids: number[]): string {
   let n = 0;
-  for (const id of ids) n += vocabOffs[id + 1] - vocabOffs[id];
+  for (const id of ids) n += tokenBytes(id).length;
   const out = new Uint8Array(n);
   let o = 0;
   for (const id of ids) {
@@ -179,15 +213,59 @@ const r = () => (rpc ??= new Rpc());
 
 export const WEIGHTS_BASE = (import.meta.env.VITE_WEIGHTS_BASE as string | undefined) ?? "/weights/gpt2";
 
+const params = new URLSearchParams(location.search);
+/** `?build=simd128|relaxed|threads` forces a wasm build (default: best supported);
+ *  `?threads=N` sizes the threads build's worker pool (default: all cores). */
+export const BUILD_PREF = (params.get("build") as BuildName | null) ?? "auto";
+
+const weightFile = () => (state.dtype === "f16" ? "model-f16.safetensors" : "model.safetensors");
+export const weightLabel = () => (state.dtype === "f16" ? "f16 · 274 MB" : "f32 · 548 MB");
+
+/** Show the recorded run in every figure (only while nothing live exists). */
+async function applyRecorded() {
+  const rec = await loadRecorded();
+  if (!rec) return;
+  setState((s) =>
+    s.source === "live"
+      ? { recorded: rec }
+      : {
+          recorded: rec,
+          source: "recorded",
+          run: rec.run,
+          config: rec.meta.config,
+          bandwidthGBs: rec.meta.bandwidthGBs,
+          peakGflops: rec.meta.peakGflops,
+          stages: s.stages.length ? s.stages : rec.meta.stages,
+        },
+  );
+}
+
+let booted = false;
 export async function boot() {
-  if (state.status !== "boot") return;
+  // once per page: React StrictMode runs effects twice in dev, and a second
+  // init would try to start a second rayon pool in the threads build
+  if (booted || state.status !== "boot") return;
+  booted = true;
+  void applyRecorded();
   try {
-    const res = await r().call<InitResult>({ t: "init" });
-    setState({ status: "idle", stages: res.stages, isolated: res.isolated, timerResUs: res.timerResUs });
-    // Never auto-download 500 MB, but if this browser already has the weights
+    const head = await fetch(`${WEIGHTS_BASE}/model-f16.safetensors`, { method: "HEAD" }).catch(() => null);
+    const f16Available = !!head?.ok;
+    setState({ f16Available, dtype: params.get("weights") === "f32" || !f16Available ? "f32" : "f16" });
+    const res = await r().call<InitResult>({ t: "init", build: BUILD_PREF, threads: Number(params.get("threads")) || undefined });
+    setState({
+      status: "idle",
+      stages: res.stages,
+      isolated: res.isolated,
+      timerResUs: res.timerResUs,
+      build: res.build,
+      builds: res.builds,
+      threads: res.threads,
+      peakKind: res.peakKind,
+    });
+    // Never auto-download, but if this browser already has the weights
     // cached, loading costs nothing: go straight to live.
     try {
-      const abs = new URL(`${WEIGHTS_BASE}/model.safetensors`, location.href).href;
+      const abs = new URL(`${WEIGHTS_BASE}/${weightFile()}`, location.href).href;
       const name = abs.replace(/^https?:\/\//, "").replace(/[^a-zA-Z0-9._-]/g, "_");
       const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle("nanoinfer-weights-v1");
       await dir.getFileHandle(name + ".ok");
@@ -205,16 +283,20 @@ export async function loadModel() {
   setState({ status: "loading", error: null });
   try {
     const stage = state.stages.find((s) => s.name === "kv-cache")?.name ?? state.stages[0].name;
-    const res = await r().call<LoadResult>({ t: "load", stage, base: WEIGHTS_BASE }, (m) => {
+    const res = await r().call<LoadResult>({ t: "load", stage, base: WEIGHTS_BASE, dtype: state.dtype }, (m) => {
       if (m.t === "progress") setState({ progress: m.p });
     });
     vocabBlob = res.vocabBlob;
     vocabOffs = res.vocabOffsets;
     setState({
       status: "ready",
+      source: "live",
       config: res.config,
       progress: null,
       load: { ms: res.loadMs, fromCache: res.fromCache, bytes: res.weightBytes },
+      // the recorded roofs are someone else's machine: re-measure here
+      bandwidthGBs: null,
+      peakGflops: null,
     });
     // Measure the two roofs once, right away (each takes well under a second).
     measureRoofs();
@@ -226,6 +308,9 @@ export async function loadModel() {
 export async function measureRoofs() {
   // Best of two probes: the first one right after the 1 GB weight load reads
   // ~40% low (cold pages / clocks), so measure, wait a beat, measure again.
+  // V8 first runs wasm in its baseline compiler (Liftoff) and tiers up to
+  // TurboFan once code is hot, so the first peak probe reads ~2x low: warm up.
+  await r().call<number>({ t: "benchPeak", millions: 100 });
   const probe = async () => {
     const bw = await r().call<number>({ t: "benchBandwidth", mb: 256, iters: 8 });
     const pk = await r().call<number>({ t: "benchPeak", millions: 400 });
@@ -247,6 +332,9 @@ export const engine = {
   encode: (text: string) => r().call<number[]>({ t: "encode", text }),
   capture: (topK: number, layer = -1, head = -1) => r().call<null>({ t: "capture", topK, layer, head }),
   attention: (tokens: number[]) => r().call<Float32Array>({ t: "attention", tokens }),
+  lens: (tokens: number[], positions: number[], topK: number) => r().call<Float32Array>({ t: "lens", tokens, positions, topK }),
+  residual: (tokens: number[], pos: number) => r().call<Float32Array>({ t: "residual", tokens, pos }),
+  logits: (slot: number) => r().call<Float32Array>({ t: "logits", slot }),
   clearCache: () => r().call<boolean>({ t: "clearCache" }),
   seed: (seed: number) => r().call<null>({ t: "seed", seed }),
 };
@@ -268,8 +356,19 @@ export function median(xs: number[]): number {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+/** Key for a browser benchmark result. */
+export const benchKey = (build: string | null, stage: string) => `${build ?? "?"}/${stage}`;
+
+/** Is the shared data live (from this tab) or recorded? */
+export const useLive = () => useEngine((s) => s.source === "live");
+
 /** Decode forwards of a run (excludes prefill). */
 export const decodes = (run: Run | null) => (run ? run.forwards.filter((f) => f.phase === "decode") : []);
 
 // Dev-only handle for poking the live engine from the console / test harness.
 if (import.meta.env.DEV) (globalThis as any).__nanoinfer = { getState, setState, engine, measureRoofs, loadModel, bench: () => import("./generate") };
+
+/** Where the shared run currently comes from: the recording, or this tab. */
+export function useRunSource(): "live" | "recorded" | "none" {
+  return useEngine((s) => (!s.run ? "none" : s.recorded && s.run === s.recorded.run ? "recorded" : "live"));
+}

@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { decodes, engine, median, showToken, tokenText, useEngine, type Tok } from "../engine/client";
+import { decodes, engine, loadModel, median, showToken, tokenText, useEngine, useRunSource, weightLabel, type Tok } from "../engine/client";
 import { generate } from "../engine/generate";
-import { NeedsEngine, useWidth } from "../ui/Figure";
+import { NeedsEngine, useFigureSource, useWidth } from "../ui/Figure";
 import { css, heatAt, usePalette, useReducedMotion } from "../ui/theme";
 import { fmtBytes, fmtMs, linear, sig } from "../lib/fmt";
 import { STAGE_NOTES } from "../lib/stages";
 
 const DEFAULT_PROMPT = "In a shocking finding, scientists discovered a herd of unicorns living in";
+
+/** A core stage whose wasm build runs some other stage's code. */
+export const fallback = (s: { wasmNote?: string; browserOnly?: boolean }) => !!s.wasmNote && !s.browserOnly && !/threads \(/.test(s.wasmNote);
 
 export function StagePicker({ value, onChange, disabled }: { value: string; onChange: (s: string) => void; disabled?: boolean }) {
   const stages = useEngine((s) => s.stages);
@@ -18,10 +21,10 @@ export function StagePicker({ value, onChange, disabled }: { value: string; onCh
           aria-pressed={s.name === value}
           disabled={disabled}
           onClick={() => onChange(s.name)}
-          title={`stage ${i} · kernels: ${s.kernels}${STAGE_NOTES[s.name] ? ` · ${STAGE_NOTES[s.name].what}` : ""}${STAGE_NOTES[s.name]?.wasm ? ` · ${STAGE_NOTES[s.name].wasm}` : ""}`}
+          title={`stage ${i} · kernels: ${s.kernels}${STAGE_NOTES[s.name] ? ` · ${STAGE_NOTES[s.name].what}` : ""}${s.wasmNote ? ` · ${s.wasmNote}` : ""}`}
         >
           <span className="nv-muted">{i}</span> {s.name}
-          {STAGE_NOTES[s.name]?.wasm && <span className="nv-muted">*</span>}
+          {fallback(s) && <span className="nv-muted">*</span>}
         </button>
       ))}
     </div>
@@ -44,12 +47,17 @@ export default function RunIt() {
   const abort = useRef({ aborted: false });
   const running = busy === "hero";
   const ready = status === "ready";
+  const source = useRunSource();
+  const recorded = source === "recorded";
+  useFigureSource(source);
 
   useEffect(() => {
     if (stages.length && !stages.some((s) => s.name === stage)) {
-      // default: the newest stage that really runs its own kernels in wasm
-      const native = stages.filter((s) => !STAGE_NOTES[s.name]?.wasm);
-      setStage((native.length ? native : stages)[(native.length ? native : stages).length - 1].name);
+      // default: the fastest browser rung if there is one, else the newest
+      // stage that really runs its own kernels in wasm
+      const own = stages.filter((s) => !fallback(s));
+      const pick = own.find((s) => s.name === "wasm-fma") ?? own.find((s) => s.name === "wasm-simd") ?? own.filter((s) => !s.browserOnly).at(-1) ?? stages.at(-1)!;
+      setStage(pick.name);
     }
   }, [stages, stage]);
 
@@ -69,7 +77,7 @@ export default function RunIt() {
   // GPT-2 talk before reading anything.
   const autoRan = useRef(false);
   useEffect(() => {
-    if (ready && !autoRan.current && !run) {
+    if (ready && !autoRan.current && (!run || recorded)) {
       autoRan.current = true;
       void go();
     }
@@ -93,6 +101,11 @@ export default function RunIt() {
   const chosen = shown ? shown.id : null;
   const kvBytes = last && last.kvLen >= 0 && cfg ? 2 * cfg.nLayer * last.kvLen * cfg.nEmbd * 4 : null;
 
+  // While showing the recording, put its prompt in the box.
+  useEffect(() => {
+    if (recorded && run) setPrompt(decodeRecordedPrompt(run.tokens));
+  }, [recorded, run]);
+
   if (!ready && !run) return <NeedsEngine>Type a prompt and GPT-2 writes the rest, one token at a time, in this tab.</NeedsEngine>;
 
   return (
@@ -109,6 +122,11 @@ export default function RunIt() {
         {running ? (
           <button className="nv-btn" onClick={() => (abort.current.aborted = true)}>
             ■ Stop
+          </button>
+        ) : !ready ? (
+          <button className="nv-btn" onClick={() => loadModel()} disabled={status === "loading" || status === "boot"}
+            title="downloads GPT-2 once (cached in your browser) and runs it on your CPU">
+            {status === "loading" ? "loading GPT-2…" : <>▶ Run live <span style={{ opacity: 0.7, fontWeight: 400 }}>· {weightLabel()}</span></>}
           </button>
         ) : (
           <button className="nv-btn" onClick={() => go()} disabled={!ready || !!busy}>
@@ -165,7 +183,9 @@ export default function RunIt() {
         <div>
           <div className="nv-muted" style={{ fontSize: "0.72rem", marginBottom: "0.5rem" }}>
             {shown
-              ? `what it could have said at position ${sel} (click one to branch)`
+              ? recorded
+                ? `what it could have said at position ${sel}`
+                : `what it could have said at position ${sel} (click one to branch)`
               : running
                 ? "next token, as it is being chosen"
                 : "the last choice · click any token to inspect it"}
@@ -177,7 +197,7 @@ export default function RunIt() {
                   key={d.id}
                   className={`nv-prob${chosen === d.id ? " chosen" : ""}`}
                   onClick={() => shown && sel != null && branch(sel, d)}
-                  disabled={!shown || running || chosen === d.id}
+                  disabled={!shown || running || chosen === d.id || !ready}
                   title={shown && chosen !== d.id ? `branch: continue with "${tokenText(d.id)}"` : undefined}
                 >
                   <span className="tk">{showToken(d.id)}</span>
@@ -200,6 +220,10 @@ export default function RunIt() {
       </div>
     </div>
   );
+}
+
+function decodeRecordedPrompt(toks: Tok[]): string {
+  return toks.filter((t) => t.prompt).map((t) => tokenText(t.id)).join("");
 }
 
 export function Stat({ k, v, u, accent }: { k: string; v: string; u?: string; accent?: boolean }) {

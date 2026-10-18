@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { decodes, median, useEngine } from "../engine/client";
-import { NeedsEngine } from "../ui/Figure";
+import { decodes, median, useEngine, useRunSource } from "../engine/client";
+import { useFigureSource, NeedsEngine } from "../ui/Figure";
 import { usePalette } from "../ui/theme";
 import { fmtBytes, log, pct, sig } from "../lib/fmt";
 import { M4_GBS, latestByStage, useNative } from "../lib/native";
@@ -19,6 +19,9 @@ const A0 = Math.PI * 1.08, A1 = -Math.PI * 0.08; // gauge sweep (radians, math o
 
 /** Speed-of-light gauge: tok/s achieved vs the bandwidth ceiling. */
 export default function SpeedOfLight() {
+  const src = useRunSource();
+  useFigureSource(src);
+  const tab = src === "recorded" ? "the recorded tab's" : "this tab's";
   const pal = usePalette();
   const cfg = useEngine((s) => s.config);
   const bw = useEngine((s) => s.bandwidthGBs);
@@ -89,7 +92,7 @@ export default function SpeedOfLight() {
           );
         })}
         {[
-          ceilBrowser && { v: ceilBrowser, l: "this tab's ceiling", c: pal.fg },
+          ceilBrowser && { v: ceilBrowser, l: `${tab} ceiling`, c: pal.fg },
           { v: ceilNative, l: "M4 ceiling", c: pal.sub },
           bestNative > 0 && dt.k === "f32" && { v: bestNative, l: "best native", c: pal.cool },
         ]
@@ -106,17 +109,17 @@ export default function SpeedOfLight() {
           {liveTok ? sig(liveTok, 3) : "–"}
         </text>
         <text x={cx} y={cy + 58} textAnchor="middle">
-          tok/s achieved {liveTok && ceilBrowser ? `· ${pct(liveTok / ceilBrowser, 0)} of this tab's ceiling` : ""}
+          tok/s achieved {liveTok && ceilBrowser ? `· ${pct(liveTok / ceilBrowser, 0)} of ${tab} ceiling` : ""}
         </text>
       </svg>
       <div className="nv-legend" style={{ justifyContent: "center", marginTop: 0 }}>
-        {ceilBrowser && <span><i style={{ background: pal.fg }} />this tab's ceiling {sig(ceilBrowser, 3)}</span>}
+        {ceilBrowser && <span><i style={{ background: pal.fg }} />{tab} ceiling {sig(ceilBrowser, 3)}</span>}
         <span><i style={{ background: pal.sub }} />M4 ceiling (120 GB/s) {sig(ceilNative, 3)}</span>
         {bestNative > 0 && dt.k === "f32" && <span><i style={{ background: pal.cool }} />best native run {sig(bestNative, 3)}</span>}
         <span><i style={{ background: pal.accent }} />achieved here</span>
       </div>
       <div className="nv-stats" style={{ justifyContent: "center", marginTop: "1rem" }}>
-        <div className="nv-stat"><span className="k">measured read bandwidth (this tab)</span><span className="v">{bw ? sig(bw, 3) : "…"}<small>GB/s</small></span></div>
+        <div className="nv-stat"><span className="k">measured read bandwidth ({src === "recorded" ? "recorded" : "this tab"})</span><span className="v">{bw ? sig(bw, 3) : "…"}<small>GB/s</small></span></div>
         <div className="nv-stat"><span className="k">÷ bytes per token</span><span className="v">{fmtBytes(bytes + kvRead)}</span></div>
         <div className="nv-stat"><span className="k">= ceiling</span><span className="v nv-accent">{ceilBrowser ? sig(ceilBrowser, 3) : "…"}<small>tok/s</small></span></div>
       </div>

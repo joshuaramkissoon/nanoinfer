@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { decodes, useEngine } from "../engine/client";
+import { decodes, useEngine, useRunSource } from "../engine/client";
 import type { ForwardTrace, OpRec } from "../engine/types";
-import { NeedsEngine, Tip, fitCanvas, useWidth } from "../ui/Figure";
+import { useFigureSource, NeedsEngine, Tip, fitCanvas, useWidth } from "../ui/Figure";
 import { KIND_LABEL, kindColor, usePalette } from "../ui/theme";
 import { aggregateByName } from "../lib/agg";
 import { fmtMs, pct, sig } from "../lib/fmt";
@@ -13,6 +13,7 @@ const LEFT = 34;
 
 /** One horizontal strip per decoded token; every op is a block of its measured width. */
 export default function TimeStrip() {
+  useFigureSource(useRunSource());
   const run = useEngine((s) => s.run);
   const pal = usePalette();
   const [wrapRef, w] = useWidth<HTMLDivElement>();

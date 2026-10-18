@@ -11,6 +11,9 @@ import Roofline from "./Roofline";
 import KvRace from "./KvRace";
 import Attention from "./Attention";
 import Ladder from "./Ladder";
+import InsideToken from "./InsideToken";
+import LogitLens from "./LogitLens";
+import StageRace from "./StageRace";
 
 export interface PanelDef {
   id: string;
@@ -33,6 +36,50 @@ export const PANELS: PanelDef[] = [
         Each token is picked from a probability distribution over all 50,257 tokens; the underline shows how likely the
         model thought the chosen one was. <b>Click a token</b> to see its rivals, then click a rival to branch the story from
         that point.
+      </>
+    ),
+  },
+  {
+    id: "inside",
+    title: "Inside one token",
+    Component: InsideToken,
+    intro: (
+      <>
+        <h2>Follow one token</h2>
+        <p>
+          Every word above came out of the same loop: take the newest token, push it through 12 layers, score the whole
+          vocabulary, pick one. Scroll, and one real step of that loop plays out op by op, with the time, bytes and FLOPs the
+          engine measured for each.
+        </p>
+      </>
+    ),
+    caption: (
+      <>
+        One decode step from the run in fig. 1: 135 ops. Each segment's width is its measured time, and the barcode is
+        the actual residual stream after each layer. The final distribution is the real one; re-sampling it costs nothing
+        because the expensive part, the forward pass, is already done.
+      </>
+    ),
+  },
+  {
+    id: "lens",
+    title: "What is it thinking at each layer?",
+    Component: LogitLens,
+    intro: (
+      <>
+        <h2>Reading its mind, one layer at a time</h2>
+        <p>
+          The last two ops of every step (a LayerNorm and the LM head) turn the residual stream into a guess. Nothing stops us
+          applying them early. Decode the stream after layer 3 and you get what the model "would say" if it had only three
+          layers. This trick is called the <i>logit lens</i>.
+        </p>
+      </>
+    ),
+    caption: (
+      <>
+        Each column is a position in the text, each row a depth; the cell is the top guess for the <i>next</i> token.
+        Shallow layers mostly guess the previous word or something common like “ the”. The answer often only appears in the
+        last few layers, and for easy tokens it locks in early. <b>Click a column</b> to see its guesses climb.
       </>
     ),
   },
@@ -138,6 +185,27 @@ export const PANELS: PanelDef[] = [
     ),
   },
   {
+    id: "race",
+    title: "Every rung, racing",
+    Component: StageRace,
+    intro: (
+      <>
+        <h2>Feel the climb</h2>
+        <p>
+          Numbers on a chart are one thing. Here every stage writes the same sentence, each at its own measured speed.
+        </p>
+      </>
+    ),
+    caption: (
+      <>
+        Same prompt, same greedy words (until a quantised stage rounds the weights enough to change its mind), very different
+        waits. Naive recomputes the whole sentence for every token; the KV
+        cache stops that; the unrolled and SIMD kernels make each remaining matmul fast. The browser-only rungs (orange) are
+        kernels written for wasm itself.
+      </>
+    ),
+  },
+  {
     id: "ladder",
     title: "The ladder",
     Component: Ladder,
@@ -153,9 +221,9 @@ export const PANELS: PanelDef[] = [
     ),
     caption: (
       <>
-        The black bars come from the native hillclimb on a Mac mini M4. The orange bars were measured by your browser just
-        now, running the same Rust code compiled to wasm. Both are drawn under their speed-of-light lines. The gap between
-        a bar and its line is the work left to do.
+        The dark bars come from the native hillclimb on a Mac mini M4. The orange bars are the same Rust compiled to wasm,
+        measured in a browser: dashed is the recording, solid is your tab once you benchmark it. Switch to <b>prefill</b> to
+        see where the browser-only SIMD rungs pay off. The gap between a bar and its line is the work left to do.
       </>
     ),
   },

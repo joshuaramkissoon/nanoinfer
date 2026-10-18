@@ -1,5 +1,16 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
-import { useEngine } from "../engine/client";
+import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { loadModel, useEngine, weightLabel } from "../engine/client";
+import { fmtBytes } from "../lib/fmt";
+
+export type FigSource = "live" | "recorded" | "none";
+const FigCtx = createContext<(s: FigSource) => void>(() => {});
+
+/** A panel tells its frame where the data it's drawing came from. Defaults to
+ *  the shared run's source. */
+export function useFigureSource(src: FigSource) {
+  const set = useContext(FigCtx);
+  useLayoutEffect(() => set(src), [src, set]);
+}
 
 /** Frame shared by every panel: number, title, provenance, body, caption. */
 export function Figure({
@@ -20,32 +31,80 @@ export function Figure({
   /** override the provenance line */
   prov?: ReactNode;
 }) {
+  const global = useEngine((s) => s.source);
+  const [src, setSrc] = useState<FigSource | null>(null);
   return (
-    <figure className={`nv-fig${narrow ? " narrow" : ""}`} id={id} style={{ margin: undefined }}>
-      <div className="nv-fig-head">
-        <div className="nv-fig-title">
-          <span className="n">fig. {String(n).padStart(2, "0")}</span>
-          {title}
+    <FigCtx.Provider value={setSrc}>
+      <figure className={`nv-fig${narrow ? " narrow" : ""}`} id={id} style={{ margin: undefined }} data-source={src ?? global}>
+        <div className="nv-fig-head">
+          <div className="nv-fig-title">
+            <span className="n">fig. {String(n).padStart(2, "0")}</span>
+            {title}
+          </div>
+          <div className="nv-prov">{prov ?? <Provenance source={src ?? global} />}</div>
         </div>
-        <div className="nv-prov">{prov ?? <Provenance />}</div>
-      </div>
-      <div className="nv-fig-body">{children}</div>
-      <figcaption className="nv-cap">{caption}</figcaption>
-    </figure>
+        <div className="nv-fig-body">{children}</div>
+        <figcaption className="nv-cap">{caption}</figcaption>
+      </figure>
+    </FigCtx.Provider>
   );
 }
 
-export function Provenance() {
+const BUILD_LABEL: Record<string, string> = { simd128: "wasm simd128", relaxed: "wasm relaxed-simd", threads: "wasm threads" };
+
+export function Provenance({ source }: { source: FigSource }) {
   const s = useEngine((s) => s.status);
   const iso = useEngine((s) => s.isolated);
   const res = useEngine((s) => s.timerResUs);
-  if (s !== "ready") return <span>waiting for the engine</span>;
+  const build = useEngine((s) => s.build);
+  const threads = useEngine((s) => s.threads);
+  const rec = useEngine((s) => s.recorded);
+  const pr = useEngine((s) => s.progress);
+  if (source === "live" && s === "ready")
+    return (
+      <span>
+        <span className="nv-dot live" />
+        live · this tab · {BUILD_LABEL[build ?? "simd128"]} · {threads > 1 ? `${threads} threads` : "1 thread"} · timer{" "}
+        {res < 1 ? res.toFixed(2) : res.toFixed(0)} µs
+        {iso ? "" : " (not isolated)"}
+      </span>
+    );
+  if (source === "recorded" && rec)
+    return (
+      <span className="nv-prov-rec">
+        <span className="nv-dot rec" />
+        <span title={`${rec.meta.runtime} · ${rec.meta.build} build · ${rec.meta.recordedAt}`}>
+          recorded on an {rec.meta.machine.replace(/^Apple /, "")} · same wasm, in V8
+        </span>
+        <LiveButton />
+      </span>
+    );
+  if (s === "loading")
+    return (
+      <span>
+        <span className="nv-dot busy" />
+        loading GPT-2{pr && pr.phase === "download" ? ` · ${fmtBytes(pr.loaded)} / ${fmtBytes(pr.total)}` : pr ? " · parsing" : "…"}
+      </span>
+    );
+  return <span>waiting for the engine</span>;
+}
+
+/** "Run it live" affordance, shown wherever a figure is drawing recorded data. */
+export function LiveButton({ label }: { label?: string }) {
+  const s = useEngine((s) => s.status);
+  const pr = useEngine((s) => s.progress);
+  useEngine((s) => s.dtype);
+  if (s === "ready") return null;
+  if (s === "loading")
+    return (
+      <span className="nv-live-btn busy">
+        loading{pr && pr.total ? ` ${Math.round((100 * pr.loaded) / pr.total)}%` : "…"}
+      </span>
+    );
   return (
-    <span>
-      <span className="nv-dot live" />
-      live · this tab · wasm simd128 · 1 thread · f32 · timer {res < 1 ? res.toFixed(2) : res.toFixed(0)} µs
-      {iso ? "" : " (not isolated)"}
-    </span>
+    <button className="nv-live-btn" onClick={() => loadModel()} disabled={s === "boot"} title="downloads GPT-2 once (cached in your browser) and runs it on your CPU">
+      ▶ {label ?? "run live in your tab"} <span className="nv-muted">· {weightLabel()}</span>
+    </button>
   );
 }
 

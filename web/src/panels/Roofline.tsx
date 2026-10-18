@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { decodes, useEngine } from "../engine/client";
-import { NeedsEngine, Tip, useWidth } from "../ui/Figure";
+import { decodes, useEngine, useRunSource } from "../engine/client";
+import { NeedsEngine, Tip, useFigureSource, useWidth } from "../ui/Figure";
 import { KIND_LABEL, kindColor, usePalette } from "../ui/theme";
 import { aggregateByName, type OpAgg } from "../lib/agg";
 import { log, logTicks, sig, short } from "../lib/fmt";
@@ -13,7 +13,10 @@ export default function Roofline() {
   const run = useEngine((s) => s.run);
   const bw = useEngine((s) => s.bandwidthGBs);
   const peak = useEngine((s) => s.peakGflops);
-  const timer = useEngine((s) => s.timerResUs);
+  const timer = useEngine((s) => s.timerResUs || 5);
+  const src = useRunSource();
+  useFigureSource(src);
+  const peakKind = useEngine((s) => (src === "recorded" ? (s.recorded?.meta.build === "simd128" ? "mul+add" : "fma") : s.peakKind));
   const pal = usePalette();
   const [ref, w] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<{ a: OpAgg; x: number; y: number; prefill: boolean } | null>(null);
@@ -41,14 +44,43 @@ export default function Roofline() {
       .filter((a) => a.ms / a.calls > minMs && a.flops > 0 && a.bytes > 0)
       .map((a) => ({ a, prefill, I: a.flops / a.bytes, G: a.flops / a.ms / 1e6 }));
   const all = [...dots(decAgg, false), ...(showPrefill ? dots(preAgg, true) : [])];
-  // Label the big decode dots; nudge labels down until they stop overlapping.
-  const labels: { key: string; x: number; y: number; text: string }[] = [];
-  for (const d of [...all].filter((d) => !d.prefill && (d.a.ms / total > 0.04 || d.a.kind === "lm_head")).sort((p, q) => q.a.ms - p.a.ms)) {
+  // Label the big decode dots. Each label tries eight spots around its dot
+  // (right first) and takes the first that collides with no other label, no
+  // dot and nothing outside the plot.
+  type Box = { x0: number; y0: number; x1: number; y1: number };
+  const hit = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+  const dotBoxes: Box[] = all.map((d) => {
     const r = 3 + Math.sqrt(d.a.ms / total) * 22;
-    let lx = x(d.I) + r + 4, ly = y(d.G) + 3;
-    const wTxt = d.a.name.length * 6.2;
-    while (labels.some((l) => Math.abs(l.y - ly) < 11 && lx < l.x + l.text.length * 6.2 && l.x < lx + wTxt)) ly += 11;
-    labels.push({ key: d.a.name, x: lx, y: ly, text: d.a.name });
+    return { x0: x(d.I) - r, y0: y(d.G) - r, x1: x(d.I) + r, y1: y(d.G) + r };
+  });
+  const labels: { key: string; x: number; y: number; text: string; anchor: "start" | "end" | "middle" }[] = [];
+  const placed: Box[] = [];
+  const CW = 6.2, LH = 11;
+  for (const d of [...all].filter((d) => !d.prefill && (d.a.ms / total > 0.03 || d.a.kind === "lm_head")).sort((p, q) => q.a.ms - p.a.ms)) {
+    const r = 3 + Math.sqrt(d.a.ms / total) * 22;
+    const cx = x(d.I), cy = y(d.G), tw = d.a.name.length * CW;
+    const spots: [number, number, "start" | "end" | "middle"][] = [
+      [cx + r + 4, cy + 3, "start"],
+      [cx - r - 4, cy + 3, "end"],
+      [cx, cy - r - 5, "middle"],
+      [cx, cy + r + 11, "middle"],
+      [cx + r + 3, cy - r - 2, "start"],
+      [cx + r + 3, cy + r + 9, "start"],
+      [cx - r - 3, cy - r - 2, "end"],
+      [cx - r - 3, cy + r + 9, "end"],
+    ];
+    const box = ([lx, ly, a]: (typeof spots)[number]): Box => {
+      const x0 = a === "start" ? lx : a === "end" ? lx - tw : lx - tw / 2;
+      return { x0: x0 - 1, y0: ly - LH + 2, x1: x0 + tw + 1, y1: ly + 2 };
+    };
+    const ok = (s: (typeof spots)[number]) => {
+      const b = box(s);
+      return b.x0 > m.l && b.x1 < w - m.r && b.y0 > m.t && b.y1 < H - m.b && !placed.some((p) => hit(p, b)) && !dotBoxes.some((p, i) => all[i] !== d && hit(p, b));
+    };
+    const spot = spots.find(ok);
+    if (!spot) continue; // unlabeled beats overlapping; the tooltip still names it
+    placed.push(box(spot));
+    labels.push({ key: d.a.name, x: spot[0], y: spot[1], text: d.a.name, anchor: spot[2] });
   }
 
   return (
@@ -91,7 +123,7 @@ export default function Roofline() {
             memory roof · {sig(bw, 3)} GB/s
           </text>
           <text x={w - m.r - 4} y={y(peak) - 6} textAnchor="end" style={{ fill: pal.fg }}>
-            compute roof · {sig(peak, 3)} GFLOP/s (simd128, 1 core)
+            compute roof · {sig(peak, 3)} GFLOP/s ({peakKind === "fma" ? "relaxed-SIMD FMA" : "simd128 mul+add"}, 1 core)
           </text>
           <line x1={x(ridge)} x2={x(ridge)} y1={y(peak)} y2={H - m.b} stroke={pal.muted} strokeDasharray="4 3" />
           <text x={x(ridge) + 4} y={H - m.b - 6} style={{ fontSize: 9 }}>ridge {sig(ridge, 2)}</text>
@@ -116,7 +148,7 @@ export default function Roofline() {
             );
           })}
           {labels.map((l) => (
-            <text key={l.key} x={l.x} y={l.y} style={{ fill: pal.sub, pointerEvents: "none" }}>{l.text}</text>
+            <text key={l.key} x={l.x} y={l.y} textAnchor={l.anchor} style={{ fill: pal.sub, pointerEvents: "none" }}>{l.text}</text>
           ))}
         </svg>
         {hover && (

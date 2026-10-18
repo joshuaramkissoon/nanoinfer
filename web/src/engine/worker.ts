@@ -2,14 +2,23 @@
 // The engine lives here. The main thread never touches wasm, so a 150 ms
 // forward pass never janks the page.
 
-import init, * as wasm from "./pkg/nanoinfer.js";
-import wasmUrl from "./pkg/nanoinfer_bg.wasm?url";
-import type { ForwardTrace, InitResult, LoadResult, OpRec, Req, StageInfo } from "./types";
+import type * as Wasm from "./pkg/nanoinfer.js";
+import type { BuildName, ForwardTrace, InitResult, LoadResult, OpRec, Req, StageInfo } from "./types";
 
 declare const self: DedicatedWorkerGlobalScope;
 
+// Three builds of the same crate (crates/wasm/build.sh); we load the best one
+// this browser can run. Globs, so a missing build (no nightly for threads) just
+// isn't offered.
+const MODS = import.meta.glob("./pkg*/nanoinfer.js") as Record<string, () => Promise<typeof Wasm>>;
+const URLS = import.meta.glob("./pkg*/nanoinfer_bg.wasm", { query: "?url", import: "default", eager: true }) as Record<string, string>;
+const DIRS: Record<BuildName, string> = { simd128: "./pkg", relaxed: "./pkg-relaxed", threads: "./pkg-threads" };
+
+let wasm: typeof Wasm;
+type Engine = Wasm.Engine;
+
 const CACHE = "nanoinfer-weights-v1";
-let engine: wasm.Engine | null = null;
+let engine: Engine | null = null;
 let names: string[] = [];
 let kinds: string[] = [];
 let layout = { header: 16, stride: 10 };
@@ -159,7 +168,25 @@ function decode(buf: Float64Array): ForwardTrace {
   };
 }
 
-function need(): wasm.Engine {
+/** Which builds exist and validate here, best first. */
+async function usableBuilds(): Promise<{ name: BuildName; bytes: ArrayBuffer }[]> {
+  const out: { name: BuildName; bytes: ArrayBuffer }[] = [];
+  for (const name of ["threads", "relaxed", "simd128"] as BuildName[]) {
+    const url = URLS[`${DIRS[name]}/nanoinfer_bg.wasm`];
+    if (!url || !MODS[`${DIRS[name]}/nanoinfer.js`]) continue;
+    if (name === "threads" && !(self.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined")) continue;
+    try {
+      const bytes = await (await fetch(url)).arrayBuffer();
+      // validate() is the real feature test: relaxed-SIMD opcodes, shared memory.
+      if (WebAssembly.validate(bytes)) out.push({ name, bytes });
+    } catch {
+      /* not served */
+    }
+  }
+  return out;
+}
+
+function need(): Engine {
   if (!engine) throw new Error("engine not loaded");
   return engine;
 }
@@ -167,7 +194,17 @@ function need(): wasm.Engine {
 async function handle(req: Req, post: (m: unknown) => void): Promise<[unknown, Transferable[]?]> {
   switch (req.t) {
     case "init": {
-      await init({ module_or_path: wasmUrl });
+      const builds = await usableBuilds();
+      if (!builds.length) throw new Error("this browser can't run WebAssembly SIMD");
+      const pick = builds.find((b) => b.name === req.build) ?? builds[0];
+      wasm = await MODS[`${DIRS[pick.name]}/nanoinfer.js`]();
+      await wasm.default({ module_or_path: pick.bytes });
+      let threads = 1;
+      if (pick.name === "threads") {
+        // Spawns the rayon pool: one Web Worker per core, all sharing this heap.
+        await (wasm as unknown as { initThreadPool(n: number): Promise<void> }).initThreadPool(req.threads || navigator.hardwareConcurrency || 4);
+        threads = wasm.thread_count();
+      }
       const l = wasm.trace_layout();
       layout = { header: l[1], stride: l[2] };
       const r: InitResult = {
@@ -175,6 +212,10 @@ async function handle(req: Req, post: (m: unknown) => void): Promise<[unknown, T
         isolated: self.crossOriginIsolated,
         timerResUs: timerResolutionUs(),
         simd: true,
+        build: wasm.build_name() as BuildName,
+        builds: builds.map((b) => b.name),
+        threads,
+        peakKind: wasm.peak_kind(),
       };
       return [r];
     }
@@ -193,19 +234,21 @@ async function handle(req: Req, post: (m: unknown) => void): Promise<[unknown, T
         return out;
       };
       const [vocab, merges] = await Promise.all([text("vocab.json"), text("merges.txt")]);
-      const hold: { bytes: wasm.Bytes | null } = { bytes: null };
+      const hold: { bytes: Wasm.Bytes | null } = { bytes: null };
+      const f16 = req.dtype === "f16";
+      const file = f16 ? "model-f16.safetensors" : "model.safetensors";
       const { total, cached } = await fetchBytes(
-        `${req.base}/model.safetensors`,
+        `${req.base}/${file}`,
         (c, size) => {
-          // Reserve the whole file up front: growing a 500 MB Vec by doubling
-          // would briefly need ~1.5x that.
-          hold.bytes ??= new wasm.Bytes(size);
+          // Reserve the whole (f32) file up front: growing a 500 MB Vec by
+          // doubling would briefly need ~1.5x that. The f16 buffer widens to
+          // f32 as it streams in.
+          hold.bytes ??= f16 ? wasm.Bytes.from_f16(size) : new wasm.Bytes(size);
           hold.bytes.push(c);
         },
-        (loaded, tot, cached) =>
-          post({ t: "progress", p: { file: "model.safetensors", loaded, total: tot, cached, phase: "download" } }),
+        (loaded, tot, cached) => post({ t: "progress", p: { file, loaded, total: tot, cached, phase: "download" } }),
       );
-      post({ t: "progress", p: { file: "model.safetensors", loaded: total, total, cached, phase: "parse" } });
+      post({ t: "progress", p: { file, loaded: total, total, cached, phase: "parse" } });
       engine?.free();
       const bytes = hold.bytes;
       if (!bytes) throw new Error("model.safetensors was empty");
@@ -257,6 +300,18 @@ async function handle(req: Req, post: (m: unknown) => void): Promise<[unknown, T
       return [null];
     case "attention": {
       const a = need().attention_maps(Uint32Array.from(req.tokens));
+      return [a, [a.buffer]];
+    }
+    case "lens": {
+      const a = need().logit_lens(Uint32Array.from(req.tokens), Uint32Array.from(req.positions), req.topK);
+      return [a, [a.buffer]];
+    }
+    case "residual": {
+      const a = need().residual_stream(Uint32Array.from(req.tokens), req.pos);
+      return [a, [a.buffer]];
+    }
+    case "logits": {
+      const a = need().logits(req.slot);
       return [a, [a.buffer]];
     }
     case "benchBandwidth":
