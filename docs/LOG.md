@@ -995,6 +995,63 @@ GEMM switch): 2646 at B=32, 2577 at B=64, so the GEMMs win from B≈32.
   as fast as the round-1 single-stream best: the ragged/paged machinery
   costs nothing measurable.
 
+### Metal stage 10: continuous batching vs static batching (metal-serve)
+
+**Hypothesis.** A static batch runs until its *longest* request finishes:
+short requests hold a slot (and their KV reservation) doing nothing, and
+requests that arrive meanwhile wait for the whole batch. Iteration-level
+scheduling (Orca) retires and admits sequences every step, so the GPU always
+has ~max_batch live rows. Expect higher throughput when output lengths vary,
+and far lower time-to-first-token (TTFT) when requests arrive over time.
+
+**What changed.** `crates/cli/src/metal_serve.rs` (`nanoinfer metal-serve`).
+Synthetic workload: prompts uniform 16–256 tokens, outputs uniform 16–256
+(fixed per request, no EOS), arrivals all at t = 0 or Poisson. Both
+schedulers drive the same `Batch::step` (CPU in the loop every iteration):
+- static: take up to 32 arrived requests, prefill them, decode until the
+  longest is done (finished rows keep computing), free, repeat. KV reserved
+  per slot = prompt + the batch's max output.
+- continuous: each iteration admits waiting requests while a slot is free
+  and the pool has pages for the prompt; builds one forward with a decode row
+  per running sequence plus prompt chunks under a 256-token prefill budget
+  (chunked prefill, Sarathi-style); retires finished sequences at once. KV
+  pages are allocated as sequences grow.
+The clock is the measured wall time of each iteration (idle gaps waiting for
+the next arrival are skipped, not slept).
+
+**Numbers** (Q4 weights, f16 paged KV, 128 requests, max batch 32, load
+8–11; `bench/serving.json`):
+
+| arrivals | policy | tok/s | makespan | TTFT p50 / p99 | TPOT p50 / p99 | KV pages peak |
+|---|---|---|---|---|---|---|
+| all at t=0 | static | 1197 | 14.7 s | 7.86 / 11.5 s | 11.4 / 13.9 ms | 810 (478 MB) |
+| all at t=0 | continuous | **1903 (1.59×)** | 9.2 s | 3.65 / 7.59 s | 15.3 / 18.2 ms | 530 (313 MB) |
+| Poisson 8/s | static | 850 | 19.2 s | 1.97 / 4.47 s | 11.8 / 13.7 ms | 740 |
+| Poisson 8/s | continuous | 1042 (1.23×) | 15.7 s | **24 / 56 ms** | 4.8 / 10.5 ms | 203 |
+| Poisson 16/s | static | 948 | 17.2 s | 4.37 / 8.01 s | 11.5 / 14.5 ms | 773 |
+| Poisson 16/s | continuous | **1725 (1.82×)** | 9.5 s | 62 / 545 ms | 15.1 / 19.5 ms | 500 |
+
+Prefill budget at 16 req/s (continuous): 32 tokens → TTFT p50 283 ms, TPOT
+p99 15.3 ms; 256 → 62 ms / 19.5 ms; 512 → 56 ms / 18.9 ms.
+
+**What surprised me.**
+- **At 8 req/s continuous batching simply keeps up** (makespan ≈ the 16 s
+  arrival window, TTFT p50 24 ms), while static batching queues: TTFT 2 s,
+  i.e. **80× worse**, at only 1.23× lower throughput. The throughput number
+  undersells it; TTFT is where static batching hurts.
+- **Static batches are mostly padding.** With outputs uniform in 16–256 the
+  batch runs ~max_out steps while the mean request needs half of that: in
+  the offline run static computes 1052 iterations for 17.5k tokens,
+  continuous 683.
+- **KV memory**: paging + retiring cuts peak KV from 810 to 530 pages offline
+  (−35%), and to 203 at 8 req/s; static reserves for the longest request in
+  the batch whether or not it is ever used (the vLLM "fragmentation" waste).
+- Continuous batching's TPOT is *higher* (15 vs 11 ms) when saturated: its
+  iterations carry prompt chunks alongside the decodes, and the batch is
+  always full, so each running request shares the GPU with more work. The
+  prefill budget is the knob between TTFT and TPOT (Sarathi's point): 32
+  tokens per iteration halves the p99 TPOT jitter but quintuples TTFT.
+
 ---
 
 ## Stage 3: neon (explicit SIMD), a null result

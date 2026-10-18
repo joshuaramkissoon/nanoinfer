@@ -63,7 +63,7 @@ pub struct ServeArgs {
     #[arg(long, default_value_t = 7)]
     seed: u64,
     /// Requests to include in the Gantt trace of the summary.
-    #[arg(long, default_value_t = 48)]
+    #[arg(long, default_value_t = 32)]
     gantt: usize,
     #[arg(long, default_value = "bench/results.jsonl")]
     out: PathBuf,
@@ -389,8 +389,8 @@ fn summarise(name: &str, reqs: &[Req], o: &Outcome, gantt: usize) -> Value {
                    "finished": l.finished, "prompt_len": r.prompt.len(), "out_len": r.out_len})
         })
         .collect();
-    // Downsample the iteration trace to <= 400 points for the page.
-    let stride = o.iters.len().div_ceil(400).max(1);
+    // Downsample the iteration trace to <= 120 points for the page.
+    let stride = o.iters.len().div_ceil(120).max(1);
     let it: Vec<Value> = o
         .iters
         .iter()
@@ -487,7 +487,10 @@ pub fn run(a: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
             });
             append_jsonl(&a.out, &line)?;
         }
-        let key = format!("rate={}", a.rate);
+        let mut key = format!("rate={}", a.rate);
+        if a.prefill_budget != 256 {
+            key += &format!(",budget={}", a.prefill_budget);
+        }
         let mut doc: Value =
             std::fs::read(&a.summary).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(json!({}));
         let obj = doc.as_object_mut().ok_or("summary is not an object")?;
@@ -510,8 +513,25 @@ pub fn run(a: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
                 "note": a.note,
             }),
         );
-        std::fs::write(&a.summary, serde_json::to_string_pretty(&doc)? + "\n")?;
+        round_floats(&mut doc);
+        std::fs::write(&a.summary, serde_json::to_string(&doc)? + "\n")?;
         eprintln!("updated {}", a.summary.display());
     }
     Ok(())
+}
+
+/// Keep the summary small: 4 significant digits is plenty for a chart.
+pub fn round_floats(v: &mut Value) {
+    match v {
+        Value::Number(n) if n.is_f64() => {
+            let x = n.as_f64().unwrap();
+            if x != 0.0 && x.is_finite() {
+                let scale = 10f64.powi(3 - x.abs().log10().floor() as i32);
+                *v = json!((x * scale).round() / scale);
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(round_floats),
+        Value::Object(o) => o.values_mut().for_each(round_floats),
+        _ => {}
+    }
 }

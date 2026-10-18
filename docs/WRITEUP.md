@@ -325,6 +325,29 @@ chart in this post is the real engine, running in your browser.
 - **Line:** "Serving one user at a time, the GPU spends its life waiting for weights.
   Serving 64, it finally has something to do with them."
 
+### GPU stage 10: continuous batching (a bus that never waits at the terminal)
+
+- **Hypothesis:** a static batch runs until its longest request finishes, so short
+  requests idle in their slots and new arrivals queue behind the whole batch.
+  Scheduling per iteration (retire and admit every step) keeps the GPU full.
+- **Change:** a scheduler over the paged ragged forward: each iteration = one
+  decode row per running request + prompt chunks of newly admitted ones under a
+  token budget; finished requests leave immediately and their KV pages return to
+  the pool. Synthetic workload: 128 requests, prompts 16–256, outputs 16–256.
+- **Result (Q4, batch ≤ 32):** offline 1197 → **1903 tok/s (1.59×)**; Poisson 16 req/s
+  948 → 1725 (1.82×) with TTFT p50 **4.4 s → 62 ms**; at 8 req/s continuous keeps up
+  (TTFT 24 ms) while static queues (TTFT 2.0 s, 80× worse). Peak KV −35% offline.
+- **Aha:** throughput is the smaller win. The big one is latency: under real arrivals
+  a static server makes every request wait for a stranger's long answer.
+- **Aha 2:** the prefill budget trades TTFT against inter-token jitter: 32 tokens per
+  iteration → TTFT 283 ms, TPOT p99 15.3 ms; 512 → 56 ms, 18.9 ms.
+- **Viz:** Gantt of the first 32 requests under both policies (arrival → admitted →
+  first token → done bars, from `bench/serving.json` `gantt`), plus a strip of rows
+  per iteration (decode vs prefill, `iters`) showing static's sawtooth of dying
+  batches vs continuous's flat full line; KV pages over time beside it.
+- **Line:** "The static server was busy 100% of the time and still made people wait
+  four seconds to hear the first word."
+
 ### Stage 3: neon (hand-written SIMD), a null result
 
 - **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per
