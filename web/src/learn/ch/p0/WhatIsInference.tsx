@@ -447,7 +447,7 @@ function ServingStack() {
             )),
           )}
           <text x={375} y={122} textAnchor="middle" fontSize={11} fill={pal.fg}>
-            weights · shared · read-only
+            weights · shared
           </text>
         </g>
         {/* compute */}
@@ -460,7 +460,7 @@ function ServingStack() {
             the fixed program
           </text>
           <text x={546} y={138} textAnchor="middle" fontSize={10.5} fill={pal.sub}>
-            one step for the batch
+            all users at once
           </text>
         </g>
         <path d="M452,96 H474" stroke={cc.c2} strokeWidth={2} markerEnd="url(#p0b)" opacity={o("w2c")} />
