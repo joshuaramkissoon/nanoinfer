@@ -50,7 +50,7 @@ function Ring() {
           const moving = step < steps && playing;
           return (
             <g key={i}>
-              {moving && <circle cx={x + (x2 - x) * frac} cy={y + (y2 - y) * frac} r={4} fill={cc.c2} />}
+              {moving && <circle cx={x + (x2 - x) * frac} cy={y + (y2 - y) * frac} r={4} fill={cc.c3} />}
               <rect x={x - 22} y={y - 14} width={44} height={28} rx={6} fill={pal.dark ? "#262421" : "#fff"} stroke={pal.sub} />
               {Array.from({ length: n }, (_, c) => (
                 <rect

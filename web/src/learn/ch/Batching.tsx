@@ -45,7 +45,7 @@ function BatchCurve({ d }: { d: LearnData }) {
         <>
           GPT-2 on the M4's GPU. Across: how many users share each step (the <G k="batch" /> size), doubling each time. Up:
           tokens per second, on a log scale (each gridline is 10× the last). <b style={{ color: pal.fg }}>Ember</b>: everything the
-          GPU writes, all users together. <b style={{ color: pal.fg }}>Blue</b>: what one user gets. At 1 user the two are the
+          GPU writes, all users together. <b style={{ color: pal.fg }}>Grey</b>: what one user gets. At 1 user the two are the
           same number. Measured on a quiet machine: 64-token prompts, then 64 tokens each.
         </>
       }
@@ -72,7 +72,7 @@ function BatchCurve({ d }: { d: LearnData }) {
           total, all users
         </span>
         <span>
-          <i style={{ display: "inline-block", width: 14, height: 2, background: cc.c2, verticalAlign: "middle", marginRight: 6 }} />
+          <i style={{ display: "inline-block", width: 14, height: 2, background: pal.sub, verticalAlign: "middle", marginRight: 6 }} />
           each user
         </span>
       </div>
@@ -104,7 +104,7 @@ function BatchCurve({ d }: { d: LearnData }) {
             </text>
             <line x1={x(B)} x2={x(B)} y1={top} y2={H - pb} stroke={pal.muted} opacity={0.6} />
             <path d={line(1)} fill="none" stroke={cc.c1} strokeWidth={2} strokeLinejoin="round" />
-            <path d={line(2)} fill="none" stroke={cc.c2} strokeWidth={2} strokeLinejoin="round" />
+            <path d={line(2)} fill="none" stroke={pal.sub} strokeWidth={2} strokeLinejoin="round" />
             {/* direct labels at the line ends */}
             <text x={x(last[0]) + 8} y={y(last[1]) + 4} fontSize={11} fill={pal.sub}>
               total
@@ -113,7 +113,7 @@ function BatchCurve({ d }: { d: LearnData }) {
               each user
             </text>
             <circle cx={x(B)} cy={y(total)} r={5} fill={cc.c1} stroke={ring} strokeWidth={2} />
-            <circle cx={x(B)} cy={y(per)} r={5} fill={cc.c2} stroke={ring} strokeWidth={2} />
+            <circle cx={x(B)} cy={y(per)} r={5} fill={pal.sub} stroke={ring} strokeWidth={2} />
           </svg>
         )}
         {w > 0 && over && (
