@@ -271,6 +271,19 @@
   font-size: 0.8rem;
   line-height: 1.7;
 }
+.ask-note {
+  margin-top: 0.8rem;
+  color: var(--m-muted);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+.ask-ai {
+  align-self: center;
+  padding: 0 0.35rem 0 0.25rem;
+  color: var(--m-muted);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+}
 .ask-off code {
   background: var(--m-code-bg);
   border-radius: 3px;

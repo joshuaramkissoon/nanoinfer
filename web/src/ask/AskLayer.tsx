@@ -27,7 +27,38 @@ interface Turn {
   done: boolean;
   error: string | null;
 }
-type Status = { available: boolean; keyEnv: string; model: string } | null;
+type Status = { available: boolean; keyEnv: string; model: string; provider: string } | null;
+
+/** In production the tutor only exists when the server has a key; setup hints are for local dev. */
+const DEV = import.meta.env.DEV;
+
+let statusP: Promise<Status> | null = null;
+/** GET /api/ask once per page; shared by the layer and useAskAvailable. */
+function fetchStatus(): Promise<Status> {
+  statusP ??= fetch("/api/ask")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j) =>
+      j
+        ? { available: !!j.available, keyEnv: j.keyEnv ?? "TOGETHER_API_KEY", model: j.model ?? "", provider: j.provider ?? "" }
+        : { available: false, keyEnv: "TOGETHER_API_KEY", model: "", provider: "" },
+    )
+    .catch(() => ({ available: false, keyEnv: "TOGETHER_API_KEY", model: "", provider: "" }));
+  return statusP;
+}
+
+/** Is select-to-ask usable here? For hints like "select any text to ask about it":
+ *  false until known, and false in production without a server key. */
+export function useAskAvailable(): boolean {
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void fetchStatus().then((st) => live && setOk(!!st?.available));
+    return () => {
+      live = false;
+    };
+  }, []);
+  return ok;
+}
 
 /** How each one-click action is labelled in the answers panel (Tangent's labels). */
 const LABEL: Record<string, string> = { explain: "Explain", define: "Define", simplify: "Plain words", deeper: "Deeper" };
@@ -102,11 +133,11 @@ export function AskLayer() {
   const voice = useRef<{ rec: Recognition | null; text: string; startedAt: number; toggled: boolean; send: boolean }>({ rec: null, text: "", startedAt: 0, toggled: false, send: false });
 
   useEffect(() => {
-    fetch("/api/ask")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => setStatus(j ? { available: !!j.available, keyEnv: j.keyEnv ?? "TOGETHER_API_KEY", model: j.model ?? "" } : { available: false, keyEnv: "TOGETHER_API_KEY", model: "" }))
-      .catch(() => setStatus({ available: false, keyEnv: "TOGETHER_API_KEY", model: "" }));
+    void fetchStatus().then(setStatus);
   }, []);
+  // The selection toolbar appears only where the tutor works (always in dev, to show the setup hint).
+  const enabledRef = useRef(false);
+  enabledRef.current = DEV || !!status?.available;
 
   // selection → toolbar
   useEffect(() => {
@@ -114,7 +145,7 @@ export function AskLayer() {
     const on = () => {
       clearTimeout(t);
       t = setTimeout(() => {
-        if (document.activeElement === input.current || voice.current.rec) return;
+        if (!enabledRef.current || document.activeElement === input.current || voice.current.rec) return;
         const sel = getSelection();
         if (!sel || !sel.rangeCount || sel.isCollapsed) {
           setPending(null);
@@ -370,6 +401,7 @@ export function AskLayer() {
             </div>
           ) : (
             <>
+              <span className="ask-ai" title="Answers come from an AI model and can be wrong">AI</span>
               <button className="ask-primary" onClick={() => openAsk("")}>
                 Ask
               </button>
@@ -414,11 +446,18 @@ export function AskLayer() {
           </span>
         </header>
         <div className="ask-scroll" ref={scroller}>
-          {status && !status.available && (
+          {status && !status.available && DEV && (
             <div className="ask-off">
               <b>Ask isn't switched on here.</b> It needs a model API key on the server (never in the browser). For local dev, put{" "}
               <code>{status.keyEnv}=…</code> in <code>web/.env.local</code> and restart <code>npm run dev</code>; on Vercel, add it
-              to the project's environment variables.
+              to the project's environment variables. (Only shown in dev: in production the tutor is hidden without a key.)
+            </div>
+          )}
+          {status && !status.available && !DEV && <div className="ask-off">The AI tutor is unavailable right now.</div>}
+          {status?.available && (
+            <div className="ask-note">
+              Answers are written by an AI model ({(model || status.model).split("/").pop()}
+              {status.provider ? ` via ${status.provider}` : ""}), paid for by this site. They can be wrong: check them against the page.
             </div>
           )}
           {!turns.length && status?.available && <div className="ask-empty">Select any text on the page, then ask about it.</div>}

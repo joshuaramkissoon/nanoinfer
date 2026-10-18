@@ -104,10 +104,18 @@ function json(status: number, body: unknown, headers: Record<string, string> = {
 
 export async function handleAsk(req: Request, env: AskEnv, ip: string): Promise<Response> {
   if (req.method === "GET") {
-    return json(200, { available: !!env.key, keyEnv: env.keyEnv, model: resolved?.model ?? env.models[0], models: env.models });
+    // Without a key, say only that it's off: the browser shows setup hints in dev only.
+    if (!env.key) return json(200, { available: false, keyEnv: env.keyEnv });
+    let provider = "";
+    try {
+      provider = new URL(env.baseUrl).hostname.replace(/^api\./, "");
+    } catch {
+      /* leave blank */
+    }
+    return json(200, { available: true, model: resolved?.model ?? env.models[0], models: env.models, provider });
   }
   if (req.method !== "POST") return json(405, { error: "method not allowed" });
-  if (!env.key) return json(503, { error: `Ask isn't configured: set ${env.keyEnv} on the server.`, keyEnv: env.keyEnv });
+  if (!env.key) return json(503, { error: "The AI tutor is unavailable right now." });
   if (env.rateLimit && limited(ip)) return json(429, { error: "That's a lot of questions! The hourly limit for this demo is reached; try again in a bit." });
 
   let b: Body;
