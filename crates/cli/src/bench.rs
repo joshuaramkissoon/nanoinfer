@@ -13,7 +13,8 @@
 //! line is appended to `bench/results.jsonl` so the hillclimb has a history.
 
 use clap::Args;
-use nanoinfer_core::{sampler, NoTrace, Session, Stage};
+use nanoinfer_core::trace::Recorder;
+use nanoinfer_core::{sampler, Model, NoTrace, Session, Stage, Trace};
 use serde_json::json;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -44,6 +45,10 @@ pub struct BenchArgs {
     /// Don't append to the results file.
     #[arg(long)]
     no_record: bool,
+    /// Run with a timing Recorder attached instead of NoTrace, to measure the
+    /// cost of tracing itself.
+    #[arg(long)]
+    with_trace: bool,
     /// Free-form note stored with the result.
     #[arg(long, default_value = "")]
     note: String,
@@ -107,7 +112,45 @@ fn timestamp() -> String {
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
+/// Ask macOS to schedule this thread on a performance core. Without this, a
+/// long single-threaded benchmark can be migrated to an efficiency core
+/// mid-run (we saw decode drop from 19 to 6.5 tok/s between runs).
+#[cfg(target_os = "macos")]
+fn prefer_performance_cores() {
+    const QOS_CLASS_USER_INTERACTIVE: u32 = 0x21;
+    extern "C" {
+        fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
+    }
+    // Safety: plain libSystem call affecting only the current thread.
+    unsafe {
+        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn prefer_performance_cores() {}
+
+/// One timed run: (prefill seconds, decode seconds).
+fn time_run<T: Trace>(
+    model: &Model,
+    stage: Stage,
+    prompt: &[u32],
+    tokens: usize,
+    trace: &mut T,
+) -> nanoinfer_core::Result<(f64, f64)> {
+    let mut s = Session::new(model, stage);
+    let t = Instant::now();
+    let mut next = sampler::argmax(s.step(model, prompt, trace)?);
+    let t_prefill = t.elapsed().as_secs_f64();
+    let t = Instant::now();
+    for _ in 0..tokens {
+        next = sampler::argmax(s.step(model, &[next], trace)?);
+    }
+    Ok((t_prefill, t.elapsed().as_secs_f64()))
+}
+
 pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
+    prefer_performance_cores();
     let tok = crate::load_tokenizer(weights)?;
     let model = crate::load_model(weights)?;
     let cfg = model.config;
@@ -136,15 +179,13 @@ pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error
     let mut prefill = Vec::new();
     let mut decode = Vec::new();
     for run in 0..a.warmup + a.runs {
-        let mut s = Session::new(&model, a.stage);
-        let t = Instant::now();
-        let mut next = sampler::argmax(s.step(&model, &prompt, &mut NoTrace)?);
-        let t_prefill = t.elapsed().as_secs_f64();
-        let t = Instant::now();
-        for _ in 0..a.tokens {
-            next = sampler::argmax(s.step(&model, &[next], &mut NoTrace)?);
-        }
-        let t_decode = t.elapsed().as_secs_f64();
+        let (t_prefill, t_decode) = if a.with_trace {
+            let start = Instant::now();
+            let mut rec = Recorder::new(move || start.elapsed().as_secs_f64());
+            time_run(&model, a.stage, &prompt, a.tokens, &mut rec)?
+        } else {
+            time_run(&model, a.stage, &prompt, a.tokens, &mut NoTrace)?
+        };
         let (p, d) = (a.prompt_len as f64 / t_prefill, a.tokens as f64 / t_decode);
         let label = if run < a.warmup { "warmup" } else { "run" };
         eprintln!("  {label:<6} prefill {p:>9.2} tok/s   decode {d:>8.3} tok/s");
@@ -186,6 +227,7 @@ pub fn run(weights: &Path, a: BenchArgs) -> Result<(), Box<dyn std::error::Error
             "pct_of_ceiling": 100.0 * dm / ceiling,
             "bandwidth_gbs": a.bandwidth_gbs,
             "machine": machine(),
+            "traced": a.with_trace,
             "note": a.note,
         });
         if let Some(dir) = a.out.parent() {
