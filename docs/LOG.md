@@ -65,6 +65,7 @@ of the weights).
 | 9 q8_0 + f16 head | ~1240–1330 | ~230–240 | 34% of 693 | 1.3× decode vs f16 |
 | 10 q4_0 + f16 head | ~1215–1230 | ~240–263 | 28% of 918 | 1.05–1.1× vs q8 |
 | 11 q8-fast / q4-fast (low-latency pool) | ~1415 | **360 (q8, 6t) / 372 (q4, 4t)** per-token, interleaved | 52% of 693 / 41% of 918 | 1.04–1.15× |
+| 12 q8-rescore / q4-rescore | ~1400 | **394 (q8) / 480 (q4)**, 6 threads | 46% of 860 / 39% of 1237 | 1.13–1.17× |
 
 (prompt 64 tokens, 16 decode steps for both rows, so they're directly comparable.)
 
@@ -1705,3 +1706,86 @@ attn_proj 5%. The LM head is now the single biggest cost.
 (membw: 92 GB/s on 4 threads vs 98 on 10, so the E-cores add almost no bandwidth,
 and every join waits for the slowest). Performance work on a shared machine needs
 an A/B harness, not two benchmarks run five minutes apart.
+
+---
+
+## Stage 12: q8-rescore / q4-rescore (approximate LM head + exact rescoring)
+
+**Hypothesis.** The f16 LM head is 1.03 ms of a ~3.4 ms token (30%, 77 MB). Most
+of its 50257 logits only matter in aggregate. If a cheap approximate head scores
+every token, and only those near the top get recomputed exactly with the f16
+weights, the probability mass (everything greedy or top-k sampling can pick)
+should keep f16-head logits while the head streams Q8 bytes (43 MB).
+
+**What changed.** `stages/packed.rs::RescoredHead<A>`: (1) approximate logits for
+all tokens from `A`; (2) candidates = tokens within `MARGIN` of the approximate
+max, at most `CAP` (the top by `select_nth` if more); (3) candidates rescored in
+parallel with `F16Matrix::dot_row` (f16 weights, f32 activations: exactly
+stage 9's head). Stages `q8-rescore` / `q4-rescore` = stage 11 + this head.
+
+**Attempt 1: Q8_0 approximate head (W8A8).** Top-1 agreement with the f16-head
+stage was **100%** at every margin. The top is always exact. But KL wouldn't
+drop below ~9e-3 (WikiText-2, vs q8-fast):
+
+| margin / cap | KL vs f16-head stage | top-1 |
+|---|---|---|
+| 2 / 256 | 2.4e-2 | 100% |
+| 6 / 256 | 1.0e-2 | 100% |
+| 10 / 256 | 8.6e-3 | 100% |
+| 10 / 2000 | 3.0e-3 | 100% |
+| 15 / 8000 | 5.9e-4 | 100% |
+| everything (sanity) | 0 | 100% |
+
+GPT-2's next-token distributions have lots of entropy. Thousands of tokens sit
+within 10–15 nats of the top and together carry real probability, so the
+approximate tail's error matters.
+
+**Tried: tail bias correction (failed).** If the tail logits carried independent
+zero-mean noise ε, the tail mass would be inflated by E[e^ε] = e^{σ²/2}
+(Jensen). Estimate μ and σ² of (exact − approx) from the rescored candidates
+and shift the tail by μ − σ²/2. Result: KL 1.13e-2 (margin 6), 8.9e-3 (margin
+10), no better. The candidates' errors aren't representative of the tail's,
+or the error isn't independent of the logit.
+
+**Diagnosis: it's the activations again.** Computing the approximate pass with f32
+activations (a quality-only hack, through the prefill path) gave KL **1.4e-3**
+(6 / 256) and **4.1e-4** (10 / 2000): 7× better. Stage 9's finding (ln_f gain
+outliers wreck int8 activations) applies to the approximate pass too.
+
+**Kept: Q8 weights × two-level int8 activations** (`kernels/q8hilo.rs`):
+`x ≈ d·q_hi + (d/254)·q_lo`, where q_lo quantises the residual of q_hi (≤ d/2),
+giving ~16-bit activation precision. Two `sdot` chains per block over the *same*
+weight bytes: twice the integer arithmetic on a pass that is bandwidth-bound
+anyway. Test: with a 17× outlier channel, hi/lo matches dequantised-W · exact-x
+to 2e-3. Quality matches the f32-activation hack:
+
+| margin / cap | KL vs f16-head stage | top-1 |
+|---|---|---|
+| 6 / 256 | 1.5e-3 | 100% |
+| **8 / 512 (kept)** | **1.0e-3** | **100%** |
+| 10 / 2000 | 4.5e-4 | 100% |
+
+**Speed** (interleaved A/B, 6 threads, per-token decode median):
+
+| | q8-fast | q8-rescore | q4-fast | q4-rescore |
+|---|---|---|---|---|
+| margin 6 / 256 | 350 | **404** (+15%) | | |
+| margin 8 / 512 | 350 | **394** (+13%) | 403 | **470** (+17%) |
+
+(A margin 10 / 2000 pair was ruined by a load spike: 295 vs 300 with min/max
+152–365.) Recorded (6 threads, 7 runs): **q8-rescore 394.5 ± 29 tok/s** (per-token
+394.6, 55 GB/s, 46% of its 860 tok/s spec ceiling), **q4-rescore 479.7 ± 30**
+(per-token 482.3, 39% of 1237). Prefill unchanged (~1400).
+
+**Quality vs f32** (WikiText-2, 4 × 512):
+
+| stage | Δppl | mean KL | top-1 |
+|---|---|---|---|
+| q8-fast (f16 head) | −0.1% | 8.6e-4 | 97.9% |
+| **q8-rescore** | **+0.21%** | **2.0e-3** | **98.1%** |
+| q4-fast | +7.3% | 0.069 | 83% |
+| q4-rescore | +8.0% | 0.081 | 82% |
+
+(The two bench lines first recorded `threads: 1`: `Stage::multithreaded` was an
+explicit list that rustfmt had reflowed, so my edit missed it. Fixed by hand in
+results.jsonl, and the method is now "every stage after 4".)

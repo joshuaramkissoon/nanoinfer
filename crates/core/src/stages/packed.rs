@@ -110,6 +110,75 @@ impl<M: PackedMatrix> Head for FoldedHead<M> {
     }
 }
 
+/// Stage 12: a cheap approximate head over the whole vocabulary, then the few
+/// tokens that could matter recomputed exactly.
+///
+/// 1. `approx` (Q8_0 weights × two-level int8 activations, 1.8× fewer bytes
+///    than f16) scores all 50257 tokens.
+/// 2. Every token within [`RescoredHead::MARGIN`] of the approximate max is a
+///    candidate (at most [`RescoredHead::CAP`], the highest-scoring if more).
+/// 3. Candidates are rescored exactly: f16 weights, f32 activations, as in the
+///    stage 9 head. That reads ~1 KB per candidate of the f16 copy, not 77 MB.
+///
+/// The tokens that carry the probability mass (everything sampling or greedy
+/// decoding can pick) get f16-head logits. Tokens > MARGIN nats below the top
+/// keep approximate logits; their probability is < e^-MARGIN of the top's.
+pub struct RescoredHead<A> {
+    pub approx: A,
+    pub exact: crate::kernels::f16::F16Matrix,
+}
+
+impl<A> RescoredHead<A> {
+    /// Candidate window below the approximate max, in logits (nats). Swept 2–15
+    /// (LOG stage 12): 8 keeps KL vs the f16 head at ~1e-3 for +13–17% decode.
+    pub const MARGIN: f32 = 8.0;
+    /// Most candidates rescored per token (GPT-2 often has thousands within 8 nats).
+    pub const CAP: usize = 512;
+}
+
+impl<A: PackedMatrix> Head for RescoredHead<A> {
+    fn build(model: &Model) -> Self {
+        let (v, c) = (model.config.n_vocab, model.config.n_embd);
+        RescoredHead { approx: A::pack(&model.wte, v, c), exact: PackedMatrix::pack(&model.wte, v, c) }
+    }
+    /// Bytes streamed per token: the approximate head (rescoring touches ~CAP rows).
+    fn bytes(&self) -> usize {
+        self.approx.bytes()
+    }
+    fn logits<K: Kernels, P: Par>(
+        &self,
+        model: &Model,
+        x: &[f32],
+        xn: &mut [f32],
+        logits: &mut [f32],
+        scratch: &mut Scratch,
+    ) {
+        let c = model.config.n_embd;
+        K::layernorm(xn, x, &model.ln_f_w, &model.ln_f_b, 1, c, Config::LN_EPS);
+        self.approx.matmul::<P>(logits, xn, None, 1, scratch);
+        let (margin, cap) = (Self::MARGIN, Self::CAP);
+        let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let cand = &mut scratch.candidates;
+        cand.clear();
+        cand.extend(logits.iter().enumerate().filter(|(_, &l)| l > max - margin).map(|(i, _)| i as u32));
+        if cand.len() > cap {
+            cand.select_nth_unstable_by(cap, |&a, &b| logits[b as usize].total_cmp(&logits[a as usize]));
+            cand.truncate(cap);
+        }
+        // Rescore candidates exactly, in parallel (each writes its own logit).
+        let out = crate::kernels::tiled::OutPtr(logits.as_mut_ptr());
+        let per = 64;
+        let cand = &scratch.candidates;
+        P::par_for(cand.len().div_ceil(per), &|ch| {
+            let o = out;
+            for &i in &cand[ch * per..((ch + 1) * per).min(cand.len())] {
+                // Safety: candidate ids are distinct, so writes are disjoint.
+                unsafe { *o.0.add(i as usize) = self.exact.dot_row(xn, i as usize) };
+            }
+        });
+    }
+}
+
 /// Every matrix the decode loop streams: blocks in format `M`, LM head as `H`.
 pub struct PackedModel<M, H = PlainHead<M>> {
     pub layers: Vec<PackedLayer<M>>,

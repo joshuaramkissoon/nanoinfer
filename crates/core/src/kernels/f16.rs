@@ -144,3 +144,12 @@ impl PackedMatrix for F16Matrix {
         }
     }
 }
+
+impl F16Matrix {
+    /// `dot(x, row o)`, one output (used to rescore a few LM-head rows exactly).
+    pub fn dot_row(&self, x: &[f32], o: usize) -> f32 {
+        assert_eq!(x.len(), self.d_in);
+        // Safety: the row has exactly d_in halves.
+        unsafe { dot(x, &self.w[o * self.d_in..(o + 1) * self.d_in]) }
+    }
+}

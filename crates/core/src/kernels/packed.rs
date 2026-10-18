@@ -25,6 +25,10 @@ use crate::stages::WeightFormat;
 pub struct Scratch {
     /// Activations quantised to Q8_0 blocks (for the integer dot products).
     pub q8: Vec<BlockQ8>,
+    /// Second (residual) int8 level of two-level activations (stage 12).
+    pub q8_lo: Vec<BlockQ8>,
+    /// Candidate token ids (stage 12's rescored LM head).
+    pub candidates: Vec<u32>,
 }
 
 #[cfg(target_arch = "aarch64")]

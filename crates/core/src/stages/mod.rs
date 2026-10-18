@@ -27,6 +27,7 @@ use crate::kernels::lowlat::FastPar;
 use crate::kernels::packed::SpinPar;
 use crate::kernels::q4::Q4Matrix;
 use crate::kernels::q8::Q8Matrix;
+use crate::kernels::q8hilo::Q8HiLoMatrix;
 use crate::kernels::{FastOps, Kernels, LowLat, Neon, Reference, Spin, Threaded, Tiled, Unrolled};
 use crate::trace::{ForwardInfo, Phase, Trace};
 use crate::weights::Model;
@@ -62,6 +63,10 @@ pub enum Stage {
     Q8Fast,
     /// Stage 11b: stage 10 (Q4_0, f16 head) on the low-latency pool.
     Q4Fast,
+    /// Stage 12: stage 11 (Q8_0) with a rescored LM head: Q8 approximate logits, f16 exact for the top candidates.
+    Q8Rescore,
+    /// Stage 12b: stage 11 (Q4_0) with the rescored LM head.
+    Q4Rescore,
 }
 
 impl Stage {
@@ -79,6 +84,8 @@ impl Stage {
         Stage::Q4,
         Stage::Q8Fast,
         Stage::Q4Fast,
+        Stage::Q8Rescore,
+        Stage::Q4Rescore,
     ];
 
     /// Name of the kernel set this stage runs.
@@ -96,23 +103,16 @@ impl Stage {
             Stage::Q4 => "fast-ops + q4_0 (f16 head)",
             Stage::Q8Fast => "lowlat + q8_0 (f16 head)",
             Stage::Q4Fast => "lowlat + q4_0 (f16 head)",
+            Stage::Q8Rescore => "lowlat + q8_0 (rescored head)",
+            Stage::Q4Rescore => "lowlat + q4_0 (rescored head)",
         }
     }
 
     /// Whether this stage's kernels use more than one thread (with the
     /// `threads` feature; the thread count is the global rayon pool's).
     pub fn multithreaded(self) -> bool {
-        matches!(
-            self,
-            Stage::Threads
-                | Stage::SpinPool
-                | Stage::FastOps
-                | Stage::F16
-                | Stage::Q8
-                | Stage::Q4
-                | Stage::Q8Fast
-                | Stage::Q4Fast
-        )
+        // Stages 0–4 are single-threaded; every later stage splits work across cores.
+        !matches!(self, Stage::Naive | Stage::KvCache | Stage::Unrolled | Stage::Neon | Stage::Tiled)
     }
 
     /// How this stage stores weight matrices (sets its decode ceiling).
@@ -123,6 +123,8 @@ impl Stage {
             Stage::Q4 => WeightFormat::Q4_0,
             Stage::Q8Fast => WeightFormat::Q8_0,
             Stage::Q4Fast => WeightFormat::Q4_0,
+            Stage::Q8Rescore => WeightFormat::Q8_0,
+            Stage::Q4Rescore => WeightFormat::Q4_0,
             _ => WeightFormat::F32,
         }
     }
@@ -130,6 +132,10 @@ impl Stage {
     /// Format of the tied LM head. Same as the blocks, except the integer
     /// stages, which keep it f16 (it is by far the most quantisation-sensitive matrix).
     pub fn head_format(self) -> WeightFormat {
+        if matches!(self, Stage::Q8Rescore | Stage::Q4Rescore) {
+            // Streamed bytes are the Q8 approximate head; rescoring reads ~256 f16 rows.
+            return WeightFormat::Q8_0;
+        }
         match self.weight_format() {
             WeightFormat::Q8_0 | WeightFormat::Q4_0 => WeightFormat::F16,
             f => f,
@@ -160,6 +166,8 @@ impl Stage {
             Stage::Q4 => "q4",
             Stage::Q8Fast => "q8-fast",
             Stage::Q4Fast => "q4-fast",
+            Stage::Q8Rescore => "q8-rescore",
+            Stage::Q4Rescore => "q4-rescore",
         }
     }
 }
@@ -301,10 +309,19 @@ enum PackedWeights {
     Q8(Box<packed::PackedModel<Q8Matrix, packed::PlainHead<F16Matrix>>>),
     /// Q4_0 blocks, f16 LM head.
     Q4(Box<packed::PackedModel<Q4Matrix, packed::PlainHead<F16Matrix>>>),
+    /// Q8_0 blocks, rescored head (Q8 × two-level int8 approximate, f16 exact for candidates).
+    Q8R(Box<packed::PackedModel<Q8Matrix, packed::RescoredHead<Q8HiLoMatrix>>>),
+    /// Q4_0 blocks, rescored head.
+    Q4R(Box<packed::PackedModel<Q4Matrix, packed::RescoredHead<Q8HiLoMatrix>>>),
 }
 
 impl PackedWeights {
     fn for_stage(model: &Model, stage: Stage) -> Self {
+        match stage {
+            Stage::Q8Rescore => return PackedWeights::Q8R(Box::new(packed::PackedModel::new(model))),
+            Stage::Q4Rescore => return PackedWeights::Q4R(Box::new(packed::PackedModel::new(model))),
+            _ => {}
+        }
         match stage.weight_format() {
             WeightFormat::F32 => PackedWeights::None,
             WeightFormat::F16 => PackedWeights::F16(Box::new(packed::PackedModel::new(model))),
@@ -461,6 +478,30 @@ impl Session {
             },
             Stage::Q4Fast => match &self.packed {
                 PackedWeights::Q4(p) => packed::forward::<LowLat, Q4Matrix, _, FastPar, T>(
+                    model,
+                    p,
+                    new_tokens,
+                    &mut self.kv,
+                    &mut self.acts,
+                    &mut self.scratch,
+                    trace,
+                ),
+                _ => unreachable!(),
+            },
+            Stage::Q8Rescore => match &self.packed {
+                PackedWeights::Q8R(p) => packed::forward::<LowLat, Q8Matrix, _, FastPar, T>(
+                    model,
+                    p,
+                    new_tokens,
+                    &mut self.kv,
+                    &mut self.acts,
+                    &mut self.scratch,
+                    trace,
+                ),
+                _ => unreachable!(),
+            },
+            Stage::Q4Rescore => match &self.packed {
+                PackedWeights::Q4R(p) => packed::forward::<LowLat, Q4Matrix, _, FastPar, T>(
                     model,
                     p,
                     new_tokens,

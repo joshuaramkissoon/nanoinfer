@@ -585,4 +585,23 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
 - **Viz:** per-op flame strip of one token at stage 10 vs 11, with the LM head now the
   widest bar.
 
+### Stage 12: q8-rescore (an approximate LM head, corrected where it matters)
+
+- **Hypothesis:** of the LM head's 50257 logits, only those near the top decide what we
+  say. Score everything cheaply in 8-bit, then recompute the top few hundred exactly.
+- **First try:** the top token was always right (100%), but the probability distribution
+  was still off (KL 1e-2). GPT-2 spreads real probability over thousands of tokens, so
+  the "unimportant" tail isn't negligible. A clever statistical tail correction did
+  nothing.
+- **Fix:** the error was again in the *activations*: 8-bit can't hold the LayerNorm's
+  17× outlier channels. Store each activation as two 8-bit numbers (value + residual).
+  That doubles cheap integer math on a memory-bound pass, and the error drops 10×.
+- **Result:** decode **394 tok/s (Q8, +13%)** and **480 tok/s (Q4, +17%)**. Q8 quality: +0.2%
+  perplexity, 98% same top token as f32.
+- **Aha:** the trick isn't "use fewer bits", it's "spend the precision where the probability
+  mass is". And when a bug-hunt and an optimisation keep pointing at the same 6 channels
+  of one LayerNorm, believe them.
+- **Viz:** logit bar chart: approximate (8-bit) bars in gray, rescored top candidates
+  snapping to their exact values in color, with the margin as a dashed line below the max.
+
 ## Open questions / things to verify before publishing
