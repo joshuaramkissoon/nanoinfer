@@ -93,6 +93,10 @@ impl Gpu {
         self.device.name().to_string()
     }
 
+    pub fn has(&self, name: &str) -> bool {
+        self.pipes.contains_key(name)
+    }
+
     pub fn pipe(&self, name: &str) -> &Pipeline {
         self.pipes.get(name).unwrap_or_else(|| panic!("no kernel named {name}"))
     }
@@ -160,6 +164,9 @@ pub struct RunStats {
     pub gpu_seconds: f64,
 }
 
+/// Copies of each op encoded back to back when profiling.
+pub const PROFILE_REPEAT: usize = 20;
+
 /// A kernel argument.
 pub enum Arg<'a> {
     Buf(&'a Buf),
@@ -175,7 +182,9 @@ pub struct Runner<'g> {
     cb: Option<CmdBuf>,
     enc: Option<Encoder>,
     pub stats: RunStats,
-    /// When `Some`, per-op GPU times are recorded (only meaningful with `Sync::PerOp`).
+    /// When `Some`, every op is timed on its own (see `PROFILE_REPEAT`) and
+    /// `(label, seconds)` pairs are appended. Outputs are garbage in this mode
+    /// (non-idempotent ops like `x += y` run repeatedly).
     pub profile: Option<Vec<(&'static str, f64)>>,
 }
 
@@ -195,6 +204,33 @@ impl Runner<'_> {
     pub fn dispatch_tg(
         &mut self,
         label: &'static str,
+        kernel: &str,
+        args: &[Arg],
+        groups: (usize, usize, usize),
+        threads: (usize, usize, usize),
+        tg_mem: usize,
+    ) {
+        // Profiling: time this op alone, as PROFILE_REPEAT back-to-back copies in
+        // its own command buffer, so the per-command-buffer start cost and GPU
+        // clock ramp are amortised and we see steady-state kernel time.
+        let repeat = if self.profile.is_some() { PROFILE_REPEAT } else { 1 };
+        if repeat > 1 {
+            self.flush();
+        }
+        for _ in 0..repeat {
+            self.encode_one(kernel, args, groups, threads, tg_mem);
+        }
+        self.stats.dispatches += 1;
+        if repeat > 1 {
+            let t = self.flush() / repeat as f64;
+            self.profile.as_mut().unwrap().push((label, t));
+        } else if self.sync == Sync::PerOp {
+            self.flush();
+        }
+    }
+
+    fn encode_one(
+        &mut self,
         kernel: &str,
         args: &[Arg],
         groups: (usize, usize, usize),
@@ -222,13 +258,6 @@ impl Runner<'_> {
         }
         let size = |(width, height, depth)| MTLSize { width, height, depth };
         enc.dispatchThreadgroups_threadsPerThreadgroup(size(groups), size(threads));
-        self.stats.dispatches += 1;
-        if self.sync == Sync::PerOp {
-            let t = self.flush();
-            if let Some(p) = self.profile.as_mut() {
-                p.push((label, t));
-            }
-        }
     }
 
     /// 1-D convenience: `n` threads total in groups of `tg`.

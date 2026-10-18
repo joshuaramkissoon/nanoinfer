@@ -38,7 +38,8 @@ struct MetalBenchArgs {
     no_record: bool,
     #[arg(long, default_value = "")]
     note: String,
-    /// Print per-op GPU times for one decode step (needs a per-op-sync stage, e.g. metal-naive).
+    /// Print steady-state GPU time per op for one decode step (each op timed
+    /// alone, repeated back to back in its own command buffer).
     #[arg(long)]
     profile: bool,
 }
@@ -177,9 +178,7 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
         s.profile = Some(Vec::new());
         s.step(&[prompt[0]])?;
         let prof = s.profile.take().unwrap_or_default();
-        if prof.is_empty() {
-            eprintln!("--profile: no per-op times (stage {} does not sync per op)", a.stage);
-        } else {
+        {
             let mut by: Vec<(&str, f64, usize)> = Vec::new();
             for (name, t) in &prof {
                 match by.iter_mut().find(|e| e.0 == *name) {
@@ -192,9 +191,21 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
             }
             by.sort_by(|x, y| y.1.total_cmp(&x.1));
             let total: f64 = by.iter().map(|e| e.1).sum();
-            println!("  GPU time per op (one decode step, context {}):", prompt.len() + 1);
+            println!("  GPU time per op (one decode step, context {}; sum {:.3} ms):", prompt.len() + 1, total * 1e3);
+            let bpw = a.stage.recipe().dtype.bytes_per_weight();
+            let weights = |name: &str| -> Option<f64> {
+                let per = match name {
+                    "qkv" => 3 * c * c,
+                    "attn_proj" => c * c,
+                    "fc" | "fc_proj" => 4 * c * c,
+                    "lm_head" => return Some((cfg.n_vocab * c) as f64 * bpw),
+                    _ => return None,
+                };
+                Some((cfg.n_layer * per) as f64 * bpw)
+            };
             for (name, t, n) in by {
-                println!("    {name:<11} {:>8.1} us  {:>5.1}%  ({n} dispatches)", t * 1e6, 100.0 * t / total);
+                let gbs = weights(name).map(|b| format!("{:>6.1} GB/s", b / t / 1e9)).unwrap_or_default();
+                println!("    {name:<11} {:>8.1} us  {:>5.1}%  ({n:>2} dispatches)  {gbs}", t * 1e6, 100.0 * t / total);
             }
         }
     }

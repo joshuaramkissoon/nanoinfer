@@ -154,6 +154,27 @@ chart in this post is the real engine, running in your browser.
   fed one long one, it stays busy 97% of the time.
 - **Viz:** timeline strip: 135 short GPU bursts with gaps vs one solid block.
 - **Line:** "Same kernels, one fewer question per op: 2.8× faster."
+
+### GPU stage 3: kernels shaped like a GPU (SIMD matvec, then parallel attention/layernorm)
+
+- **Hypothesis:** the matvec is the bottleneck; make 32 lanes read 512 contiguous bytes
+  and reduce with `simd_sum`, and decode approaches the memory wall.
+- **Change (3a):** SIMD-group matvec (4 rows per SIMD-group, float4 loads). **Result:**
+  decode 41 → **47 tok/s**. The matvecs got 2.4× faster, but they were only ~45% of the
+  token: the 12-thread attention (41%) and 1-thread layernorm (20%) now dominate.
+- **Change (3b):** a 256-thread threadgroup per layernorm row and per attention head
+  (`simd_sum`/`simd_max` + threadgroup memory). **Result:** decode **137 tok/s** (2.9×),
+  **56% of the 243 spec ceiling, ~83% of what this GPU can actually read** (~80 GB/s);
+  75 GB/s while the GPU is busy. Attention went from 6.2 ms to 62 µs per token: 100×.
+- **Aha 1:** "decode is memory-bound" only holds once *nothing else* is slow. With one
+  bad kernel left, a perfect matvec bought 13%. Amdahl first, roofline second.
+- **Aha 2:** the GPU now beats one CPU core (19 tok/s naive, 100 unrolled) and every
+  variant of the matvec we tried lands between 75 and 90 GB/s. The kernel is done; only
+  fewer bytes can go faster.
+- **Viz:** stacked per-op bars for metal-onecb → simd → par: the matvec block shrinks,
+  then the attention/layernorm block vanishes.
+- **Line:** "The GPU got 13% faster when I fixed the obvious bottleneck, and 3× faster when
+  I fixed the one I hadn't measured."
 ### Stage 3: neon (hand-written SIMD), a null result
 
 - **Hypothesis:** hand-written NEON with fused multiply-adds, computing 4 output rows per

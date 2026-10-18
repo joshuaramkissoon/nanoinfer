@@ -409,6 +409,84 @@ Now 97% of the wall time is GPU kernel time, so the next lever is the kernels:
 the attention and layernorm kernels that use a dozen threads, and a matvec
 that coalesces.
 
+**Profiling note.** `bench --profile` now times every op *alone*: 20
+back-to-back copies of the dispatch in their own command buffer, GPU time ÷ 20
+(`gpu::PROFILE_REPEAT`). That removes the per-command-buffer start cost that
+inflated metal-naive's per-op numbers (kv_write: 92 µs per-op-synced vs 1.2 µs
+steady state), but small matrices then hit in cache on repeats (attn_proj
+2.4 MB "reads" at 110–140 GB/s), so trust the GB/s column only for the 28 MB+
+matrices (fc, fc_proj, lm_head). `examples/matvec_sweep.rs` measures matvec
+bandwidth with the cache defeated (≥ 256 MB of distinct matrix copies,
+round-robin).
+
+### Metal stage 3a: metal-simd (SIMD-group matvec for decode)
+
+**Hypothesis.** Decode's matvec should be the bottleneck: make it coalesced and
+it approaches the ~80 GB/s probe figure. Each SIMD-group computes R = 4 rows;
+lane l reads float4s l, l+32, ... of each row (512 contiguous bytes per
+SIMD-group per step), the x float4 is loaded once and reused for the 4 rows,
+`simd_sum` reduces. 4 SIMD-groups per threadgroup = 16 rows. Prefill keeps the
+naive matmul, so only decode changes.
+
+**Result.** Decode **46.7 ± 0.05 tok/s** (+13%), prefill unchanged (403).
+Hypothesis wrong about *what the bottleneck was*: profile (steady state):
+
+| op | metal-onecb µs | metal-simd µs |
+|---|---|---|
+| attn (naive) | 6204 | 6166 (41%) |
+| ln_1 + ln_2 (naive) | 2972 | 3055 (20%) |
+| fc_proj | 3203 (35 GB/s) | 1316 (86 GB/s) |
+| fc | 1579 (72 GB/s) | 1293 (88 GB/s) |
+| lm_head | 2439 (63 GB/s) | 1984 (78 GB/s) |
+| qkv + attn_proj | 1911 | 1030 |
+
+The matvecs went 2.4× faster in aggregate (fc_proj 2.4×: with 768 rows of 3072,
+the naive kernel had only 768 threads in flight; now 3072 SIMD lanes share
+each row). But they were only ~45% of the token. Now 61% of the time is the
+12-thread attention and the single-thread layernorm.
+
+**matvec_sweep** (GB/s, cache defeated): naive 29–76 (worst on the short-and-
+wide fc_proj/attn_proj), every SIMD variant (R ∈ {1,2,4,8} × {1,2,4,8}
+SIMD-groups) 60–90 GB/s with run-to-run noise of ±10 GB/s on this loaded
+machine: no variant is clearly better. R=4 × 4 SIMD-groups (the stage's
+choice) measured 76–86. The kernel is at the memory wall; the remaining
+differences are noise.
+
+### Metal stage 3b: metal-par (threadgroup layernorm + attention)
+
+**What changed.** `layernorm_simd`: one 256-thread threadgroup per row, two
+reductions through `simd_sum` + 32 floats of threadgroup memory (same two-pass
+maths). `attention_simd`: one 256-thread threadgroup per (query, head); each
+SIMD-group takes every 8th key, each lane multiplies 2 of the 64 dims (float2)
+and `simd_sum` gives q·k; scores live in threadgroup memory; threadgroup
+max/sum for the softmax; then 4 groups of 64 threads accumulate disjoint key
+subsets of P·V and are summed through threadgroup memory.
+
+**Numbers** (prompt 64, 64 decode steps, 5 runs):
+
+| | metal-simd | **metal-par** |
+|---|---|---|
+| decode tok/s | 46.7 | **137.0 ± 2.9** (56.5% of 243; ~83% of the measured-80-GB/s ceiling) |
+| wall / GPU-busy ms per token | 21.4 / 20.6 | 7.30 / 6.63 |
+| GB/s (wall / while GPU busy) | 23 / 24 | **67.7 / 74.7** |
+| prefill tok/s | 403 | 426 |
+
+Steady-state profile: lm_head 35%, fc 24%, fc_proj 21%, qkv 12%, attn_proj 3%,
+attention 1.0% (62 µs for 12 layers, was 6166), layernorms 0.9% (55 µs, was
+3055). **Attention went 100× faster** by using 256 threads per head instead
+of 1. Decode is now ~97% weight streaming.
+
+**Where the remaining time goes** (7.30 ms wall per token):
+- 5.8 ms: the ideal (494.6 MB at 85 GB/s).
+- ~0.8 ms: GPU busy above ideal: matvecs at 70–80 not 85 GB/s, ~135 × 0.7 µs
+  dispatch gaps (0.1 ms), small-op kernels.
+- ~0.7 ms: wall above GPU-busy: encoding 135 dispatches on the CPU (~30 µs),
+  commit → GPU start → completion signal latency, and the CPU argmax over 50257
+  logits.
+
+Next for decode: fewer bytes (f16 halves them), and cut the per-token fixed
+costs (fusion, GPU argmax). For prefill: real matmuls (stage 4).
+
 ---
 
 ## Stage 3: neon (explicit SIMD), a null result

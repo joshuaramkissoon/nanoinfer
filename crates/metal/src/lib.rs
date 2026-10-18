@@ -113,15 +113,21 @@ pub enum MetalStage {
     Naive,
     /// Same kernels, the whole forward in one command buffer.
     OneCb,
+    /// + coalesced SIMD-group matvec for decode.
+    Simd,
+    /// + threadgroup-parallel layernorm and attention.
+    Par,
 }
 
 impl MetalStage {
-    pub const ALL: &'static [MetalStage] = &[MetalStage::Naive, MetalStage::OneCb];
+    pub const ALL: &'static [MetalStage] = &[MetalStage::Naive, MetalStage::OneCb, MetalStage::Simd, MetalStage::Par];
 
     pub fn name(self) -> &'static str {
         match self {
             MetalStage::Naive => "metal-naive",
             MetalStage::OneCb => "metal-onecb",
+            MetalStage::Simd => "metal-simd",
+            MetalStage::Par => "metal-par",
         }
     }
 
@@ -139,6 +145,10 @@ impl MetalStage {
         match self {
             MetalStage::Naive => naive,
             MetalStage::OneCb => Recipe { sync: Sync::PerForward, ..naive },
+            MetalStage::Simd => Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, ..naive },
+            MetalStage::Par => {
+                Recipe { sync: Sync::PerForward, matvec: Matvec::Simd, norm: Par::Simd, attn: Par::Simd, ..naive }
+            }
         }
     }
 

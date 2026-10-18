@@ -57,6 +57,12 @@ pub struct MetalSession<'e> {
 
 const F: usize = 4; // bytes per f32
 
+/// SIMD matvec shape: rows per SIMD-group, SIMD-groups per threadgroup
+/// (chosen by `examples/matvec_sweep.rs`).
+const MV_ROWS: usize = 4;
+const MV_SIMDGROUPS: usize = 4;
+const MV_KERNEL: &str = "matvec_simd_r4";
+
 impl<'e> MetalSession<'e> {
     fn new(e: &'e MetalEngine) -> Self {
         let cfg = e.config;
@@ -161,23 +167,29 @@ impl<'e> MetalSession<'e> {
         let has_bias = bias.is_some() as u32;
         let bias = bias.unwrap_or(&self.x); // any buffer; unused when has_bias == 0
         let kernel = if n == 1 { rec.matvec } else { matvec_for(rec.matmul) };
+        let args = [
+            Arg::Buf(out),
+            Arg::BufAt(x, x_off),
+            Arg::Buf(&w.buf),
+            Arg::Buf(bias),
+            Arg::U32(n as u32),
+            Arg::U32(d_in),
+            Arg::U32(d_out),
+            Arg::U32(has_bias),
+        ];
         match (kernel, rec.dtype) {
-            (Matvec::Naive, DType::F32) => r.dispatch(
-                label,
-                "matmul_naive",
-                &[
-                    Arg::Buf(out),
-                    Arg::BufAt(x, x_off),
-                    Arg::Buf(&w.buf),
-                    Arg::Buf(bias),
-                    Arg::U32(n as u32),
-                    Arg::U32(d_in),
-                    Arg::U32(d_out),
-                    Arg::U32(has_bias),
-                ],
-                n * w.rows,
-                256,
-            ),
+            (Matvec::Naive, DType::F32) => r.dispatch(label, "matmul_naive", &args, n * w.rows, 256),
+            (Matvec::Simd, DType::F32) => {
+                let rows_per_tg = MV_ROWS * MV_SIMDGROUPS;
+                r.dispatch_tg(
+                    label,
+                    MV_KERNEL,
+                    &args,
+                    (w.rows.div_ceil(rows_per_tg), n, 1),
+                    (32 * MV_SIMDGROUPS, 1, 1),
+                    0,
+                )
+            }
             other => unimplemented!("linear {other:?}"),
         }
     }
@@ -199,7 +211,21 @@ impl<'e> MetalSession<'e> {
                 n,
                 32,
             ),
-            Par::Simd => unimplemented!(),
+            Par::Simd => r.dispatch_tg(
+                label,
+                "layernorm_simd",
+                &[
+                    Arg::Buf(&self.xn),
+                    Arg::BufAt(&self.x, x_off),
+                    Arg::Buf(w),
+                    Arg::Buf(b),
+                    Arg::U32(n as u32),
+                    Arg::U32(c),
+                ],
+                (n, 1, 1),
+                (256, 1, 1),
+                32 * F,
+            ),
         }
     }
 
@@ -225,7 +251,22 @@ impl<'e> MetalSession<'e> {
                 n * cfg.n_head,
                 32,
             ),
-            Par::Simd => unimplemented!(),
+            Par::Simd => r.dispatch_tg(
+                "attn",
+                "attention_simd",
+                &[
+                    Arg::Buf(&self.att),
+                    Arg::Buf(&self.qkv),
+                    Arg::BufAt(&self.k_cache, layer_off),
+                    Arg::BufAt(&self.v_cache, layer_off),
+                    Arg::U32(n as u32),
+                    Arg::U32(self.pos as u32),
+                    Arg::U32(cfg.n_head as u32),
+                ],
+                (n * cfg.n_head, 1, 1),
+                (256, 1, 1),
+                (1024 + 32 + 256) * F,
+            ),
         }
     }
 
