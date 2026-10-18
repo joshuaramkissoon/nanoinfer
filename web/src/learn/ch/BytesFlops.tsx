@@ -4,6 +4,7 @@ import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
 import { log, logTicks, short } from "../../lib/fmt";
 import { chartColors, Deeper, Fig, G, Idea, Seg, Slider, Swatch, useFrame, useOnScreen } from "../kit";
+import { MACHINES } from "./p0/specs";
 
 /** fig 9.1: a truck feeding a factory */
 function Factory() {
@@ -289,6 +290,94 @@ function Roofline() {
   );
 }
 
+/** fig 9.3: the ridge on each machine the course uses, side by side */
+function Ridges() {
+  const pal = usePalette();
+  const cc = chartColors(pal.dark);
+  const liveBw = useEngine((s) => (s.source === "live" ? s.bandwidthGBs : null));
+  const livePk = useEngine((s) => (s.source === "live" ? s.peakGflops : null));
+  const [ref, w] = useWidth<HTMLDivElement>();
+  const m = (k: string) => MACHINES.find((x) => x.key === k)!;
+  const tabBw = liveBw ?? 59, tabPk = livePk ?? 97;
+  const rows: { name: string; how: string; r: number; calc: string; fig: string }[] = [
+    { name: "browser tab", how: "1 M4 core, WebAssembly, f32", r: tabPk / tabBw, calc: `${tabPk.toFixed(0)} GFLOP/s ÷ ${tabBw.toFixed(0)} GB/s`, fig: "fig 9.1" },
+    { name: "M4 CPU", how: "10 cores, f32", r: (m("m4cpu").tflops * 1000) / m("m4cpu").bw, calc: `~${m("m4cpu").tflops * 1000} GFLOP/s ÷ ${m("m4cpu").bw} GB/s`, fig: "fig 0.3.1" },
+    { name: "M4 GPU", how: "1,280 lanes, f32", r: (m("m4gpu").tflops * 1000) / m("m4gpu").bw, calc: `~${m("m4gpu").tflops} TFLOP/s ÷ ${m("m4gpu").bw} GB/s`, fig: "figs 0.2.2, 0.3.1" },
+    { name: "H100", how: "tensor cores, bf16", r: (m("h100").tflops * 1000) / m("h100").bw, calc: `${m("h100").tflops} TFLOP/s ÷ ${(m("h100").bw / 1000).toFixed(2)} TB/s`, fig: "fig 0.2.2" },
+  ];
+  const W = Math.max(300, w);
+  const narrow = W < 520;
+  const labelW = narrow ? 92 : 170;
+  const row = narrow ? 40 : 30, bar = 14, top = 22;
+  const H = top + rows.length * row + 26;
+  const x = log(0.1, 1000, labelW + 6, W - 56);
+  return (
+    <Fig
+      n="9.3"
+      title="The ridge on each machine in this course"
+      prov="estimate"
+      caption={
+        <>
+          Each bar is one machine's ridge: peak arithmetic ÷ memory bandwidth, in operations per byte, on a log scale. The{" "}
+          <Swatch c={cc.c2}>blue band</Swatch> is decode for one user: 0.5 operations per byte with 32-bit weights, 1 with 16-bit.
+          It sits left of every ridge, so one user's decode is memory-bound on all four.
+        </>
+      }
+      source="Browser tab: measured by the engine in this page (recorded M4 values when not running). M4 CPU: 98 GB/s measured, ~0.6 TFLOP/s estimated from 4 P-cores × 4 FMA pipes × 4 lanes. M4 GPU: 105 GB/s measured, ~4.3 TFLOP/s f32 (Apple). H100 SXM: NVIDIA datasheet."
+    >
+      <div ref={ref}>
+        {w > 0 && (
+          <svg width={W} height={H} role="img" aria-label="ridge points: browser tab 1.6, M4 CPU 6, M4 GPU 41, H100 295 operations per byte">
+            {[0.1, 1, 10, 100, 1000].map((t) => (
+              <g key={t}>
+                <line x1={x(t)} x2={x(t)} y1={top - 6} y2={H - 26} stroke={pal.rule} />
+                <text x={x(t)} y={H - 12} textAnchor="middle" fontSize={10} fill={pal.muted}>
+                  {t}
+                </text>
+              </g>
+            ))}
+            <rect x={x(0.5)} y={top - 6} width={x(1) - x(0.5)} height={H - 26 - (top - 6)} fill={cc.c2} fillOpacity={0.22} />
+            <text x={x(0.7)} y={top - 9} textAnchor="middle" fontSize={10} fill={pal.sub}>
+              decode
+            </text>
+            <text x={W - 4} y={H - 1} textAnchor="end" fontSize={10} fill={pal.muted}>
+              operations per byte →
+            </text>
+            {rows.map((r, i) => {
+              const y0 = top + i * row + (row - bar) / 2;
+              return (
+                <g key={r.name}>
+                  <title>{`${r.name} (${r.how}): ${r.calc} ≈ ${r.r < 10 ? r.r.toFixed(1) : Math.round(r.r)} · used in ${r.fig}`}</title>
+                  <text x={labelW} y={narrow ? y0 + 4 : y0 + bar / 2 + 4} textAnchor="end" fontSize={11.5} fill={pal.fg}>
+                    {r.name}
+                  </text>
+                  {narrow && (
+                    <text x={labelW} y={y0 + 17} textAnchor="end" fontSize={10} fill={pal.muted}>
+                      {r.how}
+                    </text>
+                  )}
+                  <rect x={x(0.1)} y={y0} width={x(r.r) - x(0.1)} height={bar} rx={3} fill={cc.c1} opacity={0.85} />
+                  <text x={x(r.r) + 6} y={y0 + bar / 2 + 4} fontSize={11} fontWeight={700} fill={pal.fg}>
+                    {r.r < 10 ? r.r.toFixed(1) : Math.round(r.r)}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        )}
+      </div>
+      <div className="lr-note">
+        {rows.map((r, i) => (
+          <span key={r.name}>
+            {i > 0 && " · "}
+            <b>{r.name}</b> ({r.how}): {r.calc}
+          </span>
+        ))}
+      </div>
+    </Fig>
+  );
+}
+
 export default function BytesFlops() {
   return (
     <>
@@ -322,7 +411,7 @@ export default function BytesFlops() {
       <Deeper title="Same idea, other names">
         <p>
           “Work per byte” is called <b>arithmetic intensity</b>, and the crossover is the <b>ridge point</b>. On real hardware
-          the ridge is far to the right: our M4's GPU is near 50 operations per byte, a datacenter GPU near 300. So for one
+          the ridge is far to the right: our M4's GPU is near 41 operations per byte, an H100 near 295 (fig 9.3). So for one
           user at a time, decode is memory-bound on essentially every computer that exists.
         </p>
         <p>
@@ -330,6 +419,13 @@ export default function BytesFlops() {
           (bandwidth) and a tight multiply-add loop (compute).
         </p>
       </Deeper>
+      <p>
+        The course quotes three different crossovers: about 1.6 for a browser tab on the M4, 41 for the M4's GPU and 295 for an H100. Each is right
+        for its machine. They differ because a ridge divides two separate design choices, the arithmetic on the chip (and the
+        number format it runs at) by the speed of its memory: an H100's tensor cores do bf16 matrix maths about 230× faster
+        than the M4's GPU does f32, while its memory is only about 32× faster.
+      </p>
+      <Ridges />
     </>
   );
 }

@@ -12,7 +12,7 @@ type ChipKey = "m4cpu" | "m4gpu" | "h100";
 const CHIP: Record<ChipKey, { units: string; lanes: number; mem: string; detail: string }> = {
   m4cpu: { units: "10 cores (4 performance + 6 efficiency)", lanes: 10 * 4, mem: "LPDDR5X, shared", detail: "Each core is big and clever: deep pipelines, branch prediction, large caches, out-of-order execution. Built to make one thread fast." },
   m4gpu: { units: "10 GPU cores × 128 lanes", lanes: 1280, mem: "the same LPDDR5X pool", detail: "Each lane is simple: no branch prediction, tiny caches, runs in lockstep with 31 neighbours. Built to run the same arithmetic over lots of numbers." },
-  h100: { units: "132 SMs × 128 lanes + 528 tensor cores", lanes: 16896, mem: "80 GB HBM3, stacked beside the die", detail: "Same idea, much bigger, plus tensor cores (hardware that multiplies small matrix tiles in one step) and HBM: DRAM stacks packaged millimetres from the die on a very wide bus." },
+  h100: { units: "132 SMs × 128 lanes + 528 tensor cores", lanes: 16896, mem: "80 GB HBM3, stacked beside the die", detail: "Same idea, much bigger, plus tensor cores (hardware that multiplies small matrix tiles in one step) and HBM: DRAM stacks packaged millimetres from the die on a very wide bus. The 989 TFLOP/s is the tensor cores' dense bf16 rate; the 16,896 ordinary lanes manage ~67 TFLOP/s of f32, about 15× less. FP8 doubles the tensor-core rate again (~1,979 TFLOP/s)." },
 };
 
 function ChipPicture() {
@@ -176,7 +176,7 @@ function ChipPicture() {
       </div>
       <div className="lr-stats">
         <Stat k="parallel lanes" v={nf(info.lanes)} unit={k === "m4cpu" ? "(4-wide SIMD per core)" : undefined} />
-        <Stat k="peak arithmetic" v={mach.tflops >= 10 ? nf(mach.tflops) : nf(mach.tflops, 1)} unit={k === "h100" ? "TFLOP/s bf16" : "TFLOP/s f32"} />
+        <Stat k="peak arithmetic" v={mach.tflops >= 10 ? nf(mach.tflops) : nf(mach.tflops, 1)} unit={k === "h100" ? "TFLOP/s bf16, tensor cores" : "TFLOP/s f32"} />
         <Stat k="FLOPs per byte read" v={nf((mach.tflops * 1e12) / (mach.bw * 1e9))} accent />
       </div>
       <p className="lr-note">{info.detail}</p>

@@ -143,7 +143,8 @@ function IdleMaths() {
         <>
           Each square is one FLOP the chip could do in the time it takes to read one byte of weights:{" "}
           {mk === "h100" ? "~989 TFLOP/s ÷ 3.35 TB/s ≈ 295" : "~4.3 TFLOP/s ÷ 105 GB/s ≈ 41"}. Decode in bf16 does one FLOP
-          per byte per user (<Swatch c={cc.c1}>ember</Swatch>); the rest of the chip's arithmetic (grey) waits for memory.
+          per byte per user (<Swatch c={cc.c1}>ember</Swatch>); the rest of the chip's arithmetic (grey) waits for memory. This
+          counts weight bytes only. Each user's KV cache isn't shared, so real speeds do fall as users join: fig 0.2.3 adds it.
         </>
       }
       tryit={
@@ -174,7 +175,7 @@ function IdleMaths() {
       <div className="lr-stats">
         <Stat k="arithmetic busy" v={`${(busy * 100).toFixed(busy < 0.1 ? 1 : 0)}%`} accent />
         <Stat k="FLOPs per byte, decode" v={nf(B)} unit={`of ${ratio} possible`} />
-        <Stat k="each user's speed" v={B <= ratio ? "unchanged" : `÷ ${(B / ratio).toFixed(1)}`} unit={B <= ratio ? "memory-bound" : "compute-bound"} />
+        <Stat k="each user's speed, weights only" v={B <= ratio ? "unchanged" : `÷ ${(B / ratio).toFixed(1)}`} unit={B <= ratio ? "memory-bound" : "compute-bound"} />
       </div>
     </Fig>
   );

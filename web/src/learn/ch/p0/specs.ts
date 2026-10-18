@@ -50,7 +50,7 @@ export const FORMATS: Format[] = [
 ];
 
 export const SOURCES =
-  "M4 numbers: our measurements (docs/LOG.md). H100: NVIDIA H100 SXM datasheet (HBM3 3.35 TB/s, 80 GB, 989 TFLOP/s dense bf16). NVLink 4: 900 GB/s total per GPU (450 each way). PCIe 5 ×16: ~64 GB/s each way. InfiniBand NDR: 400 Gb/s ≈ 50 GB/s per port.";
+  "M4 numbers: our measurements (docs/LOG.md). H100: NVIDIA H100 SXM datasheet (HBM3 3.35 TB/s, 80 GB, 989 TFLOP/s dense bf16 and 1,979 dense FP8 on tensor cores, 67 TFLOP/s f32 on the ordinary lanes). NVLink 4: 900 GB/s total per GPU (450 each way). PCIe 5 ×16: ~64 GB/s each way. InfiniBand NDR: 400 Gb/s ≈ 50 GB/s per port.";
 
 /** "1.2 GB", "495 MB", "140 GB" */
 export function fmtBytes(b: number): string {
