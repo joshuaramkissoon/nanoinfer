@@ -1347,3 +1347,15 @@ canvas.nv-canvas {
   font-size: 0.72rem;
   margin-bottom: 0.5rem;
 }
+
+/* Text fields show focus with their own border (plus a faint halo), not the thick
+   keyboard outline that buttons and links get: a field you just clicked into is
+   obviously focused, and the caret is the indicator. */
+.minimal input:not([type="range"]):not([type="checkbox"]):focus-visible,
+.minimal textarea:focus-visible {
+  outline: none;
+}
+.minimal .lr-input:focus-visible {
+  border-color: color-mix(in srgb, var(--m-accent) 60%, var(--m-rule));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--m-accent) 12%, transparent);
+}

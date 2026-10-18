@@ -78,6 +78,10 @@ export default function Ladder() {
   const small = step < 70;
   const tiny = step < 48;
 
+  // label each per-format ceiling once (again only after a long gap), so the
+  // alternating q8/q4 rungs don't stack a dozen identical labels
+  const ceilLabelled = new Map<string, number>();
+
   const runAll = async () => {
     setViewBuild(null);
     for (const s of getState().stages) {
@@ -141,7 +145,7 @@ export default function Ladder() {
                 return (
                   <g key={cc.l}>
                     <line x1={m.l} x2={w - m.r} y1={y(cc.v)} y2={y(cc.v)} stroke={cc.c} strokeWidth={1.4} strokeDasharray="6 4" />
-                    <text x={w - m.r - 2} y={y(cc.v) - 5} textAnchor="end" style={{ fill: cc.c, fontSize: 9.5 }}>{cc.l}</text>
+                    <text x={m.l + 6} y={y(cc.v) - 5} textAnchor="start" style={{ fill: cc.c, fontSize: 9.5 }}>{cc.l}</text>
                   </g>
                 );
               })}
@@ -181,10 +185,18 @@ export default function Ladder() {
                   // per-rung ceiling when a stage reads fewer bytes per weight
                   if (metric !== "decode" || !st || !st.bitsPerWeight || st.bitsPerWeight >= 32) return null;
                   const c = (nativeCeil * 32) / st.bitsPerWeight;
+                  const key = sig(c, 3);
+                  const last = ceilLabelled.get(key);
+                  const label = last == null || i - last > 10;
+                  if (label) ceilLabelled.set(key, i);
                   return (
                     <g>
-                      <line x1={x - step * 0.4} x2={x + step * 0.4} y1={y(c)} y2={y(c)} stroke={pal.fg} strokeDasharray="3 3" />
-                      <text x={x} y={y(c) - 4} textAnchor="middle" style={{ fontSize: 9 }}>{st.weightFormat} ceiling {sig(c, 3)}</text>
+                      <line x1={x - step * 0.4} x2={x + step * 0.4} y1={y(c)} y2={y(c)} stroke={pal.fg} strokeDasharray="3 3" opacity={0.6} />
+                      {label && (
+                        <text x={x - step * 0.4} y={y(c) - 4} textAnchor="start" style={{ fontSize: 9 }}>
+                          {st.weightFormat} ceiling {key}
+                        </text>
+                      )}
                     </g>
                   );
                 })()}

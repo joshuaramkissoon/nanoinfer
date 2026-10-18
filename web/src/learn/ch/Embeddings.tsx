@@ -153,10 +153,10 @@ function Explorer({ d }: { d: LearnData }) {
           </div>
           <Barcode v={hover != null ? unpackVec(e.vecs[hover]) : vec} pal={pal} />
           <div className="lr-small" style={{ margin: "1rem 0 0.35rem" }}>
-            nearest tokens to “{e.text[e.words[sel]].trim()}” (cosine similarity, 1 = same direction)
+            nearest tokens to “{e.text[e.words[show]].trim()}” (cosine similarity, 1 = same direction)
           </div>
           <div className="lr-bars">
-            {e.near[sel].map(([id, s]) => (
+            {e.near[show].map(([id, s]) => (
               <div key={id} className="lr-bar" style={{ gridTemplateColumns: "minmax(4rem,7rem) 1fr 3rem" }}>
                 <span className="tk"><Tk s={e.text[id]} /></span>
                 <span className="b">

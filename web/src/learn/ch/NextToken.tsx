@@ -128,7 +128,7 @@ function Guesser() {
         >
           <input className="lr-input" value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="your prompt" placeholder="Type the start of a sentence" spellCheck={false} />
           <button className="lr-btn solid" type="submit" disabled={busy || !prompt.trim()}>
-            {ctx ? "guess again" : "guess"}
+            guess
           </button>
         </form>
       ) : null}
@@ -141,7 +141,7 @@ function Guesser() {
           </div>
           <div style={{ marginTop: "1rem" }}>
             <div className="lr-small lr-guess-head">
-              <span>{shownDist ? "the model's top 10 guesses for the next token" : "…"}</span>
+              <span>{shownDist ? "top 10 guesses for the next token" : "…"}</span>
               <SpaceKey />
             </div>
             <div className="lr-bars">

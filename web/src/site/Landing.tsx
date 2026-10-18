@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { boot, claim, decodeTokens, engine, loadModel, release, useEngine, weightLabel } from "../engine/client";
-import { bestStage, useRecorded } from "../learn/kit";
+import { Seg, bestStage, useRecorded } from "../learn/kit";
 import { CHAPTERS, chapterHref } from "../learn/chapters";
 import { linkTo } from "../learn/router";
 import { Journey } from "./Journey";
@@ -22,11 +22,15 @@ function Demo() {
   const [speed, setSpeed] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
   const [src, setSrc] = useState<"recorded" | "live">("recorded");
+  /** what the box is showing: the recorded example, or the reader's own prompt */
+  const [mode, setMode] = useState<"example" | "mine">("example");
   const stop = useRef(false);
+  const runId = useRef(0);
 
   // recorded: replay the recorded run at its measured pace
   const replay = async () => {
     if (!rec) return;
+    const my = ++runId.current;
     stop.current = false;
     setRunning(true);
     setSrc("recorded");
@@ -37,14 +41,15 @@ function Demo() {
     setSpeed(null);
     const fw = rec.run.forwards;
     let ms = 0;
-    for (let i = 0; i < toks.length - nP && !stop.current; i++) {
+    for (let i = 0; i < toks.length - nP && !stop.current && runId.current === my; i++) {
       const f = fw[i];
       await new Promise((r) => setTimeout(r, f ? f.ms : 10));
       if (i > 0) ms += f?.ms ?? 10;
+      if (runId.current !== my) break;
       setGen(toks.slice(nP, nP + i + 1).map((t) => t.id));
       if (i > 0) setSpeed((i * 1000) / ms);
     }
-    setRunning(false);
+    if (runId.current === my) setRunning(false);
   };
 
   const runLive = async () => {
@@ -86,51 +91,88 @@ function Demo() {
   useEffect(() => () => void (stop.current = true), []);
 
   const words = speed ? speed * 0.75 : null;
+  const mine = mode === "mine";
+  const switchTo = (m: "example" | "mine") => {
+    if (m === mode) return;
+    stop.current = true;
+    runId.current++;
+    setRunning(false);
+    setMode(m);
+    setPromptIds([]);
+    setGen([]);
+    setSpeed(null);
+    if (m === "example") setTimeout(() => void replay(), 30);
+  };
+  const showOut = !mine || src === "live";
   return (
     <div className="ld-demo" data-ask-section>
       <div className="ld-demo-head">
-        <span className={`lr-prov ${src === "live" ? "live" : "recorded"}`}>
-          {src === "live" ? "live · GPT-2 running in this tab" : "a recorded run of GPT-2 in the engine"}
-        </span>
+        <Seg
+          label="what GPT-2 continues"
+          value={mode}
+          onChange={switchTo}
+          options={[
+            { v: "example", label: "recorded example" },
+            { v: "mine", label: "your prompt" },
+          ]}
+        />
+        <span className={`lr-prov ${mine ? "live" : "recorded"}`}>{mine ? "live · in this tab" : "recorded on an M4"}</span>
       </div>
-      {live ? (
-        <div className="lr-controls" style={{ flexWrap: "nowrap", margin: "0 0 0.9rem" }}>
-          <input className="lr-input" value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !running && runLive()} aria-label="prompt" />
-          <button className="lr-btn solid" onClick={() => (running ? (stop.current = true) : runLive())}>
+      {mine && live && (
+        <form
+          className="lr-controls lr-guess-input"
+          style={{ margin: "0 0 0.9rem" }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (running) stop.current = true;
+            else void runLive();
+          }}
+        >
+          <input className="lr-input" value={prompt} onChange={(e) => setPrompt(e.target.value)} aria-label="your prompt" placeholder="Type the start of a sentence" spellCheck={false} />
+          <button className="lr-btn solid" type="submit" disabled={!running && !prompt.trim()}>
             {running ? "stop" : "write"}
           </button>
+        </form>
+      )}
+      {mine && !live ? (
+        <div className="lr-empty lr-guess-load">
+          <span>To continue your own text, GPT-2 has to run in this tab. It downloads once ({weightLabel()}), then stays cached.</span>
+          <button className="lr-btn solid" onClick={() => loadModel()} disabled={status === "loading" || status === "boot"}>
+            {status === "loading" ? `loading GPT-2${progress?.total ? ` · ${Math.round((100 * progress.loaded) / progress.total)}%` : "…"}` : "load GPT-2"}
+          </button>
         </div>
-      ) : null}
-      <div className="lr-text ld-out">
-        <span className="ctx">{decodeTokens(promptIds)}</span>
-        <span>{decodeTokens(gen)}</span>
-        {running && <span className="lr-cursor" />}
-      </div>
-      <div className="ld-speed">
-        {speed ? (
-          <>
-            <b>{speed.toFixed(0)} tokens a second</b>, about {words!.toFixed(0)} words. For every one of those tokens, the computer
-            read all {MB_PER_TOKEN.toFixed(0)} MB of GPT-2's numbers from memory: about {((speed * MB_PER_TOKEN) / 1000).toFixed(0)} GB every
-            second. That is why it isn't faster, and the course explains how to change it.
-          </>
-        ) : (
-          <span className="nv-muted">{running ? "writing…" : " "}</span>
-        )}
-      </div>
-      <div className="ld-actions">
-        {!live && (
-          <>
-            <button className="lr-btn" onClick={() => !running && replay()} disabled={running || !rec}>
-              ⟲ replay
-            </button>
-            <button className="lr-btn solid" onClick={() => loadModel()} disabled={status === "loading" || status === "boot"}>
-              {status === "loading"
-                ? `loading GPT-2${progress?.total ? ` · ${Math.round((100 * progress.loaded) / progress.total)}%` : "…"}`
-                : `type your own · loads GPT-2 (${weightLabel()}) into this tab`}
-            </button>
-          </>
-        )}
-      </div>
+      ) : showOut ? (
+        <>
+          <div className="lr-text ld-out">
+            <span className="ctx">{decodeTokens(promptIds)}</span>
+            <span>{decodeTokens(gen)}</span>
+            {running && <span className="lr-cursor" />}
+          </div>
+          <div className="ld-speed">
+            {speed ? (
+              <>
+                <b>{speed.toFixed(0)} tokens a second</b>, about {words!.toFixed(0)} words. For every one of those tokens, the computer
+                read all {MB_PER_TOKEN.toFixed(0)} MB of GPT-2's numbers from memory: about {((speed * MB_PER_TOKEN) / 1000).toFixed(0)} GB every
+                second. That is why it isn't faster, and the course explains how to change it.
+              </>
+            ) : (
+              <span className="nv-muted">{running ? "writing…" : " "}</span>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="lr-empty">Type the start of a sentence and press write: GPT-2 continues it, one token at a time.</div>
+      )}
+      {!mine && (
+        <div className="ld-actions">
+          <button className="lr-btn" onClick={() => !running && replay()} disabled={running || !rec}>
+            ⟲ replay
+          </button>
+          <span className="nv-muted ld-note">
+            the grey prompt was typed by a person; the rest is GPT-2, at the speed it ran
+          </span>
+        </div>
+      )}
     </div>
   );
 }

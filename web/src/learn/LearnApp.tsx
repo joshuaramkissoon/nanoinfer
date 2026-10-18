@@ -75,8 +75,17 @@ export default function LearnApp() {
 
 function Rail({ idx }: { idx: number }) {
   const visited = readVisited();
+  // step aside when the prev/next cards at the end of the chapter scroll into view
+  const [away, setAway] = useState(false);
+  useEffect(() => {
+    const pn = document.querySelector(".lr-pn");
+    if (!pn) return;
+    const io = new IntersectionObserver(([e]) => setAway(e.isIntersecting), { rootMargin: "0px 0px -35% 0px" });
+    io.observe(pn);
+    return () => io.disconnect();
+  }, [idx]);
   return (
-    <nav className="lr-rail" aria-label="chapters">
+    <nav className={`lr-rail${away ? " away" : ""}`} aria-label="chapters">
       {CHAPTERS.map((c, i) => {
         const first = i === 0 || CHAPTERS[i - 1].part !== c.part;
         return (
