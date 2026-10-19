@@ -1,0 +1,90 @@
+# CI for nanoinfer. Correctness only: never benchmark here (shared, virtualised
+# runners give meaningless tok/s). The GPT-2 weights aren't downloaded, so the
+# reference tests print SKIP and pass (NANOINFER_REQUIRE_WEIGHTS stays unset);
+# the skip count is printed so a vacuous pass is visible.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  rust:
+    name: rust (fmt, clippy, test)
+    runs-on: macos-14 # Apple Silicon (arm64): the NEON dotprod paths and Metal
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test (core, cli)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --release -p nanoinfer-core -p nanoinfer-cli -- --test-threads=2 --nocapture 2>&1 | tee test-cpu.log
+      # The runner's GPU is a paravirtualised Metal device whose feature set can
+      # differ from real Apple GPUs, so the GPU suites are best effort.
+      - name: test (metal, webgpu; best effort on a virtual GPU)
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --release -p nanoinfer-metal -p nanoinfer-webgpu -- --test-threads=2 --nocapture 2>&1 | tee test-gpu.log
+      - name: skip count
+        if: always()
+        shell: bash
+        run: |
+          echo "SKIP lines (weights absent or GPU feature missing):"
+          cat test-*.log 2>/dev/null | grep -c '^SKIP' || true
+
+  wasm-web:
+    name: wasm + web (build, typecheck)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            crates/wasm -> target
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129 # must match the pin in crates/wasm/Cargo.toml
+      - name: core for wasm32
+        run: cargo build --release -p nanoinfer-core --target wasm32-unknown-unknown
+      - name: wasm crate (simd128 + webgpu) -> web/src/engine/pkg
+        run: ONLY=simd crates/wasm/build.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: npm ci
+        working-directory: web
+        run: npm ci
+      - name: typecheck
+        working-directory: web
+        run: npm run typecheck
+      - name: build
+        working-directory: web
+        run: npm run build
