@@ -181,6 +181,9 @@ pub enum MetalStage {
     PipelinedF16,
     /// metal-pipelined with Q8_0 weights everywhere.
     PipelinedQ8,
+    /// metal-pipelined with f32 weights and flash attention: the f32 row of
+    /// the head-to-head on the fused, pipelined decode path (metal-mma predates it).
+    PipelinedF32,
     /// metal-pipelined + split-K (flash-decoding) attention.
     FlashDec,
     /// + flash-attention prefill (simdgroup matrices, online softmax).
@@ -210,6 +213,7 @@ impl MetalStage {
         MetalStage::Pipelined,
         MetalStage::PipelinedF16,
         MetalStage::PipelinedQ8,
+        MetalStage::PipelinedF32,
         MetalStage::FlashDec,
         MetalStage::Flash,
         MetalStage::Kv16,
@@ -234,6 +238,7 @@ impl MetalStage {
             MetalStage::Pipelined => "metal-pipelined",
             MetalStage::PipelinedF16 => "metal-pipelined-f16",
             MetalStage::PipelinedQ8 => "metal-pipelined-q8",
+            MetalStage::PipelinedF32 => "metal-pipelined-f32",
             MetalStage::FlashDec => "metal-flashdec",
             MetalStage::Flash => "metal-flash",
             MetalStage::Kv16 => "metal-kv16",
@@ -278,6 +283,9 @@ impl MetalStage {
             MetalStage::Pipelined => pipelined,
             MetalStage::PipelinedF16 => Recipe { dtype: DType::F16, head_dtype: DType::F16, ..pipelined },
             MetalStage::PipelinedQ8 => Recipe { dtype: DType::Q8_0, head_dtype: DType::Q8_0, ..pipelined },
+            MetalStage::PipelinedF32 => {
+                Recipe { dtype: DType::F32, head_dtype: DType::F32, attn: Attn::Flash, ..pipelined }
+            }
             MetalStage::FlashDec => Recipe { attn: Attn::SplitK, ..pipelined },
             MetalStage::Flash => Recipe { attn: Attn::Flash, ..pipelined },
             MetalStage::Kv16 => Recipe { attn: Attn::Flash, kv_f16: true, ..pipelined },
