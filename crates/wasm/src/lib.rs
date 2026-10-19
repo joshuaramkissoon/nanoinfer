@@ -131,15 +131,19 @@ fn n_threads() -> usize {
 /// What a core stage actually runs when compiled to wasm, if that differs from
 /// native (empty when it's the same code).
 fn wasm_note(s: Stage) -> String {
+    // How the weight format's inner loop runs without NEON (kernels/i8dot.rs, kernels/f16.rs).
+    let fmt = |s: Stage| match s.weight_format().name() {
+        "f16" => "f16 weights are widened with simd128 integer ops (no fcvtl)".to_string(),
+        f => format!("{f} decode uses simd128 int8 dots (no sdot)"),
+    };
     match s {
         Stage::Neon => "no NEON in wasm: runs the unrolled kernels".into(),
         Stage::Tiled => "no NEON in wasm: the 4x4 tile is scalar code".into(),
-        s if s.multithreaded() && n_threads() <= 1 && s.weight_format().name() != "f32" => format!(
-            "no OS threads in wasm: runs single-threaded; {} weights are decoded with scalar code (no NEON)",
-            s.weight_format().name()
-        ),
+        s if s.multithreaded() && n_threads() <= 1 && s.weight_format().name() != "f32" => {
+            format!("no OS threads in wasm: runs single-threaded; {}", fmt(s))
+        }
         s if s.multithreaded() && n_threads() <= 1 => "no OS threads in wasm: runs single-threaded".into(),
-        s if s.weight_format().name() != "f32" => format!("{} weights are decoded with scalar code (no NEON)", s.weight_format().name()),
+        s if s.weight_format().name() != "f32" => fmt(s),
         _ => String::new(),
     }
 }
