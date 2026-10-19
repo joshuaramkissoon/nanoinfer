@@ -3,7 +3,7 @@ import { Tip, useWidth } from "../../../ui/Figure";
 import { usePalette } from "../../../ui/theme";
 import { log } from "../../../lib/fmt";
 import { ConstraintMap } from "../../ConstraintMap";
-import { chartColors, Deeper, Fig, G, Idea, Seg, Slider, Stat, Swatch, nf, useLearnData } from "../../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, Slider, Stat, Swatch, nf, useLearnData, T } from "../../kit";
 import { FORMATS, MACHINES, MODELS, SOURCES, fmtBytes, fmtRate } from "./specs";
 
 // ---- fig 0.2.1: bytes per token → the speed limit on each machine ---------------------------------------
@@ -38,14 +38,14 @@ function BytesPerToken() {
         <>
           Top: bytes read and arithmetic done for <b>one token, one user</b>. Below, each machine's ceiling: its memory
           bandwidth divided by those bytes (<Swatch c={cc.c2}>blue</Swatch>, log scale: each gridline is 10×). Rows marked{" "}
-          <i>doesn't fit</i> can't hold the weights at all. For GPT-2, <Swatch c={cc.c1}>ember</Swatch> ticks are what our
+          <i>doesn't fit</i> can't hold the weights at all. For GPT-2, <Swatch c={cc.c1}>ember</Swatch> rings are what our
           engine actually measured.
         </>
       }
       tryit={
         <>
           A 7B model in bf16 is 14 GB per token: even an H100 tops out near 240 tokens a second. Now pick 70B: one H100 can't
-          hold it at all. Switch to int4 and it fits, at 4× the speed limit. Then pick GPT-2 and compare our measured ticks.
+          hold it at all. Switch to int4 and it fits, at 4× the speed limit. Then pick GPT-2 and compare our measured rings.
         </>
       }
       source={SOURCES + " Ceilings ignore the KV cache and quantisation scales (≈ +6–12% bytes)."}
@@ -56,13 +56,13 @@ function BytesPerToken() {
       </div>
       <div className="p0-hero">
         <div>
-          <div className="p0-hero-v" style={{ color: cc.c2 }}>
+          <div className="p0-hero-v">
             {fmtBytes(bytes)}
           </div>
           <div className="lr-small">read from memory per token</div>
         </div>
         <div>
-          <div className="p0-hero-v" style={{ color: cc.c1 }}>
+          <div className="p0-hero-v">
             {fmtRate((2 * m.params) / 1e9)} GFLOP
           </div>
           <div className="lr-small">of arithmetic per token (2 per weight)</div>
@@ -89,8 +89,9 @@ function BytesPerToken() {
                 {fits && [1, 10, 100, 1000, 10000].map((g) => <i key={g} className="grid" style={{ left: `${x(g)}%` }} />)}
                 {fits ? (
                   <>
-                    <i className="bar" style={{ width: `${Math.max(0.5, x(ceil))}%`, background: cc.c2 }} />
-                    {meas != null && <i className="meas" style={{ left: `${x(meas)}%`, background: cc.c1 }} title={`our engine: ${meas.toFixed(0)} tok/s`} />}
+                    <i className="guide" />
+                    <i className="dot" style={{ left: `${x(ceil)}%`, background: cc.c2 }} />
+                    {meas != null && <i className="meas" style={{ left: `${x(meas)}%`, borderColor: cc.c1 }} title={`our engine: ${meas.toFixed(0)} tok/s`} />}
                   </>
                 ) : (
                   <span className="nofit-k">
@@ -287,27 +288,27 @@ function CostCurve() {
             {[0.01, 0.1, 1, 10].map((t) => (
               <g key={t}>
                 <line x1={pl} x2={W - pr} y1={y(t)} y2={y(t)} stroke={pal.rule} />
-                <text x={pl - 6} y={y(t) + 4} textAnchor="end" fontSize={10} fill={pal.muted}>
+                <text x={pl - 6} y={y(t) + 4} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
                   ${t}
                 </text>
               </g>
             ))}
             {[1, 4, 16, 64, 256].map((t) => (
-              <text key={t} x={x(t)} y={H - 16} textAnchor="middle" fontSize={10} fill={pal.muted}>
+              <text key={t} x={x(t)} y={H - 16} textAnchor="middle" fontSize={T.xs} fill={pal.muted}>
                 {t}
               </text>
             ))}
-            <text x={W - pr} y={H - 2} textAnchor="end" fontSize={10} fill={pal.muted}>
+            <text x={W - pr} y={H - 2} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
               users per step →
             </text>
-            <text x={pl - 40} y={10} fontSize={10} fill={pal.muted}>
+            <text x={pl - 40} y={10} fontSize={T.xs} fill={pal.muted}>
               $ per million tokens
             </text>
             <path d={path} fill="none" stroke={cc.c1} strokeWidth={2} strokeLinejoin="round" />
             {maxB < 512 && (
               <g>
                 <line x1={pts[pts.length - 1][0]} x2={pts[pts.length - 1][0]} y1={top} y2={H - pb} stroke={cc.c2} strokeDasharray="3 3" />
-                <text x={pts[pts.length - 1][0] + (pts[pts.length - 1][0] > W - 130 ? -6 : 6)} y={top + 24} fontSize={10.5} fill={pal.sub} textAnchor={pts[pts.length - 1][0] > W - 130 ? "end" : "start"}>
+                <text x={pts[pts.length - 1][0] + (pts[pts.length - 1][0] > W - 130 ? -6 : 6)} y={top + 24} fontSize={T.xs} fill={pal.sub} textAnchor={pts[pts.length - 1][0] > W - 130 ? "end" : "start"}>
                   memory full
                 </text>
               </g>

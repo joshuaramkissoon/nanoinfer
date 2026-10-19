@@ -3,7 +3,7 @@ import { Tip, useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
 import { log } from "../../lib/fmt";
 import { Climb, bestBatch } from "../Climb";
-import { chartColors, Deeper, Fig, G, Idea, Seg, Swatch, nf, useLearnData, type LearnData, type ServingRate } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, Swatch, nf, useLearnData, type LearnData, type ServingRate, T } from "../kit";
 
 const DT_LABEL: Record<string, string> = { q4_0: "4-bit", q8_0: "8-bit", f16: "16-bit", f32: "32-bit" };
 const fmtMs = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`);
@@ -89,27 +89,27 @@ function BatchCurve({ d }: { d: LearnData }) {
             {[10, 100, 1000, 10000].map((t) => (
               <g key={t}>
                 <line x1={pl} x2={W - pr} y1={y(t)} y2={y(t)} stroke={pal.rule} />
-                <text x={pl - 6} y={y(t) + 4} textAnchor="end" fontSize={10} fill={pal.muted}>
+                <text x={pl - 6} y={y(t) + 4} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
                   {t >= 1000 ? `${t / 1000}k` : t}
                 </text>
               </g>
             ))}
             {pts.map((p) => (
-              <text key={p[0]} x={x(p[0])} y={H - 12} textAnchor="middle" fontSize={10} fill={p[0] === B ? pal.fg : pal.muted}>
+              <text key={p[0]} x={x(p[0])} y={H - 12} textAnchor="middle" fontSize={T.xs} fill={p[0] === B ? pal.fg : pal.muted}>
                 {W < 420 && ![1, 4, 16, 64, 256].includes(p[0]) ? "" : p[0]}
               </text>
             ))}
-            <text x={W - pr} y={H - 1} textAnchor="end" fontSize={10} fill={pal.muted}>
+            <text x={W - pr} y={H + 3} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
               users per step →
             </text>
             <line x1={x(B)} x2={x(B)} y1={top} y2={H - pb} stroke={pal.muted} opacity={0.6} />
             <path d={line(1)} fill="none" stroke={cc.c1} strokeWidth={2} strokeLinejoin="round" />
             <path d={line(2)} fill="none" stroke={pal.sub} strokeWidth={2} strokeLinejoin="round" />
             {/* direct labels at the line ends */}
-            <text x={x(last[0]) + 8} y={y(last[1]) + 4} fontSize={11} fill={pal.sub}>
+            <text x={x(last[0]) + 8} y={y(last[1]) + 4} fontSize={T.xs} fill={pal.sub}>
               total
             </text>
-            <text x={x(last[0]) + 8} y={y(last[2]) + 4} fontSize={11} fill={pal.sub}>
+            <text x={x(last[0]) + 8} y={y(last[2]) + 4} fontSize={T.xs} fill={pal.sub}>
               each user
             </text>
             <circle cx={x(B)} cy={y(total)} r={5} fill={cc.c1} stroke={ring} strokeWidth={2} />
@@ -171,7 +171,7 @@ function Timeline({ srv }: { srv: ServingRate }) {
             {ticks.map((t) => (
               <g key={t}>
                 <line x1={x(t)} x2={x(t)} y1={0} y2={H - 22} stroke={pal.rule} />
-                <text x={x(t)} y={H - 8} textAnchor="middle" fontSize={10} fill={pal.muted}>
+                <text x={x(t)} y={H - 8} textAnchor="middle" fontSize={T.xs} fill={pal.muted}>
                   {t} s
                 </text>
               </g>
@@ -181,7 +181,7 @@ function Timeline({ srv }: { srv: ServingRate }) {
               const y0 = pi * panel;
               return (
                 <g key={pol}>
-                  <text x={pl} y={y0 + 14} fontSize={11.5} fill={pal.fg} fontWeight={700}>
+                  <text x={pl} y={y0 + 14} fontSize={T.xs} fill={pal.fg} fontWeight={700}>
                     {pol === "static" ? "static batches" : "continuous batching"}
                     {!narrow && (
                       <tspan fontWeight={400} fill={pal.sub}>
@@ -190,7 +190,7 @@ function Timeline({ srv }: { srv: ServingRate }) {
                     )}
                   </text>
                   {narrow && (
-                    <text x={pl} y={y0 + 27} fontSize={10.5} fill={pal.sub}>
+                    <text x={pl} y={y0 + 27} fontSize={T.xs} fill={pal.sub}>
                       median wait for the first word: {fmtMs(r.ttft_p50_ms)}
                     </text>
                   )}
@@ -200,8 +200,9 @@ function Timeline({ srv }: { srv: ServingRate }) {
                     return (
                       <g key={i} onMouseEnter={() => setHover({ pol, i })} onClick={() => setHover({ pol, i })} opacity={hover && !on ? 0.55 : 1}>
                         <rect x={0} y={yy - 1} width={W} height={row + gap} fill="transparent" />
-                        <rect x={x(arr)} y={yy} width={Math.max(1.5, x(first) - x(arr))} height={row} rx={2} fill={pal.muted} opacity={0.5} />
-                        <rect x={x(first) + 1} y={yy} width={Math.max(2, x(fin) - x(first) - 1)} height={row} rx={2} fill={cc.c1} />
+                        {/* the message is the waiting, so the grey carries the weight here and the ember steps back */}
+                        <rect x={x(arr)} y={yy} width={Math.max(1.5, x(first) - x(arr))} height={row} rx={2} fill={pal.sub} opacity={0.85} />
+                        <rect x={x(first) + 1} y={yy} width={Math.max(2, x(fin) - x(first) - 1)} height={row} rx={2} fill={cc.c1} opacity={on ? 1 : 0.5} />
                       </g>
                     );
                   })}
@@ -304,7 +305,7 @@ function PagedKv({ srv }: { srv: ServingRate }) {
                 style={{
                   minWidth: "2.1rem",
                   textAlign: "center",
-                  fontSize: "0.7rem",
+                  fontSize: "var(--t-xs)",
                   padding: "0.12rem 0.2rem",
                   borderRadius: 4,
                   border: `1px solid ${cc.c1}`,

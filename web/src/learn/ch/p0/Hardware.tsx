@@ -2,7 +2,7 @@ import { useState, type ReactElement } from "react";
 import { usePalette } from "../../../ui/theme";
 import { log } from "../../../lib/fmt";
 import { useWidth } from "../../../ui/Figure";
-import { chartColors, Deeper, Fig, G, Idea, Seg, Stat, Swatch, nf, useFrame, useOnScreen } from "../../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, Stat, Swatch, nf, useFrame, useOnScreen, T, PlayPause, usePlaying } from "../../kit";
 import { linkTo } from "../../router";
 import { MACHINES, SOURCES } from "./specs";
 
@@ -24,9 +24,9 @@ function ChipPicture() {
   const [onScreen, seen] = useOnScreen<HTMLElement>();
   const [wref, w] = useWidth<HTMLDivElement>();
   const narrow = w > 0 && w < 520; // phones get a vertical layout with larger type, not a shrunken desktop one
-  const reduce = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const [t, setT] = useState(0);
-  useFrame(seen && !reduce, (dt) => setT((v) => (v + dt) % 1000));
+  const [playing, setPlaying] = usePlaying();
+  useFrame(seen && playing, (dt) => setT((v) => (v + dt) % 1000));
   const panel = pal.dark ? "#262421" : "#ffffff";
   // bus: thickness and packet rate scale with log bandwidth
   const lb = Math.log10(mach.bw); // ~2 .. 3.5
@@ -43,10 +43,10 @@ function ChipPicture() {
         <g key={`p${i}`}>
           <rect x={x} y={y} width={78} height={66} rx={6} fill={cc.c1} fillOpacity={0.16} stroke={cc.c1} />
           <rect x={x + 6} y={y + 42} width={66} height={16} rx={3} fill={cc.c2} fillOpacity={0.25} />
-          <text x={x + 39} y={y + 24} textAnchor="middle" fontSize={9.5 * fs} fill={pal.fg}>
+          <text x={x + 39} y={y + 24} textAnchor="middle" fontSize={T.xs * fs} fill={pal.fg}>
             P-core
           </text>
-          <text x={x + 39} y={y + 54} textAnchor="middle" fontSize={8.5 * Math.min(fs, 1.3)} fill={pal.sub}>
+          <text x={x + 39} y={y + 54} textAnchor="middle" fontSize={8.5 * Math.min(fs, 1.3)} /* sized to its box; renders at ≥11px */ fill={pal.sub}>
             cache
           </text>
         </g>,
@@ -57,7 +57,7 @@ function ChipPicture() {
       units.push(
         <g key={`e${i}`}>
           <rect x={x} y={y} width={50} height={40} rx={5} fill={cc.c1} fillOpacity={0.1} stroke={cc.c1} strokeOpacity={0.7} />
-          <text x={x + 25} y={y + 25} textAnchor="middle" fontSize={8.5 * Math.min(fs, 1.35)} fill={pal.sub}>
+          <text x={x + 25} y={y + 25} textAnchor="middle" fontSize={8.5 * Math.min(fs, 1.35)} /* sized to its 50-unit box; renders at ≥11px */ fill={pal.sub}>
             E-core
           </text>
         </g>,
@@ -66,7 +66,7 @@ function ChipPicture() {
     units.push(
       <g key="l2">
         <rect x={16} y={158} width={338} height={26} rx={4} fill={cc.c2} fillOpacity={0.2} />
-        <text x={185} y={175 + (fs - 1) * 3} textAnchor="middle" fontSize={9 * fs} fill={pal.sub}>
+        <text x={185} y={175 + (fs - 1) * 3} textAnchor="middle" fontSize={T.xs * fs} fill={pal.sub}>
           large shared caches (16 MB+)
         </text>
       </g>,
@@ -94,7 +94,7 @@ function ChipPicture() {
       {Array.from({ length: k === "h100" ? 5 : 2 }, (_, i) => (
         <rect key={i} x={26} y={120 - memH / 2 + 12 + i * (k === "h100" ? 26 : 34)} width={106} height={k === "h100" ? 18 : 26} rx={3} fill={cc.c2} fillOpacity={0.3} />
       ))}
-      <text x={79} y={120 + memH / 2 + 17} textAnchor="middle" fontSize={11} fill={pal.sub}>
+      <text x={79} y={120 + memH / 2 + 17} textAnchor="middle" fontSize={T.xs} fill={pal.sub}>
         {mach.cap} GB memory
       </text>
       <rect x={146} y={120 - busW / 2} width={102} height={busW} fill={cc.c2} fillOpacity={0.35} />
@@ -102,14 +102,14 @@ function ChipPicture() {
         const p = ((t * rate + i / pkts) % 1 + 1) % 1;
         return <rect key={i} x={146 + p * 90} y={120 - Math.max(2, busW / 2 - 1)} width={8} height={Math.max(4, busW - 2)} rx={1.5} fill={cc.c2} />;
       })}
-      <text x={198} y={120 - busW / 2 - 9} textAnchor="middle" fontSize={11.5} fontWeight={700} fill={pal.fg}>
+      <text x={198} y={120 - busW / 2 - 9} textAnchor="middle" fontSize={T.xs} fontWeight={700} fill={pal.fg}>
         {bwLabel}
       </text>
-      <text x={198} y={120 + busW / 2 + 17} textAnchor="middle" fontSize={10} fill={pal.muted}>
+      <text x={198} y={120 + busW / 2 + 17} textAnchor="middle" fontSize={T.xs} fill={pal.muted}>
         {srcLabel}
       </text>
       <rect x={250} y={22} width={370} height={196} rx={12} fill={panel} stroke={pal.sub} />
-      <text x={262} y={39} fontSize={10.5} fill={pal.muted}>
+      <text x={262} y={39} fontSize={T.xs} fill={pal.muted}>
         {info.units}
       </text>
       <g transform="translate(250,22)">{units}</g>
@@ -124,7 +124,7 @@ function ChipPicture() {
       {Array.from({ length: k === "h100" ? 5 : 2 }, (_, i) => (
         <rect key={i} x={82 + i * (k === "h100" ? 36 : 90)} y={18} width={k === "h100" ? 30 : 84} height={34} rx={3} fill={cc.c2} fillOpacity={0.3} />
       ))}
-      <text x={170} y={69} textAnchor="middle" fontSize={12} fill={pal.sub}>
+      <text x={170} y={69} textAnchor="middle" fontSize={T.sm} fill={pal.sub}>
         {mach.cap} GB memory
       </text>
       <rect x={170 - busW / 2} y={busTop - 14} width={busW} height={busBot - busTop + 14} fill={cc.c2} fillOpacity={0.35} />
@@ -132,10 +132,10 @@ function ChipPicture() {
         const p = ((t * rate + i / pkts) % 1 + 1) % 1;
         return <rect key={i} x={170 - Math.max(2, busW / 2 - 1)} y={busTop - 12 + p * (busBot - busTop)} width={Math.max(4, busW - 2)} height={7} rx={1.5} fill={cc.c2} />;
       })}
-      <text x={170 + busW / 2 + 10} y={120} fontSize={14} fontWeight={700} fill={pal.fg}>
+      <text x={170 + busW / 2 + 10} y={120} fontSize={T.sm} fontWeight={700} fill={pal.fg}>
         {bwLabel}
       </text>
-      <text x={170 + busW / 2 + 10} y={137} fontSize={11.5} fill={pal.muted}>
+      <text x={170 + busW / 2 + 10} y={137} fontSize={T.xs} fill={pal.muted}>
         {srcLabel}
       </text>
       <rect x={6} y={busBot} width={328} height={196 * S + 4} rx={12} fill={panel} stroke={pal.sub} />
@@ -145,6 +145,7 @@ function ChipPicture() {
   return (
     <Fig
       figRef={onScreen}
+      aside={<PlayPause playing={playing} onToggle={() => setPlaying((p) => !p)} />}
       n="0.3.1"
       title="A CPU is a few clever cores; a GPU is thousands of simple lanes"
       prov="diagram"

@@ -3,7 +3,7 @@ import { Tk } from "../../ui/Tok";
 import { claim, engine, release, tokenText, useEngine } from "../../engine/client";
 import { LiveButton } from "../../ui/Figure";
 import { css, rgb, usePalette, type Palette } from "../../ui/theme";
-import { Deeper, Fig, G, Idea, Seg, Slider, useRecorded } from "../kit";
+import { Deeper, Fig, G, Idea, Seg, Slider, useRecorded, T } from "../kit";
 
 // ---- toy -----------------------------------------------------------------------------
 
@@ -89,11 +89,11 @@ function ToyAttention() {
           {WORDS.map((wd, i) => (
             <g key={i} opacity={i > q ? 0.3 : 1}>
               <rect x={x(i) - 25} y={102} width={50} height={22} rx={5} fill={css(valueColor(pal, i))} fillOpacity={i <= q ? 0.25 : 0.1} stroke={i === q ? pal.fg : "none"} />
-              <text x={x(i)} y={117} fontSize={wd.length > 5 ? 10.5 : 12} textAnchor="middle" fill={pal.fg} fontWeight={i === q ? 700 : 400}>
+              <text x={x(i)} y={117} fontSize={wd.length > 5 ? T.xs : T.sm} textAnchor="middle" fill={pal.fg} fontWeight={i === q ? 700 : 400}>
                 {wd}
               </text>
               {i <= q && (
-                <text x={x(i)} y={140} fontSize={10} textAnchor="middle" fill={i === top ? pal.fg : pal.muted} fontWeight={i === top ? 700 : 400}>
+                <text x={x(i)} y={140} fontSize={T.xs} textAnchor="middle" fill={i === top ? pal.fg : pal.muted} fontWeight={i === top ? 700 : 400}>
                   {(wts[i] * 100).toFixed(0)}%
                 </text>
               )}
@@ -101,7 +101,7 @@ function ToyAttention() {
           ))}
         </svg>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", marginTop: "0.4rem", fontSize: "0.82rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", marginTop: "0.4rem", fontSize: "var(--t-sm)" }}>
         <span style={{ width: 44, height: 22, borderRadius: 5, background: css(mix), display: "inline-block", border: `1px solid ${pal.rule}` }} />
         <span>
           new vector for “{WORDS[q]}” = <b>{(wts[top] * 100).toFixed(0)}%</b> “{WORDS[top]}” + the rest
@@ -233,7 +233,7 @@ function RealAttention() {
         <Slider label="layer" value={lh[0]} min={0} max={11} onChange={(v) => (setMode("custom"), setLh([v, lh[1]]))} fmt={(v) => v + 1} width="5.5rem" />
         <Slider label="head" value={lh[1]} min={0} max={11} onChange={(v) => (setMode("custom"), setLh([lh[0], v]))} fmt={(v) => v + 1} width="5.5rem" />
       </div>
-      <div style={{ lineHeight: 2.15, fontSize: "0.95rem" }}>
+      <div style={{ lineHeight: 2.15, fontSize: "var(--t-md)" }}>
         {data?.tokens.map((id, j) => {
           const w = row && j <= qi ? row[j] / (rmax || 1) : 0;
           const isQ = j === qi;

@@ -2,8 +2,8 @@ import { useRef, useState } from "react";
 import { useEngine } from "../../engine/client";
 import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
-import { log, logTicks, short } from "../../lib/fmt";
-import { chartColors, Deeper, Fig, G, Idea, Seg, Slider, Swatch, useFrame, useOnScreen } from "../kit";
+import { log, logTicks } from "../../lib/fmt";
+import { chartColors, Deeper, Fig, G, Idea, PlayPause, Seg, Slider, Swatch, useFrame, useOnScreen, usePlaying, T } from "../kit";
 import { MACHINES } from "./p0/specs";
 
 /** fig 9.1: a truck feeding a factory */
@@ -17,7 +17,8 @@ function Factory() {
   const [, tick] = useState(0);
   const truckRate = 2.2; // boxes per second, visual
   const [onScreen, vis] = useOnScreen<HTMLElement>();
-  useFrame(vis, (dt) => {
+  const [playing, setPlaying] = usePlaying();
+  useFrame(vis && playing, (dt) => {
     const s = sim.current;
     s.spawn += dt * truckRate;
     while (s.spawn >= 1 && s.queue < 9) {
@@ -97,21 +98,22 @@ function Factory() {
             { v: "prefill", label: "prefill · 32" },
           ]}
         />
+        <PlayPause playing={playing} onToggle={() => setPlaying((p) => !p)} />
       </div>
       <div ref={ref}>
         {w > 0 && (
           <svg width={W} height={H}>
             {/* warehouse: memory (blue) */}
             <rect x={2} y={26} width={houseW} height={64} rx={8} fill={cc.c2} fillOpacity={0.1} stroke={cc.c2} />
-            <text x={2 + houseW / 2} y={55} textAnchor="middle" fontSize={12.5} fontWeight={700} fill={pal.fg}>
+            <text x={2 + houseW / 2} y={55} textAnchor="middle" fontSize={T.sm} fontWeight={700} fill={pal.fg}>
               memory
             </text>
-            <text x={2 + houseW / 2} y={72} textAnchor="middle" fontSize={11} fill={pal.sub}>
+            <text x={2 + houseW / 2} y={72} textAnchor="middle" fontSize={T.xs} fill={pal.sub}>
               the weights
             </text>
             {/* road: bandwidth, carrying boxes of bytes (blue) */}
             <line x1={road0} x2={road1} y1={58} y2={58} stroke={pal.rule} strokeWidth={16} strokeLinecap="round" />
-            <text x={(road0 + road1) / 2} y={36} textAnchor="middle" fontSize={11} fill={pal.sub}>
+            <text x={(road0 + road1) / 2} y={36} textAnchor="middle" fontSize={T.xs} fill={pal.sub}>
               bytes arriving at a fixed rate →
             </text>
             {s.boxes.map((x, i) => (
@@ -124,15 +126,14 @@ function Factory() {
             {/* factory: the processor (ember when working) */}
             <g transform={`translate(${W - factW - 4},18)`}>
               <rect x={0} y={10} width={factW} height={70} rx={8} fill={cc.c1} fillOpacity={s.proc > 0 ? 0.22 : 0.05} stroke={cc.c1} />
-              <path d="M12,10 v-12 h14 v12 M36,10 v-8 h14 v8" fill="none" stroke={cc.c1} />
-              <text x={factW / 2} y={40} textAnchor="middle" fontSize={12.5} fontWeight={700} fill={pal.fg}>
+              <text x={factW / 2} y={40} textAnchor="middle" fontSize={T.sm} fontWeight={700} fill={pal.fg}>
                 processor
               </text>
-              <text x={factW / 2} y={58} textAnchor="middle" fontSize={11} fill={s.proc > 0 ? pal.fg : pal.muted}>
+              <text x={factW / 2} y={58} textAnchor="middle" fontSize={T.xs} fill={s.proc > 0 ? pal.fg : pal.muted}>
                 {s.proc > 0 ? "working" : "waiting…"}
               </text>
             </g>
-            <text x={2} y={H - 4} fontSize={11} fill={pal.muted}>
+            <text x={2} y={H - 4} fontSize={T.xs} fill={pal.muted}>
               {bound === "memory" ? "the processor is idle between boxes" : "boxes pile up at the processor's door"}
             </text>
           </svg>
@@ -154,7 +155,7 @@ function Factory() {
           <span className="pc">{(factoryBusy * 100).toFixed(0)}%</span>
         </div>
       </div>
-      <div className="lr-note">
+      <div className="lr-note lr-verdict">
         → <b>{bound === "memory" ? "memory-bound" : "compute-bound"}</b>:{" "}
         {bound === "memory" ? "a faster processor would change nothing; only a faster truck (or fewer bytes) helps." : "the truck is fast enough; only faster arithmetic helps."}
       </div>
@@ -173,9 +174,13 @@ function Roofline() {
   const [ref, w] = useWidth<HTMLDivElement>();
   const bw = m === "tab" ? liveBw ?? 59 : 105;
   const peak = m === "tab" ? livePk ?? 97 : 4300;
-  const W = Math.max(300, w), H = 280, pl = 52, pb = 34;
+  const W = Math.max(300, w), H = 300, pl = 44, pb = 44, pt = 26;
   const x = log(0.1, 1000, pl, W - 10);
-  const y = log(1, 10000, H - pb, 10);
+  const y = log(1, 10000, H - pb, pt);
+  const tk = (t: number) => (t >= 1000 ? `${t / 1000}k` : String(t));
+  const flops = (g: number) => (g >= 1000 ? `${(g / 1000).toFixed(1)} TFLOP/s` : `${g.toFixed(0)} GFLOP/s`);
+  /** labels get a surface-coloured halo so gridlines and roofs never run through them */
+  const halo = { stroke: pal.bg, strokeWidth: 4, paintOrder: "stroke" as const, strokeLinejoin: "round" as const };
   const ridge = peak / bw;
   const att = (I: number) => Math.min(peak, bw * I);
   const dec = 0.5, pre = P / 2;
@@ -222,52 +227,52 @@ function Roofline() {
           <svg width={W} height={H}>
             {logTicks(0.1, 1000).map((t) => (
               <g key={t}>
-                <line x1={x(t)} x2={x(t)} y1={10} y2={H - pb} stroke={pal.rule} />
-                <text x={x(t)} y={H - pb + 14} textAnchor="middle" fontSize={10} fill={pal.muted}>
-                  {t}
+                <line x1={x(t)} x2={x(t)} y1={pt} y2={H - pb} stroke={pal.rule} />
+                <text x={x(t)} y={H - pb + 16} textAnchor="middle" fontSize={T.xs} fill={pal.muted}>
+                  {tk(t)}
                 </text>
               </g>
             ))}
             {logTicks(1, 10000).map((t) => (
               <g key={t}>
                 <line x1={pl} x2={W - 10} y1={y(t)} y2={y(t)} stroke={pal.rule} />
-                <text x={pl - 6} y={y(t) + 4} textAnchor="end" fontSize={10} fill={pal.muted}>
-                  {short(t)}
+                <text x={pl - 6} y={y(t) + 4} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
+                  {tk(t)}
                 </text>
               </g>
             ))}
-            <text x={W - 10} y={H - 4} textAnchor="end" fontSize={10} fill={pal.sub}>
-              work per byte (FLOP/B) →
+            <text x={W - 10} y={H - 4} textAnchor="end" fontSize={T.xs} fill={pal.sub}>
+              work per byte (FLOP/B, log scale) →
             </text>
-            <text x={pl} y={8} fontSize={10} fill={pal.sub}>
-              GFLOP/s ↑
+            <text x={pl - 6} y={11} fontSize={T.xs} fill={pal.sub}>
+              ↑ GFLOP/s achieved (log scale)
             </text>
             {/* memory roof */}
             <line x1={x(0.1)} y1={y(Math.max(1, bw * 0.1))} x2={x(stage >= 2 ? ridge : 1000)} y2={y(stage >= 2 ? peak : bw * 1000)} stroke={pal.cool} strokeWidth={2.5} opacity={stage >= 2 ? 1 : 0.9} />
             {stage === 1 && (
-              <text x={x(2)} y={y(bw * 2) - 10} fontSize={11} fill={pal.cool}>
-                memory: {bw.toFixed(0)} GB/s × work per byte
+              <text x={x(2)} y={y(bw * 2) - 10} fontSize={T.xs} fill={pal.sub} {...halo}>
+                memory roof: {bw.toFixed(0)} GB/s × work per byte
               </text>
             )}
             {stage >= 2 && (
               <>
                 <line x1={x(ridge)} x2={x(1000)} y1={y(peak)} y2={y(peak)} stroke={pal.accent} strokeWidth={2.5} />
                 <line x1={x(ridge)} x2={x(ridge)} y1={y(peak)} y2={H - pb} stroke={pal.muted} strokeDasharray="3 4" />
-                <text x={x(ridge) + 6} y={H - pb - 6} fontSize={10} fill={pal.muted}>
+                <text x={x(ridge) + 6} y={H - pb - 6} fontSize={T.xs} fill={pal.muted} {...halo}>
                   ridge {ridge.toFixed(1)}
                 </text>
-                <text x={W - 14} y={y(peak) - 8} textAnchor="end" fontSize={11} fill={pal.accent}>
-                  compute: {short(peak * 1e9)}FLOP/s
+                <text x={W - 14} y={y(peak) - 8} textAnchor="end" fontSize={T.xs} fill={pal.sub} {...halo}>
+                  compute roof: {flops(peak)}
                 </text>
               </>
             )}
             {stage >= 3 && (
               <g>
                 <circle cx={x(dec)} cy={y(att(dec))} r={6} fill={pal.cool} stroke={pal.bg} strokeWidth={2} />
-                <text x={x(dec) + 10} y={y(att(dec)) + 16} fontSize={11} fill={pal.fg} fontWeight={700}>
+                <text x={x(dec) + 10} y={y(att(dec)) + 18} fontSize={T.xs} fill={pal.fg} fontWeight={700} {...halo}>
                   decode
                 </text>
-                <text x={x(dec) + 10} y={y(att(dec)) + 29} fontSize={10} fill={pal.muted}>
+                <text x={x(dec) + 10} y={y(att(dec)) + 31} fontSize={T.xs} fill={pal.muted} {...halo}>
                   {att(dec).toFixed(0)} GFLOP/s · {((att(dec) / peak) * 100).toFixed(0)}% of the factory
                 </text>
               </g>
@@ -275,10 +280,10 @@ function Roofline() {
             {stage >= 4 && (
               <g>
                 <circle cx={x(pre)} cy={y(att(pre))} r={6} fill={pal.accent} stroke={pal.bg} strokeWidth={2} />
-                <text x={Math.min(W - 160, x(pre) + 10)} y={y(att(pre)) + (pre > ridge ? 18 : -10)} fontSize={11} fill={pal.fg} fontWeight={700}>
+                <text x={Math.min(W - 160, x(pre) + 10)} y={y(att(pre)) + (pre > ridge ? 18 : -10)} fontSize={T.xs} fill={pal.fg} fontWeight={700} {...halo}>
                   prefill, {P} tokens
                 </text>
-                <text x={Math.min(W - 160, x(pre) + 10)} y={y(att(pre)) + (pre > ridge ? 31 : 3)} fontSize={10} fill={pal.muted}>
+                <text x={Math.min(W - 160, x(pre) + 10)} y={y(att(pre)) + (pre > ridge ? 31 : 3)} fontSize={T.xs} fill={pal.muted} {...halo}>
                   {pre} FLOP/B · {pre > ridge ? "compute-bound" : "memory-bound"}
                 </text>
               </g>
@@ -318,7 +323,7 @@ function Ridges() {
       prov="estimate"
       caption={
         <>
-          Each bar is one machine's ridge: peak arithmetic ÷ memory bandwidth, in operations per byte, on a log scale. The{" "}
+          Each dot is one machine's ridge: peak arithmetic ÷ memory bandwidth, in operations per byte, on a log scale. The{" "}
           <Swatch c={cc.c2}>blue band</Swatch> is decode for one user: 0.5 operations per byte with 32-bit weights, 1 with 16-bit.
           It sits left of every ridge, so one user's decode is memory-bound on all four.
         </>
@@ -331,33 +336,34 @@ function Ridges() {
             {[0.1, 1, 10, 100, 1000].map((t) => (
               <g key={t}>
                 <line x1={x(t)} x2={x(t)} y1={top - 6} y2={H - 26} stroke={pal.rule} />
-                <text x={x(t)} y={H - 12} textAnchor="middle" fontSize={10} fill={pal.muted}>
+                <text x={x(t)} y={H - 12} textAnchor="middle" fontSize={T.xs} fill={pal.muted}>
                   {t}
                 </text>
               </g>
             ))}
             <rect x={x(0.5)} y={top - 6} width={x(1) - x(0.5)} height={H - 26 - (top - 6)} fill={cc.c2} fillOpacity={0.22} />
-            <text x={x(0.7)} y={top - 9} textAnchor="middle" fontSize={10} fill={pal.sub}>
+            <text x={x(0.7)} y={top - 9} textAnchor="middle" fontSize={T.xs} fill={pal.sub}>
               decode
             </text>
-            <text x={W - 4} y={H - 1} textAnchor="end" fontSize={10} fill={pal.muted}>
-              operations per byte →
+            <text x={W - 4} y={H + 3} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
+              operations per byte (log scale) →
             </text>
             {rows.map((r, i) => {
               const y0 = top + i * row + (row - bar) / 2;
               return (
                 <g key={r.name}>
                   <title>{`${r.name} (${r.how}): ${r.calc} ≈ ${r.r < 10 ? r.r.toFixed(1) : Math.round(r.r)} · used in ${r.fig}`}</title>
-                  <text x={labelW} y={narrow ? y0 + 4 : y0 + bar / 2 + 4} textAnchor="end" fontSize={11.5} fill={pal.fg}>
+                  <text x={labelW} y={narrow ? y0 + 4 : y0 + bar / 2 + 4} textAnchor="end" fontSize={T.xs} fill={pal.fg}>
                     {r.name}
                   </text>
                   {narrow && (
-                    <text x={labelW} y={y0 + 17} textAnchor="end" fontSize={10} fill={pal.muted}>
+                    <text x={labelW} y={y0 + 17} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
                       {r.how}
                     </text>
                   )}
-                  <rect x={x(0.1)} y={y0} width={x(r.r) - x(0.1)} height={bar} rx={3} fill={cc.c1} opacity={0.85} />
-                  <text x={x(r.r) + 6} y={y0 + bar / 2 + 4} fontSize={11} fontWeight={700} fill={pal.fg}>
+                  <line x1={x(0.1)} x2={x(r.r)} y1={y0 + bar / 2} y2={y0 + bar / 2} stroke={pal.muted} strokeWidth={1.5} />
+                  <circle cx={x(r.r)} cy={y0 + bar / 2} r={5} fill={pal.sub} stroke={pal.bg} strokeWidth={2} />
+                  <text x={x(r.r) + 10} y={y0 + bar / 2 + 4} fontSize={T.xs} fontWeight={700} fill={pal.fg}>
                     {r.r < 10 ? r.r.toFixed(1) : Math.round(r.r)}
                   </text>
                 </g>

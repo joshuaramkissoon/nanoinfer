@@ -33,7 +33,7 @@ export default function TimeStrip() {
     if (!c || !w) return;
     const ctx = fitCanvas(c, w, h);
     ctx.clearRect(0, 0, w, h);
-    ctx.font = "10px JetBrains Mono, monospace";
+    ctx.font = "11px JetBrains Mono, monospace";
     ctx.textBaseline = "middle";
     fwds.forEach((f, r) => {
       const y = r * (ROW_H + GAP);
@@ -84,7 +84,7 @@ export default function TimeStrip() {
   return (
     <div>
       <div className="nv-controls" style={{ marginBottom: "0.9rem", justifyContent: "space-between" }}>
-        <span className="nv-muted" style={{ fontSize: "0.75rem" }}>
+        <span className="nv-muted" style={{ fontSize: "var(--t-sm)" }}>
           last {fwds.length} decoded tokens · {run?.stage} · {fwds[0]?.ops.length} ops per token
         </span>
         <div className="nv-seg">
@@ -116,7 +116,7 @@ export default function TimeStrip() {
         ))}
       </div>
 
-      <div style={{ marginTop: "1.6rem", display: "grid", gap: "0.3rem", fontSize: "0.75rem" }}>
+      <div style={{ marginTop: "1.6rem", display: "grid", gap: "0.3rem", fontSize: "var(--t-sm)" }}>
         <div className="nv-muted" style={{ display: "grid", gridTemplateColumns: "minmax(4.5rem, 8rem) 1fr 3.5rem 3.5rem", gap: "0.6rem" }}>
           <span>op ×12 layers</span>
           <span>share of time</span>

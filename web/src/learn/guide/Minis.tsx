@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { usePalette } from "../../ui/theme";
-import { chartColors, Seg } from "../kit";
+import { chartColors, Seg, T } from "../kit";
 
 // ---- number formats ---------------------------------------------------------------------------------
 
@@ -82,10 +82,10 @@ export function HeadSharing() {
         {Array.from({ length: kv }, (_, j) => (
           <rect key={j} x={kx(j) - 13} y={86} width={26} height={18} rx={3} fill={cc.c2} />
         ))}
-        <text x={W - 4} y={10} textAnchor="end" fontSize={10} fill={pal.sub}>
+        <text x={W - 4} y={10} textAnchor="end" fontSize={T.xs} fill={pal.sub}>
           query heads (compute)
         </text>
-        <text x={W - 4} y={118} textAnchor="end" fontSize={10} fill={pal.sub}>
+        <text x={W - 4} y={118} textAnchor="end" fontSize={T.xs} fill={pal.sub}>
           KV heads (cached) · KV cache = {kv}/8 of MHA
         </text>
       </svg>
@@ -138,7 +138,7 @@ export function ParallelMini({ mode }: { mode: ParMode }) {
       {Array.from({ length: N }, (_, g) => (
         <g key={g}>
           <rect x={gx(g)} y={gy} width={gw} height={gh} rx={8} fill={panel} stroke={pal.sub} />
-          <text x={gx(g) + 6} y={gy - 6} fontSize={9.5} fill={pal.muted}>
+          <text x={gx(g) + 6} y={gy - 6} fontSize={T.xs} fill={pal.muted}>
             GPU {g + 1}
           </text>
           {mode === "sequence"
@@ -147,13 +147,13 @@ export function ParallelMini({ mode }: { mode: ParMode }) {
                 <rect key={`${l}-${c}`} x={gx(g) + 8 + c * 19} y={gy + 8 + l * 16} width={16} height={12} rx={2} fill={held ? (mode === "expert" && l > 0 ? cc.c1 : cc.c2) : pal.rule} fillOpacity={held ? 0.75 : 0.35} />
               ))}
           {mode === "data" && (
-            <text x={gx(g) + gw / 2} y={gy + gh + 16} textAnchor="middle" fontSize={9.5} fill={pal.sub}>
+            <text x={gx(g) + gw / 2} y={gy + gh + 16} textAnchor="middle" fontSize={T.xs} fill={pal.sub}>
               users {g * 2 + 1}–{g * 2 + 2}
             </text>
           )}
         </g>
       ))}
-      <text x={W / 2} y={136} textAnchor="middle" fontSize={9.5} fill={pal.sub}>
+      <text x={W / 2} y={136} textAnchor="middle" fontSize={T.xs} fill={pal.sub}>
         {label[mode]}
       </text>
     </svg>

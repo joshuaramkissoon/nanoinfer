@@ -171,11 +171,8 @@ export default function RunIt() {
           </div>
           <div className="nv-stats" style={{ marginTop: "1.2rem" }}>
             <Stat k={run && !recorded ? `speed · ${stageLabel(run.stage)}` : "decode speed"} v={isFinite(tokS) ? sig(tokS, 3) : "–"} u="tok/s" accent />
-            <Stat k="last token" v={last ? fmtMs(last.ms) : "–"} />
-            <Stat k="context" v={run ? String(run.tokens.length) : "–"} u="tokens" />
-            <Stat k="rows computed" v={last ? String(last.nComputed) : "–"} u={last?.nComputed === 1 ? "row" : "rows"} />
-            <Stat k="kv cache" v={kvBytes != null ? fmtBytes(kvBytes) : "off"} />
-            <Stat k="generated" v={String(nGen)} />
+            <Stat k="last token" v={last ? fmtMs(last.ms) : "–"} u={last ? `${last.nComputed} ${last.nComputed === 1 ? "row" : "rows"} computed` : undefined} />
+            <Stat k="kv cache" v={kvBytes != null ? fmtBytes(kvBytes) : "off"} u={run ? `${run.tokens.length} tokens · ${nGen} generated` : undefined} />
           </div>
           <MsSpark ms={dec.map((f) => f.ms)} />
         </div>
@@ -214,7 +211,7 @@ export default function RunIt() {
             )}
           </div>
           {shown?.entropy != null && (
-            <div className="nv-muted" style={{ fontSize: "0.72rem", marginTop: "0.6rem" }}>
+            <div className="nv-muted" style={{ fontSize: "var(--t-xs)", marginTop: "0.6rem" }}>
               entropy {shown.entropy.toFixed(2)} nats · ≈ {Math.exp(shown.entropy).toFixed(1)} equally likely choices
             </div>
           )}
@@ -251,14 +248,14 @@ function MsSpark({ ms }: { ms: number[] }) {
   const bw = w / N;
   return (
     <div ref={ref} style={{ marginTop: "1rem" }}>
-      <div className="nv-muted" style={{ fontSize: "0.68rem", display: "flex", justifyContent: "space-between" }}>
+      <div className="nv-muted" style={{ fontSize: "var(--t-xs)", display: "flex", justifyContent: "space-between" }}>
         <span>ms per token →</span>
         <span>max {fmtMs(max)}</span>
       </div>
       <svg className="nv-svg nv-spark" viewBox={`0 0 ${w || 1} ${h}`} height={h} preserveAspectRatio="none">
         <line x1={0} x2={w} y1={h - 0.5} y2={h - 0.5} stroke={pal.rule} />
         {ms.map((m, i) => (
-          <rect key={i} x={i * bw + 0.5} width={Math.max(1, bw - 1.5)} y={y(m)} height={h - y(m)} fill={i === ms.length - 1 ? pal.accent : pal.heat[2]} />
+          <rect key={i} x={i * bw + 0.5} width={Math.max(1, bw - 1.5)} y={y(m)} height={h - y(m)} fill={i === ms.length - 1 ? pal.accent : pal.muted} fillOpacity={i === ms.length - 1 ? 1 : 0.55} />
         ))}
       </svg>
     </div>

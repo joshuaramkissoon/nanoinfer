@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { Tk } from "../../ui/Tok";
 import { useWidth } from "../../ui/Figure";
 import { KIND_LABEL, css, heatAt, kindColor, usePalette, type Palette } from "../../ui/theme";
-import { Deeper, Fig, G, Idea, Slider, nf, unpackVec, useLearnData, useRecorded, useFrame, useOnScreen } from "../kit";
+import { Deeper, Fig, G, Idea, Slider, nf, unpackVec, useLearnData, useRecorded, useFrame, useOnScreen, T, PlayPause, usePlaying, Swatch } from "../kit";
 
 /** fig 4.1: drag two arrows, read their dot product */
 function DotToy() {
@@ -42,7 +42,7 @@ function DotToy() {
             setDrag(id);
           }}
         />
-        <text x={x + 12} y={y - 8} fontSize={13} fontWeight={700} fill={c}>
+        <text x={x + 12} y={y - 8} fontSize={T.sm} fontWeight={700} fill={c}>
           {id}
         </text>
       </g>
@@ -75,17 +75,17 @@ function DotToy() {
           {arrow(a, pal.accent, "a")}
           {arrow(b, pal.cool, "b")}
         </svg>
-        <div style={{ fontSize: "0.92rem", lineHeight: 2, flex: "1 1 220px" }}>
+        <div style={{ fontSize: "var(--t-md)", lineHeight: 2, flex: "1 1 220px" }}>
           <div>
-            <span style={{ color: pal.accent }}>a</span> = [{a[0].toFixed(1)}, {a[1].toFixed(1)}]
+            <Swatch c={pal.accent}>a</Swatch> = [{a[0].toFixed(1)}, {a[1].toFixed(1)}]
           </div>
           <div>
-            <span style={{ color: pal.cool }}>b</span> = [{b[0].toFixed(1)}, {b[1].toFixed(1)}]
+            <Swatch c={pal.cool}>b</Swatch> = [{b[0].toFixed(1)}, {b[1].toFixed(1)}]
           </div>
           <div style={{ marginTop: "0.6rem" }}>
             a·b = {a[0].toFixed(1)}×{b[0].toFixed(1)} + {a[1].toFixed(1)}×{b[1].toFixed(1)}
           </div>
-          <div style={{ fontSize: "1.6rem", fontWeight: 700, color: dot >= 0 ? pal.accent : pal.cool }}>= {dot.toFixed(2)}</div>
+          <div style={{ fontSize: "var(--t-xl)", fontWeight: 700 }}>= {dot.toFixed(2)}</div>
           <svg width="100%" height={18} viewBox="0 0 200 18" preserveAspectRatio="none">
             <rect x={0} y={7} width={200} height={4} fill={pal.rule} rx={2} />
             <rect x={dot >= 0 ? 100 : 100 + (dot / max) * 100} y={5} width={Math.abs(dot / max) * 100} height={8} fill={dot >= 0 ? pal.accent : pal.cool} rx={2} />
@@ -113,7 +113,7 @@ function MatVec() {
   const pal = usePalette();
   const [t, setT] = useState(0);
   const [speed, setSpeed] = useState(4);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = usePlaying();
   const N = 8;
   const W = d?.corner ?? null;
   const x = useMemo(() => {
@@ -161,9 +161,7 @@ function MatVec() {
       }
     >
       <div className="lr-controls">
-        <button className="lr-btn" onClick={() => setPlaying((p) => !p)}>
-          {playing ? "❚❚ pause" : "▶ play"}
-        </button>
+        <PlayPause playing={playing} onToggle={() => setPlaying((p) => !p)} />
         <Slider label="speed" value={speed} min={1} max={16} onChange={setSpeed} fmt={(v) => `${v}/s`} />
         <span className="lr-small">
           multiply-adds: <b style={{ color: pal.fg }}>{fin ? 64 : step}</b> / 64
@@ -183,13 +181,13 @@ function MatVec() {
       <div style={{ overflowX: "auto" }}>
         <svg width={ox + N * (C + G) + 130} height={oy + N * (C + G) + 6} style={{ maxWidth: "100%", display: "block", margin: "0 auto" }} viewBox={`0 0 ${ox + N * (C + G) + 130} ${oy + N * (C + G) + 6}`}>
           {/* x on top */}
-          <text x={ox} y={11} fontSize={11.5} fill={pal.sub}>
+          <text x={ox} y={11} fontSize={T.xs} fill={pal.sub}>
             vector x: “␣dog”, first 8 of its 768 numbers
           </text>
           {x.map((v, j) => (
             <g key={j}>
               <rect x={ox + j * (C + G)} y={18} width={C} height={22} rx={3} fill={diverge(pal, v / xmax)} stroke={!fin && j === col ? pal.fg : "none"} strokeWidth={1.5} />
-              <text x={ox + j * (C + G) + C / 2} y={33} fontSize={10} textAnchor="middle" fill={pal.fg}>
+              <text x={ox + j * (C + G) + C / 2} y={33} fontSize={T.xs} textAnchor="middle" fill={pal.fg}>
                 {v.toFixed(2)}
               </text>
             </g>
@@ -212,7 +210,7 @@ function MatVec() {
                     strokeWidth={2}
                   />
                   {(active || (i === row && !fin)) && (
-                    <text x={ox + j * (C + G) + C / 2} y={oy + i * (C + G) + C / 2 + 4} fontSize={10} textAnchor="middle" fill={pal.fg} opacity={doneCell || active ? 1 : 0.6}>
+                    <text x={ox + j * (C + G) + C / 2} y={oy + i * (C + G) + C / 2 + 4} fontSize={T.xs} textAnchor="middle" fill={pal.fg} opacity={doneCell || active ? 1 : 0.6}>
                       {v.toFixed(2)}
                     </text>
                   )}
@@ -221,12 +219,12 @@ function MatVec() {
             }),
           )}
           {/* output column */}
-          <text x={ox + N * (C + G) + 18} y={oy - 6} fontSize={11.5} fill={pal.sub}>
+          <text x={ox + N * (C + G) + 18} y={oy - 6} fontSize={T.xs} fill={pal.sub}>
             output
           </text>
           {y.map((o, i) => (
             <g key={i}>
-              <text x={ox + N * (C + G) + 4} y={oy + i * (C + G) + C / 2 + 4} fontSize={11} fill={pal.muted} opacity={o.started ? 1 : 0}>
+              <text x={ox + N * (C + G) + 4} y={oy + i * (C + G) + C / 2 + 4} fontSize={T.xs} fill={pal.muted} opacity={o.started ? 1 : 0}>
                 =
               </text>
               <rect
@@ -239,7 +237,7 @@ function MatVec() {
                 opacity={o.done ? 0.9 : 0.45}
               />
               {o.started && (
-                <text x={ox + N * (C + G) + 84} y={oy + i * (C + G) + C / 2 + 4} fontSize={11} fill={pal.fg}>
+                <text x={ox + N * (C + G) + 84} y={oy + i * (C + G) + C / 2 + 4} fontSize={T.xs} fill={pal.fg}>
                   {o.s.toFixed(3)}
                 </text>
               )}

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { decodeTokens } from "../../engine/client";
 import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
-import { Deeper, Fig, G, Idea, Seg, Stat, useFrame, useOnScreen, useRecorded } from "../kit";
+import { Deeper, Fig, G, Idea, Seg, Stat, useFrame, useOnScreen, useRecorded, T, PlayPause, usePlaying } from "../kit";
 
 function Replay() {
   const rec = useRecorded();
@@ -10,7 +10,7 @@ function Replay() {
   const [ref, w] = useWidth<HTMLDivElement>();
   const [t, setT] = useState(0);
   const [slow, setSlow] = useState(10);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = usePlaying();
   const plan = useMemo(() => {
     if (!rec) return null;
     const fw = rec.run.forwards;
@@ -45,10 +45,10 @@ function Replay() {
   const node = (x: number, label: string, sub: string, on: boolean) => (
     <g>
       <rect x={x - 62} y={8} width={124} height={44} rx={8} fill={on ? pal.accent : "transparent"} fillOpacity={on ? 0.12 : 0} stroke={on ? pal.accent : pal.rule} />
-      <text x={x} y={27} textAnchor="middle" fontSize={11.5} fontWeight={700} fill={pal.fg}>
+      <text x={x} y={27} textAnchor="middle" fontSize={T.xs} fontWeight={700} fill={pal.fg}>
         {label}
       </text>
-      <text x={x} y={42} textAnchor="middle" fontSize={9.5} fill={pal.muted}>
+      <text x={x} y={42} textAnchor="middle" fontSize={T.xs} fill={pal.muted}>
         {sub}
       </text>
     </g>
@@ -70,9 +70,7 @@ function Replay() {
       tryit={<>Switch to <b>real speed</b>: that's how fast it actually ran, in V8, on one core of an M4.</>}
     >
       <div className="lr-controls">
-        <button className="lr-btn" onClick={() => setPlaying((p) => !p)}>
-          {playing ? "❚❚ pause" : "▶ play"}
-        </button>
+        <PlayPause playing={playing} onToggle={() => setPlaying((p) => !p)} />
         <button className="lr-btn" onClick={() => setT(0)}>
           ⟲
         </button>
@@ -102,7 +100,7 @@ function Replay() {
         </defs>
         <path d="M495,52 v4 H70 v-4" fill="none" stroke={phase === 2 ? pal.accent : pal.rule} strokeDasharray="3 3" />
       </svg>
-      <div className="lr-text" style={{ minHeight: "5.5rem", fontSize: "0.95rem" }}>
+      <div className="lr-text" style={{ minHeight: "5.5rem", fontSize: "var(--t-md)" }}>
         <span className="ctx">{decodeTokens(toks.slice(0, nPrompt).map((x) => x.id))}</span>
         <span>{decodeTokens(toks.slice(nPrompt, nPrompt + shownGen).map((x) => x.id))}</span>
         <span className="lr-cursor" />
@@ -123,10 +121,10 @@ function Replay() {
               />
             ))}
             <line x1={sx(t)} x2={sx(t)} y1={0} y2={38} stroke={pal.fg} strokeWidth={1.5} />
-            <text x={0} y={50} fontSize={10} fill={pal.muted}>
+            <text x={0} y={50} fontSize={T.xs} fill={pal.muted}>
               prefill
             </text>
-            <text x={W} y={50} fontSize={10} fill={pal.muted} textAnchor="end">
+            <text x={W} y={50} fontSize={T.xs} fill={pal.muted} textAnchor="end">
               {Math.min(t, plan.total).toFixed(0)} / {plan.total.toFixed(0)} ms of real time
             </text>
           </svg>

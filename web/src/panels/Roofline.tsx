@@ -1,3 +1,4 @@
+import { T } from "../learn/kit";
 import { useEffect, useMemo, useState } from "react";
 import { decodes, measureGpuRoof, useEngine, useRunSource } from "../engine/client";
 import { useRoofs } from "../lib/roofs";
@@ -101,7 +102,7 @@ export default function Roofline() {
   return (
     <div>
       <div className="nv-controls" style={{ justifyContent: "space-between", marginBottom: "0.6rem" }}>
-        <span className="nv-muted" style={{ fontSize: "0.75rem" }}>
+        <span className="nv-muted" style={{ fontSize: "var(--t-sm)" }}>
           {gpu
             ? `${run.stage} runs the whole token on the GPU, so it reports one op per token · last ${dec.length} tokens · roof = this ${roofs.bwFrom === "recorded" ? "recorded" : "tab's"} WebGPU bandwidth probe · no GPU compute roof is measured here (the M4 GPU's is above this chart)`
             : `dots = ops summed over all 12 layers and the last ${dec.length} tokens · size = share of time · roofs = this ${roofs.bwFrom === "recorded" ? "recorded" : "tab's"} wasm CPU probes`}
@@ -149,7 +150,7 @@ export default function Roofline() {
                 CPU compute roof · {sig(top, 3)} GFLOP/s ({peakKind === "fma" ? "relaxed-SIMD FMA" : "simd128 mul+add"}, 1 core)
               </text>
               <line x1={x(ridge)} x2={x(ridge)} y1={y(top)} y2={H - m.b} stroke={pal.muted} strokeDasharray="4 3" />
-              <text x={x(ridge) + 4} y={H - m.b - 6} style={{ fontSize: 9 }}>ridge {sig(ridge, 2)}</text>
+              <text x={x(ridge) + 4} y={H - m.b - 6} style={{ fontSize: T.xs }}>ridge {sig(ridge, 2)}</text>
             </>
           )}
           {all.map((d) => {

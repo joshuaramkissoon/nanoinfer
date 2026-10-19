@@ -1,3 +1,4 @@
+import { T } from "../learn/kit";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Tk } from "../ui/Tok";
 import { claim, decodes, engine, release, useEngine, useRunSource } from "../engine/client";
@@ -380,7 +381,7 @@ function Lanes({ ops, cursor, reduced }: { ops: OpRec[]; cursor: number; reduced
             const laneOn = l.ops[0].i < cursor;
             return (
               <g key={k}>
-                <text x={LW - 6} y={y + LH - 2} textAnchor="end" style={{ fontSize: 9, fill: laneOn ? pal.fg : pal.muted }}>{l.label}</text>
+                <text x={LW - 6} y={y + LH - 2} textAnchor="end" style={{ fontSize: T.xs, fill: laneOn ? pal.fg : pal.muted }}>{l.label}</text>
                 <rect x={LW} y={y} width={w - LW - 4} height={LH} fill={pal.code} rx={1.5} />
                 {l.ops.map(({ o, i }) => {
                   const ow = Math.max(0.8, o.dur * sx);
@@ -402,7 +403,7 @@ function Lanes({ ops, cursor, reduced }: { ops: OpRec[]; cursor: number; reduced
           })}
         </svg>
       )}
-      <div className="nv-legend" style={{ marginTop: "0.35rem", fontSize: "0.68rem" }}>
+      <div className="nv-legend" style={{ marginTop: "0.35rem", fontSize: "var(--t-xs)" }}>
         {[...new Set(ops.map((o) => o.kind))].map((k) => (
           <span key={k}>
             <i style={{ background: kindColor(pal, k) }} />
@@ -453,7 +454,7 @@ function Barcode({ v, all, label }: { v: Float32Array; all: Float32Array[]; labe
   }, [v, w, pal, scale]);
   return (
     <div ref={ref} className="nv-walk-barcode">
-      <div className="nv-muted" style={{ fontSize: "0.68rem", display: "flex", justifyContent: "space-between", gap: "0.6rem", flexWrap: "wrap" }}>
+      <div className="nv-muted" style={{ fontSize: "var(--t-xs)", display: "flex", justifyContent: "space-between", gap: "0.6rem", flexWrap: "wrap" }}>
         <span>{label} · 768 numbers</span>
         <span>
           ‖x‖ = {sig(norm, 3)} · biggest dims {big.map((i) => `#${i}`).join(" ")}

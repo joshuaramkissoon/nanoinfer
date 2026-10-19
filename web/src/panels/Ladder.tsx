@@ -1,3 +1,4 @@
+import { T } from "../learn/kit";
 import { useState } from "react";
 import { benchKey, getState, useEngine } from "../engine/client";
 import { benchStage } from "../engine/generate";
@@ -118,7 +119,7 @@ export default function Ladder() {
           <button aria-pressed={metric === "prefill"} onClick={() => setMetric("prefill")}>prefill (64)</button>
         </div>
       </div>
-      <div className="nv-controls" style={{ justifyContent: "space-between", marginTop: "0.6rem", fontSize: "0.75rem" }}>
+      <div className="nv-controls" style={{ justifyContent: "space-between", marginTop: "0.6rem", fontSize: "var(--t-sm)" }}>
         <span className="nv-muted">
           {native == null ? "loading native results…" : native.length ? `${native.length} native runs · best untraced run per stage at a 64-token prompt` : "no native runs recorded yet"}
         </span>
@@ -157,7 +158,7 @@ export default function Ladder() {
                 return (
                   <g key={cc.l}>
                     <line x1={m.l} x2={w - m.r} y1={y(cc.v)} y2={y(cc.v)} stroke={cc.c} strokeWidth={1.4} strokeDasharray="6 4" />
-                    <text x={m.l + 6} y={y(cc.v) - 5} textAnchor="start" style={{ fill: cc.c, fontSize: 9.5 }}>{cc.l}</text>
+                    <text x={m.l + 6} y={y(cc.v) - 5} textAnchor="start" style={{ fill: cc.c, fontSize: T.xs }}>{cc.l}</text>
                   </g>
                 );
               })}
@@ -177,13 +178,13 @@ export default function Ladder() {
               : fallback(st) ? "wasm: fallback" : `stage ${i}`;
             return (
               <g key={n}>
-                <text x={x} y={H - m.b + 16} textAnchor="middle" style={{ fill: pal.fg, fontSize: small ? 8.5 : 11 }}
+                <text x={x} y={H - m.b + 16} textAnchor="middle" style={{ fill: pal.fg, fontSize: T.xs }}
                   transform={small ? `rotate(-28 ${x} ${H - m.b + 16})` : undefined}>{n}</text>
-                {!small && <text x={x} y={H - m.b + 30} textAnchor="middle" style={{ fontSize: 9, fill: st?.browserOnly ? pal.accent : undefined }}>{tag}</text>}
+                {!small && <text x={x} y={H - m.b + 30} textAnchor="middle" style={{ fontSize: T.xs, fill: st?.browserOnly ? pal.accent : undefined }}>{tag}</text>}
                 {nVal > 0 && (
                   <g onPointerEnter={() => setHover({ x: x - bar * 0.7, y: y(nVal), text: `native ${nr?.backend === "wgpu-metal" ? "(wgpu on Metal) " : ""}${n}: ${sig(nVal, 3)} tok/s ${metric}${metric === "decode" ? ` · ${pct(nVal / nativeCeil, 1)} of ceiling` : ""}${nr?.threads && nr.threads !== 1 ? ` · ${nr.threads} threads` : ""}${nr?.note ? ` · ${nr.note}` : ""}` })}>
                     <rect x={x - bar * 1.2} width={bar} y={y(nVal)} height={H - m.b - y(nVal)} fill={pal.fg} opacity={0.85} />
-                    {!tiny && <text x={x - bar * 0.7} y={y(nVal) - 5} textAnchor="middle" style={{ fill: pal.fg, fontSize: small ? 8 : 10 }}>{sig(nVal, small ? 2 : 3)}</text>}
+                    {!tiny && <text x={x - bar * 0.7} y={y(nVal) - 5} textAnchor="middle" style={{ fill: pal.fg, fontSize: T.xs }}>{sig(nVal, small ? 2 : 3)}</text>}
                   </g>
                 )}
                 {bVal > 0 && (
@@ -194,7 +195,7 @@ export default function Ladder() {
                   })()}` })}>
                     <rect x={x + bar * 0.2} width={bar} y={y(bVal)} height={H - m.b - y(bVal)}
                       fill={recBar ? "none" : pal.accent} stroke={pal.accent} strokeWidth={recBar ? 1.3 : 0} strokeDasharray={recBar ? "3 2" : undefined} />
-                    {!tiny && <text x={x + bar * 0.7} y={y(bVal) - (small ? 14 : 5)} textAnchor="middle" style={{ fill: pal.accent, fontSize: small ? 8 : 10 }}>{sig(bVal, small ? 2 : 3)}</text>}
+                    {!tiny && <text x={x + bar * 0.7} y={y(bVal) - (small ? 14 : 5)} textAnchor="middle" style={{ fill: pal.fg, fontSize: T.xs }}>{sig(bVal, small ? 2 : 3)}</text>}
                   </g>
                 )}
                 {(() => {
@@ -209,14 +210,14 @@ export default function Ladder() {
                     <g>
                       <line x1={x - step * 0.4} x2={x + step * 0.4} y1={y(c)} y2={y(c)} stroke={pal.fg} strokeDasharray="3 3" opacity={0.6} />
                       {label && (
-                        <text x={x - step * 0.4} y={y(c) - 4} textAnchor="start" style={{ fontSize: 9 }}>
+                        <text x={x - step * 0.4} y={y(c) - 4} textAnchor="start" style={{ fontSize: T.xs }}>
                           {st.weightFormat} ceiling {key}
                         </text>
                       )}
                     </g>
                   );
                 })()}
-                {!nVal && !bVal && <text x={x} y={H - m.b - 8} textAnchor="middle" style={{ fontSize: 9 }}>–</text>}
+                {!nVal && !bVal && <text x={x} y={H - m.b - 8} textAnchor="middle" style={{ fontSize: T.xs }}>–</text>}
               </g>
             );
           })}

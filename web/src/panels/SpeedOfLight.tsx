@@ -1,3 +1,4 @@
+import { T } from "../learn/kit";
 import { useEffect, useState } from "react";
 import { decodes, measureGpuRoof, median, useEngine, useRunSource } from "../engine/client";
 import { useFigureSource, NeedsEngine } from "../ui/Figure";
@@ -89,7 +90,7 @@ export default function SpeedOfLight() {
             </button>
           ))}
         </div>
-        <span className="nv-muted" style={{ fontSize: "0.75rem" }}>
+        <span className="nv-muted" style={{ fontSize: "var(--t-sm)" }}>
           {run ? `${stageLabel(run.stage)} on the ${where}` : where} · {fmtText}: {fmtBytes(bytes)} {kvRead ? `+ ${fmtBytes(kvRead)} KV ` : ""}read per token
           {!own && " · projected: the run in fig 1 used another format"}
           {!own && !liveFormats.has(fmt.weightFormat) && " (no stage uses this one yet)"}
@@ -124,7 +125,7 @@ export default function SpeedOfLight() {
         <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={pal.fg} strokeWidth={2.5} strokeLinecap="round"
           style={{ transition: "all 0.6s cubic-bezier(0.16,1,0.3,1)" }} />
         <circle cx={cx} cy={cy} r={6} fill={pal.fg} />
-        <text x={cx} y={cy + 40} textAnchor="middle" style={{ fill: pal.fg, fontSize: 30, fontWeight: 700, letterSpacing: "-0.04em" }}>
+        <text x={cx} y={cy + 40} textAnchor="middle" style={{ fill: pal.fg, fontSize: T.num, fontWeight: 700, letterSpacing: "-0.04em" }}>
           {liveTok ? sig(liveTok, 3) : "–"}
         </text>
         <text x={cx} y={cy + 58} textAnchor="middle">

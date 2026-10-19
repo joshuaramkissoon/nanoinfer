@@ -6,7 +6,7 @@ import { softmaxAt } from "../../lib/recorded";
 import { usePalette } from "../../ui/theme";
 import { log } from "../../lib/fmt";
 import { Tip, useWidth } from "../../ui/Figure";
-import { Deeper, Fig, G, Idea, Seg, liveForward, useRecorded } from "../kit";
+import { Deeper, Fig, G, Idea, Seg, liveForward, useRecorded, T } from "../kit";
 
 type Dist = { id: number; p: number }[];
 
@@ -257,13 +257,13 @@ function LongTail() {
             {[1e-6, 1e-4, 1e-2, 1].map((t) => (
               <g key={t}>
                 <line x1={padL} x2={W - 8} y1={y(t)} y2={y(t)} stroke={pal.rule} />
-                <text x={padL - 6} y={y(t) + 4} textAnchor="end" fontSize={10} fill={pal.muted}>
+                <text x={padL - 6} y={y(t) + 4} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
                   {t === 1 ? "100%" : t === 1e-2 ? "1%" : t === 1e-4 ? "0.01%" : "1e-6"}
                 </text>
               </g>
             ))}
             {[1, 10, 100, 1000, 10000, 50257].map((r) => (
-              <text key={r} x={x(r)} y={H - 8} textAnchor="middle" fontSize={10} fill={pal.muted}>
+              <text key={r} x={x(r)} y={H - 8} textAnchor="middle" fontSize={T.xs} fill={pal.muted}>
                 {r === 50257 ? "50,257" : r.toLocaleString()}
               </text>
             ))}
@@ -284,7 +284,7 @@ function LongTail() {
               />
             ))}
             {hover != null && <line x1={x(hover + 1)} x2={x(hover + 1)} y1={6} y2={H - padB} stroke={pal.muted} strokeWidth={1} opacity={0.5} />}
-            <text x={W - 8} y={14} textAnchor="end" fontSize={10} fill={pal.muted}>
+            <text x={W - 8} y={14} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
               rank →
             </text>
           </svg>

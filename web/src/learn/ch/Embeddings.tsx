@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Tk } from "../../ui/Tok";
 import { fitCanvas, useWidth } from "../../ui/Figure";
 import { usePalette, type Palette } from "../../ui/theme";
-import { chartColors, Chip, Deeper, Fig, G, Idea, unpackVec, useLearnData, type LearnData } from "../kit";
+import { chartColors, Chip, Deeper, Fig, G, Idea, unpackVec, useLearnData, type LearnData, T, Swatch } from "../kit";
 
 const GROUP_LABEL: Record<string, string> = {
   numbers: "numbers",
@@ -109,14 +109,14 @@ function Explorer({ d }: { d: LearnData }) {
                   if (placed.some(([a, b]) => Math.abs(a - x) < 80 && Math.abs(b - y) < 16)) y = py(Math.min(...pts.map((p) => p[1]))) + 22;
                   placed.push([x, y]);
                   return (
-                    <text key={g} x={x} y={y} textAnchor="middle" fontSize={11} fill={g === e.group[sel] ? pal.fg : pal.sub} fontWeight={g === e.group[sel] ? 700 : 400} style={{ pointerEvents: "none" }}>
+                    <text key={g} x={x} y={y} textAnchor="middle" fontSize={T.xs} fill={g === e.group[sel] ? pal.fg : pal.sub} fontWeight={g === e.group[sel] ? 700 : 400} style={{ pointerEvents: "none" }}>
                       {GROUP_LABEL[g] ?? g}
                     </text>
                   );
                 });
               })()}
               {[show].map((i) => (
-                <text key="lab" x={px(e.xy[i][0]) + 10} y={py(e.xy[i][1]) + 18} fontSize={12} fontWeight={700} fill={pal.fg} style={{ pointerEvents: "none" }}>
+                <text key="lab" x={px(e.xy[i][0]) + 10} y={py(e.xy[i][1]) + 18} fontSize={T.sm} fontWeight={700} fill={pal.fg} style={{ pointerEvents: "none" }}>
                   {e.text[e.words[i]].trim()}
                 </text>
               ))}
@@ -142,14 +142,14 @@ function Explorer({ d }: { d: LearnData }) {
         <div style={{ marginTop: "1.4rem", paddingTop: "1.1rem", borderTop: `1px solid ${pal.rule}` }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: "0.6rem", flexWrap: "wrap" }}>
             <Chip tone={0}>
-              <span style={{ fontSize: "1.1rem", fontWeight: 700 }}><Tk s={e.text[e.words[show]]} /></span>
+              <span style={{ fontSize: "var(--t-base)", fontWeight: 700 }}><Tk s={e.text[e.words[show]]} /></span>
             </Chip>
             <span className="lr-small">
               token {e.words[show]} → row {e.words[show].toLocaleString()} of the table
             </span>
           </div>
           <div className="lr-small" style={{ margin: "0.9rem 0 0.3rem" }}>
-            its 768 numbers <span style={{ color: pal.accent }}>▮ positive</span> <span style={{ color: pal.cool }}>▮ negative</span>
+            its 768 numbers <Swatch c={pal.accent}>positive</Swatch> <Swatch c={pal.cool}>negative</Swatch>
           </div>
           <Barcode v={hover != null ? unpackVec(e.vecs[hover]) : vec} pal={pal} />
           <div className="lr-small" style={{ margin: "1rem 0 0.35rem" }}>

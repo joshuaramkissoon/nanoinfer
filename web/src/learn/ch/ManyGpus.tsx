@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { usePalette } from "../../ui/theme";
-import { chartColors, Deeper, Fig, Idea, Seg, Swatch, useFrame, useOnScreen } from "../kit";
+import { chartColors, Deeper, Fig, Idea, Seg, Swatch, useFrame, useOnScreen, T, PlayPause, usePlaying } from "../kit";
 import { linkTo } from "../router";
 
 /** Ring all-reduce: N GPUs each own a vector split into N chunks; after 2(N−1) steps everyone has the sum. */
@@ -9,7 +9,7 @@ function Ring() {
   const cc = chartColors(pal.dark);
   const [n, setN] = useState(4);
   const [t, setT] = useState(0);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = usePlaying();
   const steps = 2 * (n - 1);
   const [onScreen, vis] = useOnScreen<HTMLElement>();
   useFrame(vis && playing, (dt) => setT((v) => (v + dt * 0.9) % (steps + 1.5)));
@@ -39,9 +39,7 @@ function Ring() {
     >
       <div className="lr-controls">
         <Seg options={[2, 4, 8].map((v) => ({ v, label: `${v} GPUs` }))} value={n} onChange={(v) => (setN(v), setT(0))} label="GPUs" />
-        <button className="lr-btn" onClick={() => setPlaying((p) => !p)}>
-          {playing ? "❚❚ pause" : "▶ play"}
-        </button>
+        <PlayPause playing={playing} onToggle={() => setPlaying((p) => !p)} />
         <span className="lr-small">
           step {step} / {steps} · {reducePhase ? "adding up" : step < steps ? "sharing the sums" : "done: everyone has the total"}
         </span>
@@ -67,7 +65,7 @@ function Ring() {
                   fill={(c + i) % n < doneChunks ? cc.c1 : pal.rule}
                 />
               ))}
-              <text x={x} y={y - 3} textAnchor="middle" fontSize={11} fill={pal.fg}>
+              <text x={x} y={y - 3} textAnchor="middle" fontSize={T.xs} fill={pal.fg}>
                 GPU {i + 1}
               </text>
             </g>

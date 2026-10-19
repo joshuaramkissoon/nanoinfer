@@ -3,7 +3,7 @@ import { SpaceKey, Tk } from "../../ui/Tok";
 import { decodeTokens, tokenText } from "../../engine/client";
 import { fitCanvas, useWidth } from "../../ui/Figure";
 import { usePalette, type Palette } from "../../ui/theme";
-import { chartColors, Deeper, Fig, G, Idea, Swatch, useFrame, useOnScreen, useRecorded } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Swatch, useFrame, useOnScreen, useRecorded, T, PlayPause, usePlaying } from "../kit";
 
 /** fig 6.1: inside one block */
 function BlockDiagram() {
@@ -11,7 +11,8 @@ function BlockDiagram() {
   const cc = chartColors(pal.dark);
   const [t, setT] = useState(0);
   const [onScreen, vis] = useOnScreen<HTMLElement>();
-  useFrame(vis, (dt) => setT((v) => (v + dt * 0.35) % 1));
+  const [playing, setPlaying] = usePlaying();
+  useFrame(vis && playing, (dt) => setT((v) => (v + dt * 0.35) % 1));
   const W = 440, H = 280, sx = 78;
   const y = (f: number) => 18 + f * (H - 36);
   const pulse = y(t);
@@ -22,18 +23,18 @@ function BlockDiagram() {
       <g>
         <path d={`M${sx},${yy0} H${cx} V${mid - 30}`} fill="none" stroke={pal.muted} strokeDasharray="3 3" />
         <rect x={bx} y={mid - 30} width={bw} height={60} rx={8} fill={cc.c1} fillOpacity={0.1} stroke={cc.c1} />
-        <text x={cx} y={mid - 9} textAnchor="middle" fontSize={14.5} fontWeight={700} fill={pal.fg}>
+        <text x={cx} y={mid - 9} textAnchor="middle" fontSize={T.sm} fontWeight={700} fill={pal.fg}>
           {label}
         </text>
-        <text x={cx} y={mid + 8} textAnchor="middle" fontSize={12} fill={pal.sub}>
+        <text x={cx} y={mid + 8} textAnchor="middle" fontSize={T.sm} fill={pal.sub}>
           {l1}
         </text>
-        <text x={cx} y={mid + 23} textAnchor="middle" fontSize={11.5} fill={pal.muted}>
+        <text x={cx} y={mid + 23} textAnchor="middle" fontSize={T.xs} fill={pal.muted}>
           {l2}
         </text>
         <path d={`M${cx},${mid + 30} V${yy1} H${sx + 11}`} fill="none" stroke={cc.c1} strokeWidth={1.5} />
         <circle cx={sx} cy={yy1} r={10} fill={pal.bg} stroke={cc.c1} strokeWidth={1.6} />
-        <text x={sx} y={yy1 + 5} textAnchor="middle" fontSize={15} fill={cc.c1} fontWeight={700}>
+        <text x={sx} y={yy1 + 5} textAnchor="middle" fontSize={T.sm} fill={cc.c1} fontWeight={700}>
           +
         </text>
       </g>
@@ -42,6 +43,7 @@ function BlockDiagram() {
   return (
     <Fig
       figRef={onScreen}
+      aside={<PlayPause playing={playing} onToggle={() => setPlaying((p) => !p)} />}
       n="6.1"
       title="One block: read the stream, compute an edit, add it back"
       prov="diagram"
@@ -58,13 +60,13 @@ function BlockDiagram() {
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 520, display: "block", margin: "0 auto" }} role="img" aria-label="a transformer block: attention then feed-forward, each added back onto the residual stream">
         <line x1={sx} x2={sx} y1={y(0)} y2={y(1)} stroke={pal.muted} strokeWidth={8} strokeLinecap="round" opacity={0.55} />
         <circle cx={sx} cy={pulse} r={6} fill={cc.c1} />
-        <text x={sx - 16} y={y(0) + 5} textAnchor="end" fontSize={12.5} fill={pal.sub}>
+        <text x={sx - 16} y={y(0) + 5} textAnchor="end" fontSize={T.sm} fill={pal.sub}>
           in
         </text>
-        <text x={sx - 16} y={y(1) + 5} textAnchor="end" fontSize={12.5} fill={pal.sub}>
+        <text x={sx - 16} y={y(1) + 5} textAnchor="end" fontSize={T.sm} fill={pal.sub}>
           out
         </text>
-        <text x={sx - 16} y={y(0.5) + 5} textAnchor="end" fontSize={11.5} fill={pal.muted}>
+        <text x={sx - 16} y={y(0.5) + 5} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
           stream
         </text>
         {branch(y(0.05), y(0.47), "attention", "look at earlier tokens", "4 matrices: query, key, value, out")}
@@ -134,7 +136,7 @@ function Stream() {
       }
       tryit={<>Press <b>send it down</b>. Early on it mostly guesses words that look like “group”; watch where “<Tk s=" of" />” takes over.</>}
     >
-      <div className="lr-text" style={{ fontSize: "0.9rem", marginBottom: "0.8rem" }}>
+      <div className="lr-text" style={{ fontSize: "var(--t-md)", marginBottom: "0.8rem" }}>
         <span className="ctx">…{decodeTokens(toks.slice(Math.max(0, walk.pos - 12), walk.pos))}</span>
         <span style={{ outline: `2px solid ${pal.accent}`, borderRadius: 3, fontWeight: 700 }}>{tokenText(me)}</span>
         <span className="nv-muted"> → ?</span>

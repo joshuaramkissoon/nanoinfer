@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
 import { Climb } from "../Climb";
-import { chartColors, Deeper, Fig, G, Idea } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, T } from "../kit";
 
 // `nanoinfer membw` on the M4 (docs/LOG.md, "The ceiling"): read GB/s by thread count.
 const MEMBW: [number, number][] = [
@@ -45,16 +45,16 @@ function Pantry() {
             {[0, 40, 80, 120].map((v) => (
               <g key={v}>
                 <line x1={pl} x2={W - 10} y1={y(v)} y2={y(v)} stroke={pal.rule} />
-                <text x={pl - 6} y={y(v) + 4} textAnchor="end" fontSize={10} fill={pal.muted}>
+                <text x={pl - 6} y={y(v) + 4} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
                   {v}
                 </text>
               </g>
             ))}
             <line x1={pl} x2={W - 10} y1={y(120)} y2={y(120)} stroke={pal.fg} strokeDasharray="4 3" opacity={0.6} />
-            <text x={W - 10} y={y(120) - 6} textAnchor="end" fontSize={10} fill={pal.sub}>
+            <text x={W - 10} y={y(120) - 6} textAnchor="end" fontSize={T.xs} fill={pal.sub}>
               spec 120 GB/s
             </text>
-            <text x={pl} y={10} fontSize={10} fill={pal.sub}>
+            <text x={pl} y={10} fontSize={T.xs} fill={pal.sub}>
               GB/s read
             </text>
             {MEMBW.map(([n, v], i) => {
@@ -64,16 +64,16 @@ function Pantry() {
                 <g key={n} onClick={() => setSel(i)} onMouseEnter={() => setSel(i)} style={{ cursor: "pointer" }}>
                   <rect x={cx - bw / 2} y={top} width={bw} height={H - pb - top} fill="transparent" />
                   <path d={`M${cx - barW / 2},${y(0)} V${y(v) + 4} a4,4 0 0 1 4,-4 H${cx + barW / 2 - 4} a4,4 0 0 1 4,4 V${y(0)} Z`} fill={on ? cc.c2 : pal.muted} opacity={on ? 1 : 0.5} />
-                  <text x={cx} y={y(v) - 6} textAnchor="middle" fontSize={10.5} fill={on ? pal.fg : pal.muted} fontWeight={on ? 700 : 400}>
+                  <text x={cx} y={y(v) - 6} textAnchor="middle" fontSize={T.xs} fill={on ? pal.fg : pal.muted} fontWeight={on ? 700 : 400}>
                     {v}
                   </text>
-                  <text x={cx} y={H - pb + 14} textAnchor="middle" fontSize={10.5} fill={on ? pal.fg : pal.muted}>
+                  <text x={cx} y={H - pb + 14} textAnchor="middle" fontSize={T.xs} fill={on ? pal.fg : pal.muted}>
                     {n}
                   </text>
                 </g>
               );
             })}
-            <text x={W - 10} y={H - 2} textAnchor="end" fontSize={10} fill={pal.muted}>
+            <text x={W - 10} y={H + 3} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
               cores working →
             </text>
           </svg>

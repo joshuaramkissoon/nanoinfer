@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SpaceKey, Tk } from "../../ui/Tok";
 import { engine, useEngine } from "../../engine/client";
 import { loadTokenizer, type Tokenizer } from "../bpe";
-import { Chip, Deeper, Fig, G, Idea, Stat, useStepper, useOnScreen } from "../kit";
+import { Chip, Deeper, Fig, G, Idea, Stat, useStepper, useOnScreen, PlayPause, usePlaying } from "../kit";
 
 function useTokenizer(): [Tokenizer | null, string | null] {
   const [t, setT] = useState<Tokenizer | null>(null);
@@ -51,7 +51,7 @@ function LiveTokenizer({ tok, onPickWord }: { tok: Tokenizer; onPickWord: (w: st
           number underneath. A small <Tk s=" " /> bracket means a space: most words carry the space in front of them. This is GPT-2's real tokenizer (its own vocabulary files), running in your
           browser.
           {agree != null && (
-            <span className="nv-accent">
+            <span className="nv-sub">
               {" "}
               {agree ? "✓ The engine's own Rust tokenizer agrees, ID for ID." : "The engine's tokenizer disagrees here (please report this)."}
             </span>
@@ -72,7 +72,7 @@ function LiveTokenizer({ tok, onPickWord }: { tok: Tokenizer; onPickWord: (w: st
             <Chip tone={i} on={hover === i} onClick={() => onPickWord(words.get(p.word) ?? p.text)} title={`token ${p.id}`}>
               <Tk s={p.text} />
             </Chip>
-            <span className="lr-small" style={{ fontSize: "0.62rem", lineHeight: 1 }}>
+            <span className="lr-small" style={{ fontSize: "var(--t-xs)", lineHeight: 1 }}>
               {p.id}
             </span>
           </span>
@@ -94,7 +94,7 @@ function LiveTokenizer({ tok, onPickWord }: { tok: Tokenizer; onPickWord: (w: st
 /** fig 2.2: BPE merges, step by step */
 function Merges({ tok, word, onWord }: { tok: Tokenizer; word: string; onWord: (w: string) => void }) {
   const steps = useMemo(() => tok.steps(word), [tok, word]);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = usePlaying();
   const [onScreen, vis] = useOnScreen<HTMLElement>();
   const [i, setI] = useStepper(steps.length + 2, 900, vis && playing);
   useEffect(() => setI(0), [word, setI]);
@@ -132,7 +132,7 @@ function Merges({ tok, word, onWord }: { tok: Tokenizer; word: string; onWord: (
           {rank != null && (
             <>
               {" "}
-              · merged “<Tk s={prev![merged]} />” + “<Tk s={prev![merged + 1]} />” <span className="nv-accent">(merge #{rank.toLocaleString()})</span>
+              · merged “<Tk s={prev![merged]} />” + “<Tk s={prev![merged + 1]} />” <span className="nv-muted">(merge #{rank.toLocaleString()})</span>
             </>
           )}
           {k === 0 && " · one piece per byte"}
@@ -147,9 +147,7 @@ function Merges({ tok, word, onWord }: { tok: Tokenizer; word: string; onWord: (
         </div>
       </div>
       <div className="lr-controls" style={{ marginBottom: 0, marginTop: "0.6rem" }}>
-        <button className="lr-btn" onClick={() => setPlaying((p) => !p)}>
-          {playing ? "❚❚ pause" : "▶ play"}
-        </button>
+        <PlayPause playing={playing} onToggle={() => setPlaying((p) => !p)} />
         <button className="lr-btn" onClick={() => (setPlaying(false), setI(Math.max(0, k - 1)))}>
           ←
         </button>

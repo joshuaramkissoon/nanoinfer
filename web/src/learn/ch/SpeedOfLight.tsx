@@ -89,16 +89,16 @@ function Calculator() {
           <Seg options={MACHINES.map((m) => ({ v: m.v, label: m.label }))} value={mach} onChange={setMach} label="machine" />
         </Row>
       </div>
-      <div style={{ fontSize: "0.86rem", color: pal.sub }}>
+      <div style={{ fontSize: "var(--t-sm)", color: pal.sub }}>
         {C.bw.toLocaleString()} GB/s ÷ {fmtBytes(bytes)} per token =
       </div>
-      <div style={{ fontSize: "clamp(2.2rem, 7vw, 3.2rem)", fontWeight: 700, letterSpacing: "-0.04em", lineHeight: 1.1, fontVariantNumeric: "proportional-nums" }}>
+      <div style={{ fontSize: "clamp(var(--t-xl), 7vw, var(--t-2xl))", fontWeight: 700, letterSpacing: "-0.04em", lineHeight: 1.1, fontVariantNumeric: "proportional-nums" }}>
         {fits ? (
           <>
-            {fmtTok(limit)} <span style={{ fontSize: "1rem", fontWeight: 400, color: pal.sub, letterSpacing: 0 }}>tokens per second, at most</span>
+            {fmtTok(limit)} <span style={{ fontSize: "var(--t-md)", fontWeight: 400, color: pal.sub, letterSpacing: 0 }}>tokens per second, at most</span>
           </>
         ) : (
-          <span style={{ fontSize: "1.3rem" }}>doesn't fit: {fmtBytes(bytes)} of weights, {fmtBytes(C.mem)} of memory</span>
+          <span style={{ fontSize: "var(--t-lg)" }}>doesn't fit: {fmtBytes(bytes)} of weights, {fmtBytes(C.mem)} of memory</span>
         )}
       </div>
       <div className="lr-small" style={{ marginTop: "0.2rem" }}>

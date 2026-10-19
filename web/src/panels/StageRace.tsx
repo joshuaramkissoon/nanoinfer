@@ -219,7 +219,7 @@ export default function StageRace() {
           );
         })}
       </div>
-      <div className="nv-muted" style={{ fontSize: "0.7rem", marginTop: "0.6rem" }}>
+      <div className="nv-muted" style={{ fontSize: "var(--t-xs)", marginTop: "0.6rem" }}>
         greedy, so every f32 lane writes the same words (quantised lanes round the weights and can pick different ones) · {TARGET} tokens or {BUDGET_MS / 1000} s of engine time per lane · prompt prefill not raced ·
         lanes run one forward at a time on one engine thread, and each token appears when that lane's own measured forward times add
         up to it · * = this stage runs another stage's code in wasm

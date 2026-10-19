@@ -88,11 +88,11 @@ export default function LogitLens() {
   return (
     <div ref={viewRef}>
       <div className="nv-controls" style={{ justifyContent: "space-between", marginBottom: "0.8rem" }}>
-        <span className="nv-muted" style={{ fontSize: "0.75rem" }}>
+        <span className="nv-muted" style={{ fontSize: "var(--t-sm)" }}>
           {P} positions × {depth} depths · {depth * P} LM-head evaluations in {fmtMs(data.ms)} · cell = the top guess, shade = its probability ·
           <span style={{ color: pal.fg }}> ▁</span> = matches the token that actually came next
         </span>
-        {computing && <span className="nv-muted" style={{ fontSize: "0.75rem" }}>recomputing…</span>}
+        {computing && <span className="nv-muted" style={{ fontSize: "var(--t-sm)" }}>recomputing…</span>}
       </div>
 
       <div className="nv-lens-scroll">
@@ -141,7 +141,7 @@ export default function LogitLens() {
 
       <div className="nv-lens-detail">
         <div>
-          <div style={{ fontSize: "0.78rem", marginBottom: "0.6rem" }}>
+          <div style={{ fontSize: "var(--t-sm)", marginBottom: "0.6rem" }}>
             <b>reading “<Tk id={data.tokens[selPos]} />”</b>
             <span className="nv-muted">
               {" "}
@@ -194,7 +194,7 @@ function DepthChart({ data, p, lock }: { data: LensData; p: number; lock: number
   const line = (f: (c: (typeof cells)[number]) => number) => cells.map((c, s) => `${x(s)},${y(f(c))}`).join(" ");
   return (
     <div ref={ref}>
-      <div className="nv-muted" style={{ fontSize: "0.72rem", marginBottom: "0.4rem" }}>
+      <div className="nv-muted" style={{ fontSize: "var(--t-xs)", marginBottom: "0.4rem" }}>
         how sure it is, layer by layer · the guess locks in at {lock === 0 ? "the embedding" : `layer ${lock}`}
       </div>
       {w > 0 && (

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Tip, useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
-import { chartColors, Deeper, Fig, G, Idea, Seg, nf, useLearnData, useOnScreen, type SpecPair, type SpecPrompt } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, nf, useLearnData, useOnScreen, type SpecPair, type SpecPrompt, T } from "../kit";
 
 // Speculative decoding on the M4 GPU (bench/specdec.json via public/learn/data.json):
 // a GPT-2 small drafter (4-bit) guessing for GPT-2 medium or large (16-bit).
@@ -123,13 +123,13 @@ function Playback({ pairs }: { pairs: SpecPair[] }) {
         ))}
         {n === 0 && <span className="lr-small">each group will be one pass of the big model</span>}
       </div>
-      <div style={{ fontSize: "0.86rem", minHeight: "6.5rem", fontFamily: "var(--nv-mono, inherit)" }} aria-live="off">
+      <div style={{ fontSize: "var(--t-sm)", minHeight: "6.5rem", fontFamily: "var(--nv-mono, inherit)" }} aria-live="off">
         <span style={{ color: pal.muted, whiteSpace: "pre-wrap" }}>…{pr.text.slice(-70)}</span>
         {done.map((r, i) => (
           <span key={i}>
             {r.kept.length > 0 && <span style={keptStyle}>{show(r.kept.join(""))}</span>}
             {r.wrong > 0 && (
-              <span style={{ color: pal.muted, fontSize: "0.7rem", letterSpacing: "-0.05em", margin: "0 0.1rem" }} aria-label={`${r.wrong} guesses thrown away`}>
+              <span style={{ color: pal.muted, fontSize: "var(--t-xs)", letterSpacing: "-0.05em", margin: "0 0.1rem" }} aria-label={`${r.wrong} guesses thrown away`}>
                 {"✕".repeat(r.wrong)}
               </span>
             )}
@@ -195,15 +195,15 @@ function ByText({ pairs }: { pairs: SpecPair[] }) {
             {ticks.map((t) => (
               <g key={t}>
                 <line x1={x(t)} x2={x(t)} y1={top} y2={H - 26} stroke={pal.rule} />
-                <text x={x(t)} y={H - 12} textAnchor="middle" fontSize={10} fill={pal.muted}>
+                <text x={x(t)} y={H - 12} textAnchor="middle" fontSize={T.xs} fill={pal.muted}>
                   {t}×
                 </text>
               </g>
             ))}
-            <text x={W - 2} y={11} textAnchor="end" fontSize={10} fill={pal.muted}>
+            <text x={W - 2} y={11} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
               {narrow ? "right" : "guesses right"}
             </text>
-            <text x={x(1)} y={H - 1} fontSize={10} fill={pal.muted}>
+            <text x={x(1)} y={H + 3} fontSize={T.xs} fill={pal.muted}>
               faster than the big model alone →
             </text>
             {rows.map((r, i) => {
@@ -214,14 +214,14 @@ function ByText({ pairs }: { pairs: SpecPair[] }) {
               return (
                 <g key={r.prompt} onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} opacity={hover != null && !on ? 0.6 : 1}>
                   <rect x={0} y={top + i * row} width={W} height={row} fill="transparent" />
-                  <text x={labelW} y={y0 + bar / 2 + 4} textAnchor="end" fontSize={11.5} fill={on ? pal.fg : pal.sub}>
+                  <text x={labelW} y={y0 + bar / 2 + 4} textAnchor="end" fontSize={T.xs} fill={on ? pal.fg : pal.sub}>
                     {(narrow ? SHORT : KIND)[r.prompt] ?? r.prompt}
                   </text>
                   <path d={`M${x0},${y0} H${x1 - 4} a4,4 0 0 1 4,4 V${y0 + bar - 4} a4,4 0 0 1 -4,4 H${x0} Z`} fill={cc.c1} />
-                  <text x={x1 + 6} y={y0 + bar / 2 + 4} fontSize={11} fill={pal.fg} fontWeight={700}>
+                  <text x={x1 + 6} y={y0 + bar / 2 + 4} fontSize={T.xs} fill={pal.fg} fontWeight={700}>
                     {r.best.toFixed(1)}×
                   </text>
-                  <text x={W - 2} y={y0 + bar / 2 + 4} textAnchor="end" fontSize={11} fill={pal.sub}>
+                  <text x={W - 2} y={y0 + bar / 2 + 4} textAnchor="end" fontSize={T.xs} fill={pal.sub}>
                     {Math.round(r.alpha * 100)}%
                   </text>
                 </g>

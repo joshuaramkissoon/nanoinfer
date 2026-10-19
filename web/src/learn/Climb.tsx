@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useWidth } from "../ui/Figure";
 import { usePalette } from "../ui/theme";
 import { log } from "../lib/fmt";
-import { chartColors, Fig, Seg, Stat, Swatch, useFrame, useOnScreen, useLearnData, type LearnData } from "./kit";
+import { chartColors, Fig, Seg, Stat, Swatch, useFrame, useOnScreen, useLearnData, type LearnData, T, PlayPause, usePlaying } from "./kit";
 
 export interface Milestone {
   key: string;
@@ -62,7 +62,11 @@ export function climbFactor(d: LearnData | null): string | null {
   return (Math.round(x / p) * p).toLocaleString("en-GB");
 }
 
-/** fig: decode tok/s per milestone, up to and including `upto`. */
+const fmtTok = (v: number) => (v < 1 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : Math.round(v).toLocaleString("en-GB"));
+
+/** fig: decode tok/s per milestone, up to and including `upto`. A lollipop chart on a log axis: a grey dot per earlier
+ *  step, an ember dot for this chapter's, a short fg tick at each step's own speed limit (spec bandwidth ÷ its bytes
+ *  per token), and the batching total as a hollow ring because it is a different measure (all users together). */
 export function Climb({ upto, n }: { upto: number; n: string }) {
   const pal = usePalette();
   const cc = chartColors(pal.dark);
@@ -71,85 +75,88 @@ export function Climb({ upto, n }: { upto: number; n: string }) {
   const [ref, w] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const W = Math.max(300, w);
-  const labelW = Math.min(150, W * 0.36);
-  const row = 30, bar = 16, top = 8;
-  const H = top + MILESTONES.length * row + 30;
-  const x = log(0.1, 10000, labelW + 4, W - (upto >= 6 ? 84 : 64));
+  const narrow = W < 520;
+  const labelW = narrow ? 116 : 150;
+  const valW = narrow ? 92 : 112;
+  const row = 30, top = 22;
+  const H = top + MILESTONES.length * row + 34;
+  const x = log(0.1, 10000, labelW + 10, W - valW - 10);
   const cur = MILESTONES[upto];
   const prev = upto > 0 ? MILESTONES[upto - 1] : null;
   const shown = hover ?? upto;
+  const ticks = [0.1, 1, 10, 100, 1000, 10000];
   return (
     <Fig
       n={n}
       title="The climb so far"
       prov="measured"
+      alt={`Decode speed after each optimisation, up to ${cur.label.replace(/^\+ /, "")}: ${fmtTok(cur.tokS)} tokens per second.`}
       caption={
         <>
-          How fast the engine writes, after each optimisation: tokens per second for one user, on our M4 Mac mini. The scale is
-          logarithmic: each gridline is 10× the last, so equal steps mean equal multiples. Grey bars are earlier steps, the
-          ember bar is this chapter's. Each bar sits in its own track, which ends at that step's speed limit (chapter 10):
-          {` ${SPEC_GBS}`} GB/s ÷ the bytes it reads per token. The percentage is how much of its own limit the step reached.
+          How fast the engine writes after each optimisation: tokens per second for one user on our M4 Mac mini, on a log
+          scale (each gridline is 10×). Grey dots are earlier steps, the <Swatch c={cc.c1}>ember</Swatch> dot is this chapter's.
+          The short tick on each row is that step's own speed limit (chapter 10): {SPEC_GBS} GB/s ÷ the bytes it reads per
+          token; the percentage is how much of it the step reached.
           {upto >= 4 && " Smaller numbers mean fewer bytes, so from chapter 15 on the limit itself moves right."}
           {upto >= 5 &&
-            " The GPU and batching bars were measured on a quiet machine (64-token prompt, then 64 tokens). An earlier GPU run, with other benchmarks competing for memory, gave about three quarters as much."}
-          {MILESTONES[upto].total && " The batching bar counts every user's tokens together, so a one-user limit doesn't apply to it."}
+            " The GPU and batching steps were measured on a quiet machine (64-token prompt, then 64 tokens). An earlier GPU run, with other benchmarks competing for memory, gave about three quarters as much."}
+          {MILESTONES[upto].total && " The batching ring counts every user's tokens together, so a one-user limit doesn't apply to it."}
         </>
       }
     >
       <div ref={ref} onMouseLeave={() => setHover(null)}>
         {w > 0 && (upto < 5 || d) && (
-          <svg width={W} height={H} role="img" aria-label="decode speed after each optimisation">
-            {[0.1, 1, 10, 100, 1000, 10000].map((t) => (
+          <svg width={W} height={H}>
+            <text x={labelW + 10} y={11} fontSize={T.xs} fill={pal.muted}>
+              {narrow ? "log scale" : "tokens per second, one user · log scale"}
+            </text>
+            <text x={W} y={11} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
+              tok/s · % of limit
+            </text>
+            {ticks.map((t) => (
               <g key={t}>
-                <line x1={x(t)} x2={x(t)} y1={top} y2={H - 26} stroke={pal.rule} />
-                <text x={x(t)} y={H - 12} textAnchor="middle" fontSize={10} fill={pal.muted}>
+                <line x1={x(t)} x2={x(t)} y1={top - 4} y2={H - 28} stroke={pal.rule} />
+                <text x={x(t)} y={H - 12} textAnchor="middle" fontSize={T.xs} fill={pal.muted}>
                   {t >= 1000 ? `${t / 1000}k` : t}
                 </text>
               </g>
             ))}
-            <text x={W - 4} y={H - 1} textAnchor="end" fontSize={10} fill={pal.muted}>
-              tokens per second →
-            </text>
             {MILESTONES.map((m, i) => {
-              const y0 = top + i * row + (row - bar) / 2;
+              const cy = top + i * row + row / 2;
               const on = i <= upto;
+              const now = i === upto;
               const x1 = x(m.tokS);
-              const x0 = x(0.1);
-              const fill = i === upto ? cc.c1 : pal.muted;
               const lim = limitOf(m);
-              const xl = lim ? x(lim) : x1;
               const pct = lim ? (m.tokS / lim) * 100 : null;
+              const mark = now ? cc.c1 : pal.muted;
+              const hot = now || hover === i;
               return (
-                <g key={m.key} onMouseEnter={() => on && setHover(i)} style={{ cursor: on ? "default" : undefined }}>
-                  <rect x={0} y={top + i * row} width={W} height={row} fill="transparent" />
-                  <text x={labelW} y={y0 + bar / 2 + 4} textAnchor="end" fontSize={11.5} fill={on ? (i === upto ? pal.fg : pal.sub) : pal.rule} fontWeight={i === upto ? 700 : 400}>
-                    {m.label}
+                <g key={m.key} onMouseEnter={() => on && setHover(i)} onClick={() => on && setHover(i)}>
+                  <rect x={0} y={cy - row / 2} width={W} height={row} fill="transparent" />
+                  <text x={labelW} y={cy + 4} textAnchor="end" fontSize={narrow ? T.xs : T.sm} fill={on ? (now ? pal.fg : pal.sub) : pal.muted} fontWeight={now ? 700 : 400} opacity={on ? 1 : 0.6}>
+                    {narrow ? m.label.replace(/^\+ /, "") : m.label}
                   </text>
                   {on ? (
                     <>
-                      {lim && (
-                        <>
-                          <rect x={x0} y={y0} width={xl - x0} height={bar} rx={4} fill="none" stroke={pal.rule} />
-                          <line x1={xl} x2={xl} y1={y0 - 3} y2={y0 + bar + 3} stroke={pal.fg} strokeWidth={1} strokeDasharray="3 2" opacity={0.7} />
-                        </>
+                      <line x1={x(0.1)} x2={x1} y1={cy} y2={cy} stroke={mark} strokeWidth={now ? 2 : 1.5} opacity={now ? 1 : hot ? 0.9 : 0.55} />
+                      {lim && <line x1={x(lim)} x2={x(lim)} y1={cy - 8} y2={cy + 8} stroke={pal.fg} strokeWidth={1.5} opacity={0.8} />}
+                      {m.total ? (
+                        <circle cx={x1} cy={cy} r={5.5} fill={pal.bg} stroke={mark} strokeWidth={2} />
+                      ) : (
+                        <circle cx={x1} cy={cy} r={5} fill={mark} stroke={pal.bg} strokeWidth={2} />
                       )}
-                      <path
-                        d={`M${x0},${y0} H${x1 - 4} a4,4 0 0 1 4,4 V${y0 + bar - 4} a4,4 0 0 1 -4,4 H${x0} Z`}
-                        fill={fill}
-                        opacity={i === upto || hover === i ? 1 : 0.55}
-                      />
-                      <text x={Math.max(x1, xl) + 6} y={y0 + bar / 2 + 4} fontSize={11} fill={i === upto ? pal.fg : pal.sub} fontWeight={i === upto ? 700 : 400}>
-                        {m.tokS < 1 ? m.tokS.toFixed(2) : m.tokS < 100 ? m.tokS.toFixed(1) : Math.round(m.tokS).toLocaleString()}
+                      <text x={W} y={cy + 4} textAnchor="end" fontSize={narrow ? T.xs : T.sm} fill={now ? pal.fg : pal.sub} fontWeight={now ? 700 : 400}>
+                        {fmtTok(m.tokS)}
                         {m.total ? " total" : ""}
                         {pct != null && (
                           <tspan fontWeight={400} fill={pal.muted}>
-                            {` · ${pct < 1 ? pct.toFixed(2) : pct.toFixed(0)}%`}
+                            {` · ${pct < 1 ? pct.toFixed(1) : pct.toFixed(0)}%`}
                           </tspan>
                         )}
                       </text>
                     </>
                   ) : (
-                    <line x1={x0} x2={x0 + 40} y1={y0 + bar / 2} y2={y0 + bar / 2} stroke={pal.rule} />
+                    <line x1={x(0.1)} x2={x(0.1) + 32} y1={cy} y2={cy} stroke={pal.rule} />
                   )}
                 </g>
               );
@@ -158,12 +165,12 @@ export function Climb({ upto, n }: { upto: number; n: string }) {
         )}
       </div>
       <div className="lr-note">
-        <b>{MILESTONES[shown].label.replace(/^\+ /, "")}</b>: {MILESTONES[shown].what}
+        <b>{MILESTONES[shown].label.replace(/^\+ /, "")}</b>: {fmtTok(MILESTONES[shown].tokS)} tok/s{MILESTONES[shown].total ? " in total" : ""} · {MILESTONES[shown].what}
         {limitOf(MILESTONES[shown]) && ` · limit ${Math.round(limitOf(MILESTONES[shown])!).toLocaleString("en-GB")} tok/s (${MILESTONES[shown].mb} MB per token)`}
         {shown === upto && prev && (
           <>
             {" "}
-            · <span className="nv-accent">{(cur.tokS / prev.tokS).toFixed(cur.tokS / prev.tokS < 10 ? 1 : 0)}× the step before</span>
+            · {(cur.tokS / prev.tokS).toFixed(cur.tokS / prev.tokS < 10 ? 1 : 0)}× the step before
           </>
         )}
       </div>
@@ -178,7 +185,7 @@ export function WorkGrid({ n, mode: fixed }: { n: string; mode?: "naive" | "cach
   const cc = chartColors(pal.dark);
   const [mode, setMode] = useState<"naive" | "cache">(fixed ?? "cache");
   const [t, setT] = useState(0);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = usePlaying();
   const P = 6, N = 14; // prompt rows, generated tokens
   const [onScreen, vis] = useOnScreen<HTMLElement>();
   useFrame(vis && playing, (dt) => setT((v) => (v + dt * 1.6) % (N + 4)));
@@ -246,9 +253,7 @@ export function WorkGrid({ n, mode: fixed }: { n: string; mode?: "naive" | "cach
             label="mode"
           />
         )}
-        <button className="lr-btn" onClick={() => setPlaying((p) => !p)}>
-          {playing ? "❚❚ pause" : "▶ play"}
-        </button>
+        <PlayPause playing={playing} onToggle={() => setPlaying((p) => !p)} />
       </div>
       <div className="p0-legend lr-small">
         <span>
@@ -267,10 +272,10 @@ export function WorkGrid({ n, mode: fixed }: { n: string; mode?: "naive" | "cach
           <svg width={W} height={H} role="img" aria-label={cache ? "each pass computes one token and reads the rest from the cache" : "each pass recomputes every token"}>
             {/* row labels: a bracket for the prompt, then the generated tokens */}
             <path d={`M${left - 10},${yOf(0)} H${left - 6} M${left - 10},${yOf(0)} V${yOf(P) - 2} H${left - 6}`} stroke={pal.muted} fill="none" />
-            <text x={left - 14} y={(yOf(0) + yOf(P)) / 2 + 3} textAnchor="end" fontSize={11} fill={pal.sub}>
+            <text x={left - 14} y={(yOf(0) + yOf(P)) / 2 + 3} textAnchor="end" fontSize={T.xs} fill={pal.sub}>
               prompt
             </text>
-            <text x={left - 14} y={(yOf(P) + yOf(P + Math.min(last, N) + 1)) / 2 + 3} textAnchor="end" fontSize={11} fill={pal.sub} opacity={last > 1 ? 1 : 0}>
+            <text x={left - 14} y={(yOf(P) + yOf(P + Math.min(last, N) + 1)) / 2 + 3} textAnchor="end" fontSize={T.xs} fill={pal.sub} opacity={last > 1 ? 1 : 0}>
               new
             </text>
             {Array.from({ length: step }, (_, s) => {
@@ -285,7 +290,7 @@ export function WorkGrid({ n, mode: fixed }: { n: string; mode?: "naive" | "cach
                 </g>
               );
             })}
-            <text x={xOf(0)} y={H - 6} fontSize={11} fill={pal.muted}>
+            <text x={xOf(0)} y={H - 6} fontSize={T.xs} fill={pal.muted}>
               passes, in time →
             </text>
           </svg>

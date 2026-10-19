@@ -79,7 +79,7 @@ function Sampler() {
         </>
       }
     >
-      <div className="lr-text" style={{ fontSize: "0.9rem", marginBottom: "0.6rem" }}>
+      <div className="lr-text" style={{ fontSize: "var(--t-md)", marginBottom: "0.6rem" }}>
         <span className="ctx">…{decodeTokens(toks.slice(Math.max(0, pos - 14), pos + 1))}</span>
         <span className="nv-accent"> ▍</span>
       </div>

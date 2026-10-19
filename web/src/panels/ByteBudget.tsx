@@ -1,3 +1,4 @@
+import { T } from "../learn/kit";
 import { useMemo, useState } from "react";
 import { decodes, useEngine, useRunSource } from "../engine/client";
 import { useFigureSource, NeedsEngine, Tip, useWidth } from "../ui/Figure";
@@ -111,7 +112,7 @@ export default function ByteBudget() {
             </button>
           ))}
         </div>
-        <span className="nv-muted" style={{ fontSize: "0.75rem" }}>
+        <span className="nv-muted" style={{ fontSize: "var(--t-sm)" }}>
           {fmtBytes(total)} per token at context {f.contextLen}
           {dt.k !== "f32" ? " · projected" : ""}
         </span>
@@ -130,13 +131,13 @@ export default function ByteBudget() {
                 style={{ transition: "opacity 0.15s" }}
               />
               {r.w > 64 && r.h > 30 && (
-                <text x={r.x + 7} y={r.y + 16} style={{ fill: pal.bg, fontSize: 11, fontWeight: 700 }}>
+                <text x={r.x + 7} y={r.y + 16} style={{ fill: pal.bg, fontSize: T.xs, fontWeight: 700 }}>
                   {r.name}
                   {r.layer >= 0 ? ` · L${r.layer + 1}` : ""}
                 </text>
               )}
               {r.w > 64 && r.h > 46 && (
-                <text x={r.x + 7} y={r.y + 31} style={{ fill: pal.bg, fontSize: 10, opacity: 0.85 }}>
+                <text x={r.x + 7} y={r.y + 31} style={{ fill: pal.bg, fontSize: T.xs, opacity: 0.85 }}>
                   {fmtBytes(r.bytes)} · {pct(r.bytes / total, r.bytes / total > 0.1 ? 0 : 1)}
                 </text>
               )}

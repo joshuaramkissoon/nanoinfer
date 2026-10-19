@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
 import { Climb } from "../Climb";
-import { chartColors, Deeper, Fig, G, Idea, useLearnData, type LearnData } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, useLearnData, type LearnData, T } from "../kit";
 
 // One decode token on the M4 GPU, four ways: quiet-machine runs from bench/webgpu.json
 // (the paired Metal rungs) and bench/results.jsonl, via public/learn/data.json.
@@ -14,7 +14,8 @@ function FourWays({ STEPS }: { STEPS: Step[] }) {
   const [sel, setSel] = useState(0);
   const [ref, w] = useWidth<HTMLDivElement>();
   const W = Math.max(300, w), labelW = Math.min(160, W * 0.36), row = 40, bar = 16, top = 6;
-  const H = top + STEPS.length * row + 30;
+  const base = top + STEPS.length * row;
+  const H = base + 36;
   const xmax = Math.ceil((STEPS[0].work + STEPS[0].idle) / 10) * 10;
   const x = (ms: number) => labelW + 8 + (ms / xmax) * (W - labelW - 100);
   return (
@@ -37,13 +38,13 @@ function FourWays({ STEPS }: { STEPS: Step[] }) {
           <svg width={W} height={H}>
             {Array.from({ length: xmax / 10 + 1 }, (_, i) => i * 10).map((t) => (
               <g key={t}>
-                <line x1={x(t)} x2={x(t)} y1={top} y2={H - 26} stroke={pal.rule} />
-                <text x={x(t)} y={H - 12} textAnchor="middle" fontSize={10} fill={pal.muted}>
+                <line x1={x(t)} x2={x(t)} y1={top} y2={base} stroke={pal.rule} />
+                <text x={x(t)} y={base + 14} textAnchor="middle" fontSize={T.xs} fill={pal.muted}>
                   {t}
                 </text>
               </g>
             ))}
-            <text x={W - 4} y={H - 1} textAnchor="end" fontSize={10} fill={pal.muted}>
+            <text x={x(xmax)} y={base + 32} textAnchor="end" fontSize={T.xs} fill={pal.muted}>
               ms per token →
             </text>
             {STEPS.map((s, i) => {
@@ -51,14 +52,14 @@ function FourWays({ STEPS }: { STEPS: Step[] }) {
               const on = i === sel;
               const xw = x(s.work), xi = x(s.work + s.idle);
               return (
-                <g key={s.label} onMouseEnter={() => setSel(i)} onClick={() => setSel(i)} style={{ cursor: "pointer" }} opacity={on ? 1 : 0.6}>
+                <g key={s.label} onMouseEnter={() => setSel(i)} onClick={() => setSel(i)} style={{ cursor: "pointer" }}>
                   <rect x={0} y={top + i * row} width={W} height={row} fill="transparent" />
-                  <text x={labelW} y={y0 + bar / 2 + 4} textAnchor="end" fontSize={11.5} fill={on ? pal.fg : pal.sub} fontWeight={on ? 700 : 400}>
+                  <text x={labelW} y={y0 + bar / 2 + 4} textAnchor="end" fontSize={T.xs} fill={on ? pal.fg : pal.sub} fontWeight={on ? 700 : 400}>
                     {s.label}
                   </text>
-                  <rect x={x(0)} y={y0} width={Math.max(2, xw - x(0))} height={bar} rx={2} fill={cc.c1} />
+                  <rect x={x(0)} y={y0} width={Math.max(2, xw - x(0))} height={bar} rx={2} fill={cc.c1} opacity={on ? 1 : 0.45} />
                   {s.idle > 0.5 && <rect x={xw + 2} y={y0} width={Math.max(2, xi - xw - 2)} height={bar} rx={2} fill={pal.muted} opacity={0.6} />}
-                  <text x={xi + 8} y={y0 + bar / 2 + 4} fontSize={11} fill={pal.fg} fontWeight={on ? 700 : 400}>
+                  <text x={xi + 8} y={y0 + bar / 2 + 4} fontSize={T.xs} fill={on ? pal.fg : pal.sub} fontWeight={on ? 700 : 400}>
                     {s.tokS < 100 ? s.tokS.toFixed(1) : Math.round(s.tokS)} tok/s
                   </text>
                 </g>

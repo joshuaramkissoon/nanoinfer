@@ -127,7 +127,7 @@ export default function KvRace() {
     const ctx = fitCanvas(c, w, L * (ch + 2) + 4);
     ctx.clearRect(0, 0, w, c.height);
     const filled = kvLane?.kvLen ?? 0;
-    ctx.font = "9px JetBrains Mono, monospace";
+    ctx.font = "11px JetBrains Mono, monospace";
     ctx.textBaseline = "middle";
     for (let l = 0; l < L; l++) {
       ctx.fillStyle = pal.muted;
@@ -186,7 +186,7 @@ export default function KvRace() {
 
       <div style={{ display: "grid", gap: "0.6rem", marginTop: "1.2rem" }}>
         {(shownLanes ?? [a, b].map((s) => ({ stage: s, tokens: [], used: 0, rows: 0 }) as unknown as Lane)).map((l, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "6.5rem 1fr 9rem", gap: "0.8rem", alignItems: "center", fontSize: "0.78rem" }}>
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "6.5rem 1fr 9rem", gap: "0.8rem", alignItems: "center", fontSize: "var(--t-sm)" }}>
             <span style={{ color: colors[i], fontWeight: 700 }}>{l.stage}</span>
             <div style={{ position: "relative", height: "1.6rem", background: pal.code, borderRadius: 4, overflow: "hidden" }}>
               <div style={{ position: "absolute", inset: 0, width: `${(100 * l.tokens.length) / (lanes ? target : 40)}%`, background: colors[i], opacity: 0.22, transition: "width 0.2s" }} />
@@ -223,7 +223,7 @@ export default function KvRace() {
       </div>
 
       <div style={{ marginTop: "1rem" }}>
-        <div className="nv-muted" style={{ fontSize: "0.72rem", marginBottom: "0.4rem", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
+        <div className="nv-muted" style={{ fontSize: "var(--t-xs)", marginBottom: "0.4rem", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
           <span>KV cache: one K and one V row per layer per token{kvLane ? ` (${kvLane.stage})` : ""}</span>
           <span>
             {kvLane && cfg ? `${kvLane.kvLen} positions · ${fmtBytes(2 * cfg.nLayer * kvLane.kvLen * cfg.nEmbd * 4)} · full 1024 would be ${fmtBytes(2 * cfg.nLayer * 1024 * cfg.nEmbd * 4)}` : "no cached lane yet"}

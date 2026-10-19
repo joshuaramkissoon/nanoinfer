@@ -229,13 +229,13 @@ export default function Attention() {
                 )),
               ])}
             </div>
-            <div className="nv-muted" style={{ fontSize: "0.7rem", marginTop: "0.6rem" }}>
+            <div className="nv-muted" style={{ fontSize: "var(--t-xs)", marginTop: "0.6rem" }}>
               {L * Hh} heads × {T}×{T} · one analysis pass in {fmtMs(shown.ms)}
               {data && run && isGpu(run.stage) ? " on the CPU engine (the WebGPU stages don't capture attention)" : ""} · rows = query token, columns = the tokens it reads · colour = attention vs. spreading evenly · click a head
             </div>
           </div>
           <div>
-            <div style={{ fontSize: "0.78rem", marginBottom: "0.5rem" }}>
+            <div style={{ fontSize: "var(--t-sm)", marginBottom: "0.5rem" }}>
               <b>layer {sel[0] + 1}, head {sel[1] + 1}</b>
               <span className="nv-muted"> · query “<Tk id={shown.tokens[qi]} />” at {qi} looks most at </span>
               {topOf(qi).map((t, k) => (
