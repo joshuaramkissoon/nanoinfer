@@ -123,20 +123,24 @@ reader will see**.
 ## Honest claims
 
 These are the numbers the site may quote, with the conditions each one needs. Sources: `README.md`, `docs/LOG.md`
-("Head-to-head", "Metal f32 on the pipelined path, and what streaming costs") and `bench/headtohead.json`.
+("Head-to-head, re-run (19 Oct, night)", "Browser stage 4") and `bench/headtohead.json` (`decode_modes`,
+`conditions`).
 
 - **The headline metric is % of the speed limit** (a stage's tok/s ÷ its own speed limit), per DECISIONS.md #9. The
   climb goes from 0.15% (0.37 tok/s, a deliberately naive first version) to about 60% (817 tok/s, 4-bit on the M4's
-  GPU). Any "N× faster" names the naive baseline in the same sentence.
-- **GPU decode against MLX and llama.cpp.** The 760–817 tok/s Q4 numbers are *pipelined*: every token's work is
-  queued up front and the CPU never waits. In the 18 Oct head-to-head (pipelined), nanoinfer led at f16, Q8 and Q4
-  (787 vs MLX 694 and llama.cpp 622 at Q4). A chat server reads each token back before it can encode the next. With
-  that per-token synchronisation (what llama.cpp's benchmark does) nanoinfer is **slightly behind at every format**:
-  Q4 593 vs llama.cpp 622 and MLX 694; Q8 486 vs 502; f16 305 vs 333. Keeping one token in flight (commit t+1 before
-  reading t) recovers it: Q4 760. Never write "fastest" or "beats llama.cpp/MLX" without saying which loop.
-- **f32 on the GPU.** `metal-pipelined-f32` makes about 186 tok/s, level with llama.cpp's 192 (estimate, scaled to
-  head-to-head conditions). The older 176 vs 192 gap is gone.
-- **Prefill is a loss**: llama.cpp is about 2× faster at prefill on both GPU and CPU.
-- **The browser.** The quantised CPU stages (Q8, Q4) are currently slow in wasm (25.7 and 34.6 tok/s on the M4,
-  recorded) because the int8 dot falls back to scalar code off aarch64. Don't say 4-bit is the fastest option in the
-  browser. Quote the measured numbers from `public/recorded/` or say nothing about their rank.
+  GPU, pipelined, best run of a quiet 18 Oct session; the 19 Oct head-to-head made 792 in the same mode). Any "N×
+  faster" names the naive baseline in the same sentence.
+- **GPU decode has three loops; always name the one you quote.** *Pipelined* (every token's work queued up front, the
+  CPU never waits) is what the GPU can do; no streaming server can run it. *Per-token sync* (read each token back
+  before encoding the next) is what llama-bench `tg` does (it calls `llama_synchronize` after every token, verified in
+  its source), so it is the like-for-like comparison with llama.cpp. *One token in flight* (commit t+1 before reading
+  t) is a server design and the same idea as MLX's async `stream_generate`.
+- **19 Oct head-to-head (randomised, 3 rounds, one session).** Per-token sync: nanoinfer is slightly behind llama.cpp
+  at every format (Q8 505 vs 511, a tie; Q4 611 vs 636; f16 315 vs 334; f32 180 vs 192). One token in flight:
+  nanoinfer is fastest at f16, Q8 and Q4 (Q4 789 vs MLX 700 and llama.cpp 636) and level at f32 (191 vs llama.cpp
+  192). Never write "fastest" or "beats llama.cpp/MLX" without saying which loop.
+- **Prefill and CPU are losses.** GPU prefill is 1.5–1.9× behind llama.cpp. On the CPU, decode is 3–16% behind at
+  the best thread count and quantised prefill 1.6–2.5× behind.
+- **The browser.** The quantised CPU stages run simd128 int8 dots and are the fastest browser CPU decode: about 195
+  tok/s for q8/q4-rescore and -attn, about 163 for -kv16, about 97 for plain q8/q4 (held back by their f16 LM head).
+  The best f32 browser stage makes about 130. Quote `public/recorded/` and say which stage.

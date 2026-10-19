@@ -203,8 +203,8 @@ export const PANELS: PanelDef[] = [
       <>
         Tokens per second for each stage, log scale. <Swatch c="var(--m-fg)">Solid</Swatch> bars: the native engine on the M4
         Mac mini. <Swatch c="var(--m-accent)">Ember</Swatch> bars: the same Rust in the browser (dashed outline: recorded;
-        filled: measured in your tab). In the browser, the 8-bit and 4-bit CPU stages currently use a scalar int8 dot
-        product, so there they trail the 32-bit stages.
+        filled: measured in your tab). In the browser, 8-bit and 4-bit stages that keep a 16-bit LM head are held back by
+        that head.
       </>
     ),
     tryit: <>Switch to prefill. Notice which optimisations only help reading the prompt.</>,

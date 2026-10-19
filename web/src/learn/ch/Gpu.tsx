@@ -139,26 +139,27 @@ export default function Gpu() {
       <Deeper title="Pipelined decode isn't what a chat server sees">
         <p>
           A chat server has to read each token back to the CPU before it encodes the next pass. It needs the token to stream
-          it, detokenise it and check for a stop. With that per-token synchronisation, which is also how llama.cpp's
-          benchmark runs, each token costs about 0.37 ms more. Keeping one token in flight (sending pass t+1 before reading
-          token t back) hides that cost. Decode tok/s for one user on the M4's GPU:
+          it, detokenise it and check for a stop. That per-token synchronisation costs about 0.36 ms a token. llama.cpp's
+          benchmark syncs after every token too, so this is the like-for-like loop. Keeping one token in flight (sending pass
+          t+1 before reading token t back) hides the cost, and MLX streams the same way. Decode tok/s for one user on the M4's
+          GPU, all from one randomised session on 19 Oct:
         </p>
         <ul>
-          <li>4-bit: 760 pipelined, 593 with per-token sync, 760 with one token in flight. MLX 694, llama.cpp 622.</li>
-          <li>8-bit: 589 pipelined, 486 with per-token sync, 577 with one token in flight. MLX 534, llama.cpp 502.</li>
-          <li>16-bit: 347 pipelined, 305 with per-token sync, 339 with one token in flight. MLX 342, llama.cpp 333.</li>
-          <li>32-bit: 186 pipelined, 174 with per-token sync, 185 with one token in flight. MLX 178, llama.cpp 192.</li>
+          <li>4-bit: 792 pipelined, 611 with per-token sync, 789 with one token in flight. llama.cpp 636, MLX 700.</li>
+          <li>8-bit: 611 pipelined, 505 with per-token sync, 608 with one token in flight. llama.cpp 511, MLX 546.</li>
+          <li>16-bit: 361 pipelined, 315 with per-token sync, 360 with one token in flight. llama.cpp 334, MLX 340.</li>
+          <li>32-bit: 195 pipelined, 180 with per-token sync, 191 with one token in flight. llama.cpp 192, MLX 178.</li>
         </ul>
         <p>
-          So with per-token sync, nanoinfer is slightly behind llama.cpp and MLX at every format. With one token in flight it
-          is ahead of both at 4-bit and 8-bit, level at 16-bit, and a little behind llama.cpp at 32-bit. A server can run that loop:
-          it notices a stop one token late and discards the extra pass. Prefill is a clear loss. llama.cpp reads a prompt
-          about 1.6 to 1.9× faster on this GPU, because it stages its matrix tiles in 16-bit and ours are 32-bit.
+          With per-token sync, nanoinfer is slightly behind llama.cpp at every format (8-bit is a tie). With one token in
+          flight it is ahead of both at 4-bit, 8-bit and 16-bit, and level with llama.cpp at 32-bit. A server can run that
+          loop: it notices a stop one token late and discards the extra pass. Pipelined decode shows what the GPU can do, but
+          a streaming server can't run it.
         </p>
         <p>
-          Our rows come from one session on 19 Oct, which ran about 3% slower than the 18 Oct head-to-head. MLX and
-          llama.cpp were measured in that head-to-head, where nanoinfer's pipelined 4-bit made 787. Every engine read the same bytes per token
-          and had its quality checked against its own 32-bit model.
+          Prefill is a clear loss. llama.cpp reads a prompt 1.5 to 1.9× faster on this GPU, because it stages its matrix tiles
+          in 16-bit and ours are 32-bit. The 817 above is the best pipelined run, from a quiet session on 18 Oct. Every engine
+          read the same bytes per token and had its quality checked against its own 32-bit model.
         </p>
       </Deeper>
       <Deeper title="Measuring on a busy machine">

@@ -49,7 +49,7 @@ export function milestones(d: LearnData | null): Milestone[] {
   return [
     { ...CPU_STEPS[0], tokS: d?.headline.naive.decode ?? CPU_STEPS[0].tokS },
     ...CPU_STEPS.slice(1),
-    { key: "gpu", label: "+ the GPU", tokS: gpu, mb: 89.3, what: "Metal kernels shaped for the GPU, tokens pipelined, 4-bit · M4 GPU · quiet machine" },
+    { key: "gpu", label: "+ the GPU", tokS: gpu, mb: 89.3, what: "Metal kernels shaped for the GPU, tokens pipelined, 4-bit · M4 GPU · quiet machine, 18 Oct" },
     { key: "batch", label: "+ batching", tokS: total, what: `${B} users at once: ${Math.round(per)} tok/s each · M4 GPU`, total: true },
   ];
 }

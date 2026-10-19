@@ -68,9 +68,9 @@ function fallbackNote(s: StageInfo): string {
   const n = s.wasmNote ?? "";
   if (/NEON/.test(n) && /unrolled/.test(n)) return "no NEON in a browser: runs the 16-totals code";
   if (/scalar code/.test(n) && /tile/.test(n)) return "no NEON in a browser: the tile runs as plain code";
-  if (/single-threaded/.test(n) && /weights/.test(n)) return "one thread here, and the small weights are unpacked slowly";
   if (/single-threaded/.test(n)) return "no OS threads in a browser: runs on one core";
-  if (/scalar/.test(n)) return "the small weights are unpacked with plain code here";
+  if (/int8 dots/.test(n)) return "no sdot in a browser: the int8 dots use WebAssembly SIMD";
+  if (/widened/.test(n)) return "16-bit weights are widened with WebAssembly SIMD here";
   return n;
 }
 

@@ -125,8 +125,8 @@ export default function Quantization() {
       <p>
         4-bit reached <span className="k">497 tokens per second</span>, the fastest CPU result. The cost is now visible. The
         top-choice token differs from the 32-bit model's about 1 time in 5, and <G k="perplexity" /> (how surprised the model
-        is by real text) rises about 8%. In a browser tab these 8-bit and 4-bit stages are currently much slower (the lab
-        shows the measured numbers), because WebAssembly runs their int8 dot product as scalar code.
+        is by real text) rises about 8%. In a browser tab, the later 8-bit and 4-bit stages are the fastest CPU decode, about
+        195 tokens per second on the M4. The best 32-bit browser stage makes about 130.
       </p>
       <Climb upto={4} n="15.2" />
       <p>
