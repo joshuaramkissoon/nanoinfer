@@ -260,7 +260,8 @@ function ServingStack() {
   const cc = chartColors(pal.dark);
   const [job, setJob] = useState("run");
   const J = JOBS.find((j) => j.k === job)!;
-  const o = (id: string) => (J.on.includes(id) ? 1 : 0.22);
+  // context stays readable when dimmed (~45%): the reader still needs the labels to place the lit part
+  const o = (id: string) => (J.on.includes(id) ? 1 : 0.45);
   const panel = pal.dark ? "#262421" : "#ffffff";
   const users = ["A", "B", "C"];
   const [wref, w] = useWidth<HTMLDivElement>();

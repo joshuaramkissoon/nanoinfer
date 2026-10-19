@@ -271,7 +271,8 @@
 }
 .p0-job {
   margin-top: 0.6rem;
-  font-size: var(--t-sm);
+  font-family: var(--f-serif);
+  font-size: var(--t-md);
   line-height: 1.7;
   min-height: 7.2em;
 }
@@ -622,13 +623,18 @@
 }
 .p0-stone-b {
   padding: 0 0.3rem 1rem 1.5rem;
-  font-size: var(--t-sm);
+  font-family: var(--f-serif);
+  font-size: var(--t-md);
   line-height: 1.65;
   color: var(--m-sub);
   animation: lr-rise 0.3s var(--lr-ease) both;
 }
 .p0-stone-b p {
   margin: 0 0 0.45rem;
+}
+.p0-stone-b a {
+  font-family: var(--f-mono);
+  font-size: var(--t-sm);
 }
 @media (max-width: 640px) {
   .p0-stone-h {

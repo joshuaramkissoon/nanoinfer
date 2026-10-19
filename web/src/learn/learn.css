@@ -1428,3 +1428,10 @@ button.lr-bar:hover {
 .lr-hint a {
   white-space: nowrap;
 }
+@media (max-width: 640px) {
+  .ld-hero,
+  .nv-hero,
+  .lr-ihero {
+    padding-top: var(--s-7);
+  }
+}
