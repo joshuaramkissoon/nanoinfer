@@ -125,7 +125,7 @@ export function kindColor(p: Palette, kind: string): string {
 }
 
 export const KIND_LABEL: Record<string, string> = {
-  lm_head: "lm head",
+  lm_head: "LM head",
   matmul: "matmul",
   attn: "attention",
   kv_write: "kv write",

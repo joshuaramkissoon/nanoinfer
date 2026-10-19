@@ -61,13 +61,12 @@ function Replay() {
       prov="recorded"
       caption={
         <>
-          A real run of the engine, replayed with its measured timings. Top: the four steps of the loop, with the current
-          one lit. Middle: the text, growing. Bottom: a timeline where each bar is one full <G k="forward pass" /> through all
-          12 layers, its width the time it really took. The wide first bar is <G k="prefill" />: the whole prompt in one go.
-          Every short bar after it is one <G k="decode" /> step, producing one token.
+          A real run of the engine, replayed with its measured timings. Top: the four steps of the loop, the current one lit.
+          Middle: the text. Bottom: a timeline where each bar is one <G k="forward pass" />, as wide as it took. The wide
+          first bar is <G k="prefill" />; each short bar after it is one <G k="decode" /> step.
         </>
       }
-      tryit={<>Switch to <b>real speed</b>: that's how fast it actually ran, in V8, on one core of an M4.</>}
+      tryit={<>Switch to <b>real speed</b>, the speed it ran in V8 on one core of the M4. Notice how the first bar compares with the rest.</>}
     >
       <div className="lr-controls">
         <PlayPause playing={playing} onToggle={() => setPlaying((p) => !p)} />
@@ -143,32 +142,31 @@ export default function Loop() {
   return (
     <>
       <p>
-        We have everything for the full loop. Turn the text into tokens. Run them through the model. Get 50,257 scores. Pick
+        You now have every piece of the loop. Turn the text into tokens. Run them through the model. Get 50,257 scores. Pick
         one. Add it to the text. Run the model again.
       </p>
       <Replay />
       <p>
-        Two phases, and they behave very differently. <b>Prefill</b> takes the whole prompt in one pass: 14 tokens went through
-        together. <b>Decode</b> produces one token per pass, because each new token depends on the one just chosen; there's
-        no way to compute token 20 before you know token 19.
+        The loop has two phases, and they behave very differently. <b>Prefill</b> takes the whole prompt in one pass; here 14
+        tokens went through together. <b>Decode</b> produces one token per pass, because each new token depends on the one
+        just chosen. There's no way to compute token 20 before you know token 19.
       </p>
       <p>
-        Look at the speeds: prefill wrote its 14 tokens faster per token than decode did. That's because prefill reads each
-        weight once and uses it for all 14 prompt tokens, while every decode pass reads all 12 layers and all 49 matrices,
-        every one of the model's 124 million weights, to produce a single token. (This early, single-core engine shows only
-        a small gap; on a GPU the same effect makes prefill 8× faster than decode, chapter 16.) Same arithmetic per token,
-        very different bytes per token: hold on to that, it's the whole of part two.
+        Prefill handled its 14 tokens faster per token than decode did. Prefill reads each weight once and uses it for all
+        14 prompt tokens. Every decode pass reads all 124 million weights to produce a single token. This early,
+        single-core engine shows only a small gap. On the M4's GPU, prefill runs about 8× faster per token than decode
+        (chapter 16). Prefill and decode do the same arithmetic per token but read very different bytes per token. Part 2
+        is about that difference.
       </p>
-      <Idea>Generation is a loop of full forward passes, one per token. Prefill reads the prompt in one go; decode crawls one token per pass, and each pass uses every weight in the model.</Idea>
+      <Idea>Generation is a loop of full forward passes, one per token. Prefill reads the prompt in one pass; decode writes one token per pass, and each pass reads every weight in the model.</Idea>
       <Deeper title="What's the user actually waiting for?">
         <p>
-          Two numbers describe how a model feels. <b>Time to first token</b> (TTFT) is how long until the first word appears:
-          mostly the prefill. <b>Time per output token</b> (TPOT) is the gap between words after that: one decode step. A long
+          Two numbers describe how a model feels. <b>Time to first token</b> (TTFT) is how long until the first token appears,
+          mostly the prefill. <b>Time per output token</b> (TPOT) is the gap between tokens after that, one decode step. A long
           document as a prompt hurts the first; a long answer hurts the second.
         </p>
         <p>
-          Part one is done: that's what a language model does. Part two asks the question this whole project is about:{" "}
-          <b>why does each of those decode steps take as long as it does?</b>
+          That completes part 1. Part 2 measures <b>why each decode step takes as long as it does</b>.
         </p>
       </Deeper>
     </>

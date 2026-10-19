@@ -151,12 +151,12 @@ function ChipPicture() {
       prov="diagram"
       caption={
         <>
-          {narrow ? "Top" : "Left"}, <Swatch c={cc.c2}>blue</Swatch>: memory, and the bus to the chip (thicker and busier = more
-          bandwidth). {narrow ? "Below" : "Right"}, <Swatch c={cc.c1}>ember</Swatch>: compute units, drawn to count, not to
-          scale. The FLOPs-per-byte number is how much arithmetic the chip can do per byte it reads: the gap decode can't fill.
+          {narrow ? "Top" : "Left"}, <Swatch c={cc.c2}>blue</Swatch>: memory, and the bus to the chip (thicker = more
+          bandwidth). {narrow ? "Below" : "Right"}, <Swatch c={cc.c1}>ember squares</Swatch>: compute units, drawn to count
+          rather than scale. FLOPs per byte is how much arithmetic the chip can do for each byte it reads.
         </>
       }
-      tryit={<>Flip between the three. The M4's CPU and GPU share one memory, so their buses barely differ; the H100's is 30× wider.</>}
+      tryit={<>Switch between the three chips. Notice how much the bus changes compared with the compute units.</>}
       source={SOURCES}
     >
       <div className="lr-controls">
@@ -189,10 +189,10 @@ function ChipPicture() {
 
 const LADDER: { name: string; gbs: number; kind: "mem" | "link"; src: string; cap?: string }[] = [
   { name: "H100 HBM3", gbs: 3350, kind: "mem", src: "NVIDIA datasheet", cap: "80 GB" },
-  { name: "NVLink 4 (GPU ↔ GPU, one way)", gbs: 450, kind: "link", src: "NVIDIA: 900 GB/s total per GPU" },
+  { name: "NVLink 4 (GPU ↔ GPU, each way)", gbs: 450, kind: "link", src: "NVIDIA: 900 GB/s total per GPU" },
   { name: "M4 GPU reading memory", gbs: 105, kind: "mem", src: "measured, docs/LOG.md", cap: "24 GB shared" },
   { name: "M4 CPU, all 10 cores", gbs: 98, kind: "mem", src: "measured, docs/LOG.md", cap: "24 GB shared" },
-  { name: "PCIe 5 ×16 (CPU ↔ GPU, one way)", gbs: 64, kind: "link", src: "PCI-SIG spec, ~64 GB/s" },
+  { name: "PCIe 5 ×16 (CPU ↔ GPU, each way)", gbs: 64, kind: "link", src: "PCI-SIG spec, ~64 GB/s" },
   { name: "one M4 core", gbs: 57, kind: "mem", src: "measured, docs/LOG.md" },
   { name: "InfiniBand NDR (server ↔ server)", gbs: 50, kind: "link", src: "400 Gb/s per port" },
   { name: "100 GbE network", gbs: 12.5, kind: "link", src: "100 Gb/s" },
@@ -210,12 +210,11 @@ function BandwidthLadder() {
       prov="external"
       caption={
         <>
-          Bandwidth on a log scale (each gridline 10×). <Swatch c={cc.c2}>Blue</Swatch>: a processor reading its own
-          memory. <Swatch c={cc.c3}>Olive</Swatch>: links between chips and machines. A byte crossing NVLink is ~7× slower
-          than a byte read locally on an H100; across the network, ~70×.
+          Bandwidth on a log scale (each gridline 10×). <Swatch c={cc.c2}>Blue bars</Swatch>: a processor reading its own
+          memory. <Swatch c={cc.c3}>Olive bars</Swatch>: links between chips and machines.
         </>
       }
-      tryit={<>Hover a row for its source.</>}
+      tryit={<>Select a row to see its source. Notice how far the links sit below local memory.</>}
       source="Measured rows: docs/LOG.md (M4 Mac mini, 24 GB). External rows: NVIDIA H100 / NVLink datasheets, PCIe 5 and InfiniBand NDR line rates."
     >
       <div className="p0-legend lr-small">
@@ -230,7 +229,7 @@ function BandwidthLadder() {
       </div>
       <div className="p0-ladder">
         {LADDER.map((r, i) => (
-          <div key={r.name} className={`p0-ladder-row${hi === i ? " hi" : ""}`} onPointerEnter={() => setHi(i)} onPointerLeave={() => setHi(null)}>
+          <div key={r.name} className={`p0-ladder-row${hi === i ? " hi" : ""}`} onPointerEnter={() => setHi(i)} onPointerLeave={() => setHi(null)} onClick={() => setHi(i)}>
             <span className="nm">{r.name}</span>
             <span className="track">
               {[10, 100, 1000].map((g) => (
@@ -283,17 +282,17 @@ function SplitCost() {
   return (
     <Fig
       n="0.3.3"
-      title="Splitting a model buys bandwidth and capacity, and costs conversation"
+      title="Splitting a model buys bandwidth and capacity, and costs communication"
       prov="estimate"
       caption={
         <>
-          A 70B model in bf16 (140 GB) split across H100s with tensor parallelism: each GPU holds a slice of every matrix
-          and reads only its slice (<Swatch c={cc.c2}>blue</Swatch>: time reading weights per token). After every attention
-          and feed-forward block the GPUs all-reduce their partial results (<Swatch c={cc.c3}>olive</Swatch>: time talking).
-          The messages are tiny (16 KB), so the talking is all latency and doesn't shrink as GPUs are added.
+          A 70B model in bf16 (140 GB) split across H100s with tensor parallelism. Each GPU holds and reads a slice of every
+          matrix (<Swatch c={cc.c2}>blue bars</Swatch>: time reading weights per token). After every attention and
+          feed-forward step the GPUs all-reduce their partial results (<Swatch c={cc.c3}>olive bars</Swatch>: time
+          communicating). The messages are 16 KB, so that time is almost all latency.
         </>
       }
-      tryit={<>Switch the link to a network between servers. Eight GPUs now spend almost half of every token talking.</>}
+      tryit={<>Switch the link to a network between servers. Notice what happens to the olive share as you add GPUs.</>}
       source="80 layers × 2 all-reduces per token; ~8 µs per small all-reduce over NVLink and ~30 µs over InfiniBand are order-of-magnitude figures for NCCL-style collectives (estimate). HBM 3.35 TB/s per H100 (datasheet)."
     >
       <div className="lr-controls">
@@ -345,76 +344,75 @@ export default function Hardware() {
   return (
     <>
       <p>
-        You know CPUs. This chapter is the minimum hardware picture for inference: why GPUs, why memory is the wall, and why
-        more than one GPU gets hard. Three figures, three numbers to keep: <b>bandwidth</b>, <b>capacity</b>, and{" "}
-        <b>link speed</b>.
+        This chapter is the minimum hardware picture for inference. It covers why GPUs, why memory is the wall, and why more
+        than one GPU is hard. Keep three numbers in mind: <b>bandwidth</b>, <b>capacity</b> and <b>link speed</b>.
       </p>
       <h2>Few clever cores, or thousands of simple ones</h2>
       <p>
-        A CPU spends its transistors making one thread fast. A <G k="GPU" /> spends them on lanes: thousands of simple
-        arithmetic units running the same instruction over different numbers, like SIMD taken to an extreme. A matrix
-        multiply is the perfect workload: millions of independent multiply-adds.
+        A CPU spends its transistors making one thread fast. A <G k="GPU" /> spends them on lanes, thousands of simple
+        arithmetic units running the same instruction over different numbers. It is SIMD taken to an extreme. A matrix
+        multiply suits a GPU well, because it is millions of independent multiply-adds.
       </p>
       <ChipPicture />
       <p>
-        But look at the last number. More lanes only help when there's arithmetic to do, and decode has ~1 FLOP per byte.
-        What really makes datacentre GPUs fast at decode is the memory beside them: <G k="HBM" />, stacks of DRAM on a bus
-        thousands of bits wide. An H100 reads ~30× faster than the M4, so the same model decodes ~30× faster.
+        Now look at the last number. More lanes only help when there's arithmetic to do, and decode has about 1 FLOP per
+        byte. What makes datacentre GPUs fast at decode is the memory beside them. <G k="HBM" /> is stacks of DRAM on a bus
+        thousands of bits wide. An H100 reads about 30× faster than the M4, so the same model decodes about 30× faster.
       </p>
 
       <h2>Bandwidth, by where the bytes live</h2>
       <p>
-        Apple silicon has <G k="unified memory" />: CPU and GPU share one pool, so nothing is copied between them (that's
-        why our M4 can try both on the same weights). A datacentre GPU has its own HBM; the weights cross PCIe once at load
+        Apple silicon has <G k="unified memory" />: CPU and GPU share one pool, so nothing is copied between them. That
+        is why the M4 can run both on the same weights. A datacentre GPU has its own HBM; the weights cross PCIe once at load
         time and then stay put.
       </p>
       <BandwidthLadder />
-      <h2>So when does a CPU win?</h2>
+      <h2>When a CPU is the better choice</h2>
       <p>
-        Look at the two M4 rows: CPU and GPU read the same memory at 98 and 105 GB/s, so for one user's decode their speed
-        limits are nearly equal. Our engine reached 497 tokens a second on the CPU and 817 on the GPU, and most of that gap
-        came from the GPU waiting less (chapter 16), not from its lanes. Prefill is another story: 2,415 vs 6,800, because
-        reading a prompt is arithmetic-heavy and that's what lanes are for.
+        Look at the two M4 rows. The CPU and GPU read the same memory at 98 and 105 GB/s, so for one user's decode their
+        speed limits are nearly equal. With 4-bit weights, our engine reached 497 tokens per second on the CPU and 817 on
+        the GPU (pipelined, chapter 16). Most of that gap came from the GPU waiting less, not from its lanes. Prefill differs
+        more, 2,415 against 6,800 tokens per second, because reading a prompt is arithmetic-heavy.
       </p>
       <p>
-        So the rule of thumb: <b>decode speed follows bandwidth; prefill and batch speed follow FLOPs</b>. A CPU is a fine
-        choice for a small model, one user, and shared memory: laptops, phones, edge boxes, or a big-RAM server running a
-        model no single GPU can hold. A GPU wins as soon as there's arithmetic to share out (long prompts, many users) or
-        when it brings much faster memory, like an H100's HBM.
+        The rule of thumb is <b>decode speed follows bandwidth; prefill and batch speed follow FLOPs</b>. A CPU is a fine
+        choice for a small model, one user and shared memory. Examples are laptops, phones, edge boxes, or a big-RAM server
+        running a model no single GPU can hold. A GPU wins once there's arithmetic to share out (long prompts, many users),
+        or when it brings much faster memory, like an H100's HBM.
       </p>
       <p>
-        Capacity is the other wall: 80 GB per H100, 24 GB on our Mac. A 70B model in bf16 needs 140 GB before a single
+        Capacity is the other wall: 80 GB per H100, 24 GB on the M4. A 70B model in bf16 needs 140 GB before a single
         user's KV cache. When it doesn't fit, you either shrink it (quantise) or split it.
       </p>
 
-      <h2>Why more GPUs is hard</h2>
+      <h2>Why splitting across GPUs costs time</h2>
       <p>
-        Splitting a model is sharding, with a twist you'll recognise: the shards must exchange partial results{" "}
-        <b>on every layer of every token</b>, a synchronous barrier hundreds of times per word. Each split also needs an{" "}
+        Splitting a model is sharding, with a twist. The shards must exchange partial results{" "}
+        <b>on every layer of every token</b>, a synchronous barrier hundreds of times per token. Each exchange is an{" "}
         <G k="all-reduce" />, so the link (<G k="NVLink" /> inside a server, the network between servers) is on the
         critical path.
       </p>
       <SplitCost />
       <p>
-        Amdahl's law, in a new costume: the per-token communication is a serial fraction that doesn't shrink with more GPUs.
-        That's why big models are split within one NVLink-connected server where possible, and across servers mostly by
-        layers (pipeline) or by request (replicas), where the traffic is lighter. Chapter 19 animates the all-reduce.
+        This is Amdahl's law. The per-token communication is a serial part that more GPUs don't shrink. So big models are
+        split within one NVLink-connected server where possible. Across servers they are split by layers (pipeline) or by
+        request (replicas), where the traffic is lighter. Chapter 19 animates the all-reduce.
       </p>
       <Idea>
-        GPUs win at inference mainly because of their memory bandwidth (HBM), and their lanes win prefill and big batches.
-        Memory capacity decides what fits; links between chips are 7–70× slower than local memory, so splitting a model is a
-        trade, not a free speed-up.
+        GPUs win at decode mainly because of their memory bandwidth (HBM); their lanes win prefill and big batches. Memory
+        capacity decides what fits. Links between chips are 7–70× slower than local memory, so splitting a model buys
+        capacity and bandwidth at the cost of communication time.
       </Idea>
       <Deeper title="What about TPUs, Groq, Cerebras, and phones?">
         <p>
           Same physics, different trades. TPUs are matrix engines with HBM, linked in big pods with fast custom
           interconnect. Groq and Cerebras keep weights in on-chip SRAM (far faster than HBM, far smaller), so a model spans
-          many chips. Phones and laptops run small quantised models from shared DRAM at 50–120 GB/s, which is why a 3–8B model
-          in 4 bits is the on-device sweet spot. In every case, work out bytes per token ÷ bandwidth first.
+          many chips. Phones and laptops run small quantised models from shared DRAM at 50 to 120 GB/s. That is why a 3B to
+          8B model in 4 bits suits on-device use. In every case, work out bytes per token ÷ bandwidth first.
         </p>
       </Deeper>
       <p className="p0-next-hint">
-        Next: the Rosetta stone. Or see the{" "}
+        Next: A Rosetta stone. Or see the{" "}
         <a href="/learn/many-gpus" onClick={linkTo("/learn/many-gpus")}>
           ring all-reduce
         </a>{" "}

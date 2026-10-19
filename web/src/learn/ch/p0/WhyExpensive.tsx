@@ -36,19 +36,19 @@ function BytesPerToken() {
       prov="estimate"
       caption={
         <>
-          Top: bytes read and arithmetic done for <b>one token, one user</b>. Below, each machine's ceiling: its memory
-          bandwidth divided by those bytes (<Swatch c={cc.c2}>blue</Swatch>, log scale: each gridline is 10×). Rows marked{" "}
-          <i>doesn't fit</i> can't hold the weights at all. For GPT-2, <Swatch c={cc.c1}>ember</Swatch> rings are what our
-          engine actually measured.
+          Top: bytes read and arithmetic done for <b>one token, one user</b>. Below, each machine's speed limit, its memory
+          bandwidth ÷ those bytes (<Swatch c={cc.c2}>blue bars</Swatch>, log scale, each gridline 10×). A row marked{" "}
+          <i>doesn't fit</i> can't hold the weights. For GPT-2, the <Swatch c={cc.c1}>ember rings</Swatch> are our
+          engine's measured speeds.
         </>
       }
       tryit={
         <>
-          A 7B model in bf16 is 14 GB per token: even an H100 tops out near 240 tokens a second. Now pick 70B: one H100 can't
-          hold it at all. Switch to int4 and it fits, at 4× the speed limit. Then pick GPT-2 and compare our measured rings.
+          Pick 7B, then 70B, then switch 70B to 4-bit. Notice which change decides whether it runs at all, and which
+          decides how fast.
         </>
       }
-      source={SOURCES + " Ceilings ignore the KV cache and quantisation scales (≈ +6–12% bytes)."}
+      source={SOURCES + " Speed limits ignore the KV cache and quantisation scales (about 6–12% more bytes)."}
     >
       <div className="lr-controls">
         <Seg options={MODELS.map((x) => ({ v: x.key, label: x.key === "gpt2" ? "GPT-2 124M" : x.key.toUpperCase() }))} value={mk} onChange={setMk} label="model" />
@@ -102,7 +102,7 @@ function BytesPerToken() {
               <span className="v">{fits ? `${fmtRate(ceil)} tok/s` : "–"}</span>
               {fits && meas != null && (
                 <span className="measv lr-small" style={{ color: pal.sub }}>
-                  measured {meas.toFixed(0)} tok/s ({Math.round((meas / ceil) * 100)}% of ceiling)
+                  measured {meas.toFixed(0)} tok/s ({Math.round((meas / ceil) * 100)}% of the speed limit)
                 </span>
               )}
             </div>
@@ -144,14 +144,14 @@ function IdleMaths() {
         <>
           Each square is one FLOP the chip could do in the time it takes to read one byte of weights:{" "}
           {mk === "h100" ? "~989 TFLOP/s ÷ 3.35 TB/s ≈ 295" : "~4.3 TFLOP/s ÷ 105 GB/s ≈ 41"}. Decode in bf16 does one FLOP
-          per byte per user (<Swatch c={cc.c1}>ember</Swatch>); the rest of the chip's arithmetic (grey) waits for memory. This
-          counts weight bytes only. Each user's KV cache isn't shared, so real speeds do fall as users join: fig 0.2.3 adds it.
+          per byte per user (<Swatch c={cc.c1}>ember squares</Swatch>); the rest (<Swatch c={pal.rule}>grey squares</Swatch>)
+          waits for memory. This counts weight bytes only; fig 0.2.3 adds each user's KV cache.
         </>
       }
       tryit={
         <>
-          Drag the users slider. Each extra user's token reuses the same bytes, so the ember fills in for free until the
-          chip runs out of maths. That fill point is the ridge from chapter 09, and the whole case for batching.
+          Drag the users slider (or use the arrow keys). Notice how many users it takes before the ember squares fill
+          the grid. That point is the ridge from chapter 9.
         </>
       }
       source="H100 SXM: 989 TFLOP/s dense bf16 and 3.35 TB/s HBM3 (NVIDIA datasheet). M4 GPU: ~4.3 TFLOP/s f32 and 105 GB/s measured (docs/LOG.md)."
@@ -242,8 +242,8 @@ function CostCurve() {
       }
       tryit={
         <>
-          Raise the context to 4k tokens: the line gets shorter, because each user's cache is 2 GB. Then turn on GQA, which
-          shrinks the cache 4× (the field guide explains how). Longer line, cheaper tokens.
+          Raise the context to 4,096 tokens, then turn on GQA (the field guide explains it). Notice where the line stops
+          each time, and why.
         </>
       }
       source={`H100 spec numbers as in fig 0.2.1; ${PRICE.toFixed(2)} $/GPU-hour is a typical 2025–26 on-demand rental (estimate). KV cache: Llama-2-7B shape (32 layers × 4096 × K and V × 2 bytes = 0.5 MB per token). Ideal kernels; real servers reach maybe half of this.`}
@@ -343,8 +343,7 @@ export default function WhyExpensive() {
   return (
     <>
       <p>
-        Here is the fact the whole field is organised around. To write one token, the model runs its program once, and that
-        program touches <b>every weight</b>. Each weight is read from memory and used for one multiply and one add. Then the
+        To write one token, the model runs its program once, and that program reads <b>every weight</b>. Each weight is read from memory and used for one multiply and one add. Then the
         next token reads them all again.
       </p>
       <p>
@@ -352,14 +351,14 @@ export default function WhyExpensive() {
         <b>arithmetic = 2 × weights</b>. Neither depends on how clever the question is.
       </p>
       <p>
-        Two words you'll see everywhere: <G k="prefill" /> is the first pass, which reads your whole prompt at once;{" "}
-        <G k="decode" /> is every pass after it, each writing exactly one new token. Decode is what you watch streaming in,
-        and it's where this chapter's cost bites (chapter 08 replays both on a real run).
+        Two terms you'll see everywhere. <G k="prefill" /> is the first pass, which reads your whole prompt at once.{" "}
+        <G k="decode" /> is every pass after it, each writing one new token. Decode is what you watch streaming in, and
+        it's where this chapter's cost applies (chapter 8 replays both on a real run).
       </p>
       <BytesPerToken />
       <p>
-        That ceiling is a back-of-envelope SLO you can compute before writing a line of code (chapter 10 does it properly).
-        Real engines reach 50–80% of it. Notice two different walls: <b>bandwidth</b> (how fast) and <b>capacity</b>{" "}
+        That speed limit is a back-of-envelope SLO you can compute before writing any code (chapter 10 does it properly).
+        Real engines reach 50–80% of it. There are two different walls: <b>bandwidth</b> (how fast) and <b>capacity</b>{" "}
         (whether it runs at all).
       </p>
 
@@ -370,21 +369,21 @@ export default function WhyExpensive() {
       </p>
       <IdleMaths />
       <p>
-        One user leaves more than 99% of an H100's arithmetic idle. That's why serving is a game of finding more useful work
-        for each byte: more users per step (<G k="batch">batching</G>), more tokens per user per step (speculative
-        decoding), or fewer bytes per weight (<G k="quantization">quantisation</G>).
+        One user leaves more than 99% of an H100's arithmetic idle. So serving engines look for more useful work per byte.
+        There are three ways: more users per step (<G k="batch">batching</G>), more tokens per user per step (speculative
+        decoding), and fewer bytes per weight (<G k="quantization">quantisation</G>).
       </p>
 
       <h2>The one piece of state: the KV cache</h2>
       <p>
         To write the next token, the model has to look back at every token before it (that's <G k="attention" />, chapter
-        05). From each earlier token it needs two small vectors per layer, a <b>key</b> and a <b>value</b>, and those never
-        change once computed. So every engine memoises them in an append-only, per-request log: the <G k="KV cache" />.
+        5). From each earlier token it needs two small vectors per layer, a <b>key</b> and a <b>value</b>, and those never
+        change once computed. So engines memoise them in an append-only, per-request log, the <G k="KV cache" />.
       </p>
       <p>
-        You know this shape: it's per-session state that grows. One entry per token, per layer. For a 7B model (32 layers,
-        4,096 numbers each for K and V, 2 bytes) that's <b>0.5 MB per token</b>, so a 4,000-token conversation holds 2 GB, and
-        unlike the weights it can't be shared between users. It's read in full on every step, so it costs bandwidth as well
+        This is per-session state that grows: one entry per token, per layer. A 7B model (32 layers, 4,096 numbers each
+        for K and V, 2 bytes) stores <b>0.5 MB per token</b>. A 4,096-token conversation holds 2 GB, and unlike the weights
+        it can't be shared between users. It's read in full on every step, so it costs bandwidth as well
         as space. Chapter 12 shows it being built.
       </p>
 
@@ -396,8 +395,8 @@ export default function WhyExpensive() {
       </p>
       <CostCurve />
       <p>
-        That's the economics of every LLM API in one chart: cheap tokens come from big batches, big batches need memory, and
-        long contexts eat it. Users meanwhile care about <G k="latency" />: <G k="TTFT">time to first token</G> and{" "}
+        The chart shows the basic economics of serving. Big batches make tokens cheap. Big batches need memory, and long
+        contexts use it up. Users, meanwhile, care about <G k="latency" />: <G k="TTFT">time to first token</G> and{" "}
         <G k="TPOT">time per output token</G>. The engine's job is to sit as far down this curve as the latency targets
         allow.
       </p>
@@ -410,24 +409,24 @@ export default function WhyExpensive() {
         prov="diagram"
         caption={
           <>
-            Colour is the kind of limit: blue for memory, ember for compute, olive for talking between chips, grey for time.
-            Open one limit at a time; each chip opens the chapter (<b>ch</b>) or field-guide entry (<b>guide</b>) that
-            explains it. Don't try to learn the names yet: the rest of the course meets them one by one.
+            Each row is one limit, its colour the kind: blue for memory, ember for compute, olive for communication
+            between chips. Each chip links to the chapter (<b>ch</b>) or field guide entry (<b>guide</b>) that explains
+            it. Don't learn the names yet; the course meets them one by one.
           </>
         }
       >
         <ConstraintMap collapsible />
       </Fig>
       <Idea>
-        Each token reads every weight once and does almost no arithmetic with it, so decode is limited by memory bandwidth,
-        and what fits is limited by memory capacity. Nearly every inference trick either reads fewer bytes, shares each read
-        across more work, or fits more into memory.
+        Each token reads every weight once and does almost no arithmetic with it. So memory bandwidth limits decode speed,
+        and memory capacity limits what fits. Nearly every inference technique reads fewer bytes, shares each read across
+        more work, or fits more into memory.
       </Idea>
       <Deeper title="Why not just keep the weights in cache?">
         <p>
           Same instinct as caching a hot dataset, wrong scale. An H100 has ~50 MB of L2 cache and ~30 MB of on-chip SRAM
-          spread across its cores; a 7B model is 14 GB. Every token streams the weights through the chip once; there's no
-          reuse within a token to exploit, only across tokens of a batch, which is exactly what batching does. (Cerebras and
+          spread across its cores; a 7B model is 14 GB. Every token streams the weights through the chip once. There's no
+          reuse within a token, only across the tokens of a batch, and that reuse is what batching exploits. (Cerebras and
           Groq build chips with hundreds of MB of SRAM and shard a model across many of them to get around this.)
         </p>
       </Deeper>

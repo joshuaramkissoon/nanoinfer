@@ -59,23 +59,22 @@ function Explorer({ d }: { d: LearnData }) {
   return (
     <Fig
       n="3.1"
-      title="Words as points"
+      title="Tokens as points"
       prov="weights"
       caption={
         <>
-          {e.words.length} words, each placed by its real row of numbers in GPT-2's table. 768 numbers can't be drawn, so the
-          map squashes them down to 2: it's a rough sketch, but the topics (our labels; the model was never told them)
-          clearly clump together. The selected word is ringed; its group is ember. Below: its 768 numbers as a barcode
-          (ember up = positive, blue down = negative), and its exact nearest tokens out of ~30,000 whole words, measured in
-          all 768 dimensions.
+          {e.words.length} whole-word tokens, placed by their rows in GPT-2's table, squashed from 768 dimensions to 2. The
+          topic labels are ours. The selected token is ringed and its group is <Swatch c={cc.c1}>ember</Swatch>. Below: its
+          768 numbers as a barcode (<Swatch c={cc.c1}>ember</Swatch> bars up, positive; <Swatch c={cc.c2}>blue</Swatch> bars
+          down, negative) and its nearest tokens in all 768 dimensions.
         </>
       }
-      tryit={<>Click “Monday”, then a country, then a colour. Look at who the neighbours are.</>}
+      tryit={<>Select “Monday”, then a country, then a colour. Notice which tokens come out as the nearest neighbours.</>}
     >
       <div>
         <div ref={mapRef}>
           {mw > 0 && (
-            <svg width={W} height={H} onMouseLeave={() => setHover(null)} role="img" aria-label="2D map of word embeddings">
+            <svg width={W} height={H} onMouseLeave={() => setHover(null)} role="img" aria-label="2D map of token embeddings">
               {e.near[sel].map(([id]) => {
                 const j = e.words.indexOf(id);
                 if (j < 0) return null;
@@ -177,35 +176,36 @@ export default function Embeddings() {
   return (
     <>
       <p>
-        A token ID like <code>3290</code> (that's “<Tk s=" dog" />”) is just a row number. The model's first step is to look up that
-        row in a big table and fetch what's there: a list of <span className="k">768</span> numbers. That list is the
+        A token ID like <code>3290</code> (that's <Tk s=" dog" />) is a row number. The model's first step is to look up that
+        row in a big table and fetch a list of <span className="k">768</span> numbers. That list is the
         token's <G k="embedding" />, and from here on the model only ever works with lists of numbers like it, called{" "}
         <G k="vector">vectors</G>.
       </p>
       <p>
-        The table has one row for each of the 50,257 tokens: 50,257 × 768 ≈ 38.6 million numbers. Nobody wrote those
-        numbers. They started random and were nudged, during training, until they helped the model guess well. What they
-        ended up encoding is surprisingly sensible:
+        The table has one row for each of the 50,257 tokens: 50,257 × 768, about 38.6 million weights. Training set those
+        numbers. They start random, and training adjusts them until they help the model guess well. The result groups
+        related tokens together:
       </p>
       {d ? (
         <Explorer d={d} />
       ) : (
-        <Fig n="3.1" title="Words as points" prov="weights">
+        <Fig n="3.1" title="Tokens as points" prov="weights">
           <div className="lr-empty">loading…</div>
         </Fig>
       )}
       <p>
-        Days sit with days, countries with countries. " Monday"'s nearest neighbours are the other six days. " dog" is
-        next to " dogs", " puppy" and " canine". Nobody told the model about weekdays or pets; tokens that show up in
-        similar places in text simply ended up with similar numbers.
+        Days sit with days, countries with countries. The nearest neighbours of <Tk s=" Monday" /> are the other 6 days.{" "}
+        <Tk s=" dog" /> is next to <Tk s=" dogs" />, <Tk s=" puppy" /> and <Tk s=" canine" />. The model was never given
+        these categories. Tokens that appear in similar contexts get similar numbers. The map is a rough sketch; the
+        neighbour list is exact, measured in all 768 dimensions over about 30,000 whole-word tokens.
       </p>
-      <Idea>An embedding turns a token into a point in a 768-dimensional space, where similar meanings land close together. "Close" is measured with a dot product, the subject of the next chapter.</Idea>
+      <Idea>An embedding turns a token into a point in a 768-dimensional space, where similar meanings sit close together. “Close” is measured with a dot product, the subject of the next chapter.</Idea>
       <Deeper title="How big is this table, and why does it matter for speed?">
         <p>
-          38.6 million numbers at 4 bytes each is <b>154 MB</b>, about a third of GPT-2 small. GPT-2 uses the same table a
-          second time at the very end: to score all 50,257 possible next tokens it compares its final vector with every row.
-          So every single token the model writes has to read this whole table from memory. Keep that in mind for chapter 10,
-          where reading memory turns out to be the speed limit.
+          38.6 million weights at 4 bytes each is <b>154 MB</b>, about a third of GPT-2 small. GPT-2 uses the same table again
+          at the end, as the LM head. To score all 50,257 possible next tokens, it compares its final vector with every row.
+          So every token the model writes reads this whole table from memory. Chapter 10 shows why that sets the speed
+          limit.
         </p>
         <p>
           The first lookup itself is nearly free: one row, 768 numbers, 3 KB. In the engine's timings it takes about a

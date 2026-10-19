@@ -3,7 +3,7 @@ import { Tk } from "../../ui/Tok";
 import { claim, engine, release, tokenText, useEngine } from "../../engine/client";
 import { LiveButton } from "../../ui/Figure";
 import { css, rgb, usePalette, type Palette } from "../../ui/theme";
-import { Deeper, Fig, G, Idea, Seg, Slider, useRecorded, T } from "../kit";
+import { Deeper, Fig, G, Idea, Seg, Slider, Swatch, useRecorded, T } from "../kit";
 
 // ---- toy -----------------------------------------------------------------------------
 
@@ -48,23 +48,21 @@ function ToyAttention() {
       prov="toy"
       caption={
         <>
-          A sentence. The outlined word is asking the question (its <b>query</b>). Each arc to an earlier word is that word's
-          share of the attention: thicker means more, and the percentages add up to 100%. The coloured box at the bottom is
-          the blend of the words' <b>values</b> (here each value is a colour, so you can see the mix). Words after the
-          outlined one are faded: a word can only look back. The vectors are hand-made with 2 numbers each; GPT-2's are
-          learned and 64 numbers long.
+          A toy sentence. The outlined token asks the question (its <b>query</b>). Each arc is an earlier token's share of
+          the attention; thicker means more. The box at the bottom blends the tokens' <b>values</b>, drawn as colours. The
+          vectors are hand-made with 2 numbers; GPT-2's are learned and 64 long.
         </>
       }
       tryit={
         <>
-          Pick “it” and see where its attention goes. Then drag <b>sharpness</b> down to 0.2: the scores get squashed and
-          attention spreads evenly over everything. Up to 8: it locks onto one word.
+          Pick “it”, then drag <b>sharpness</b> (or use the arrow keys) from low to high. Notice how the arcs change at each
+          end.
         </>
       }
     >
       <div className="lr-controls">
-        <span className="lr-small">query word:</span>
-        <Seg options={Object.keys(QUERIES).map((k) => ({ v: +k, label: WORDS[+k] }))} value={q} onChange={setQ} label="query word" />
+        <span className="lr-small">query token:</span>
+        <Seg options={Object.keys(QUERIES).map((k) => ({ v: +k, label: WORDS[+k] }))} value={q} onChange={setQ} label="query token" />
         <Slider label="sharpness" value={sharp} min={0.2} max={8} step={0.1} onChange={setSharp} fmt={(v) => v.toFixed(1)} />
       </div>
       <div style={{ overflowX: "auto" }}>
@@ -203,12 +201,12 @@ function RealAttention() {
       aside={!ready ? <LiveButton label="try your own sentence" /> : undefined}
       caption={
         <>
-          A real sentence and one of GPT-2's 144 attention heads (12 layers × 12 heads). The outlined token is the query;
-          the ember shading on earlier tokens is how much attention this head gives each one. The presets jump to heads with
-          easy-to-name habits; most heads are harder to describe.
+          A real sentence and one of GPT-2's 144 attention heads (12 layers × 12 heads). The outlined token is the query.
+          The <Swatch c={pal.accent}>ember</Swatch> shading on earlier tokens is how much attention this head gives each one. The
+          presets jump to heads with easy-to-name patterns; most heads are harder to describe.
         </>
       }
-      tryit={<>Click different words. Try “previous word”, then “first word”. Then wander with the layer and head sliders.</>}
+      tryit={<>Select different tokens. Try “previous token”, then “first token”, then explore with the layer and head sliders. Notice how rare an easy-to-name pattern is.</>}
     >
       {ready && (
         <div className="lr-controls" style={{ flexWrap: "nowrap" }}>
@@ -221,8 +219,8 @@ function RealAttention() {
       <div className="lr-controls">
         <Seg
           options={[
-            { v: "prev", label: "previous word" },
-            { v: "first", label: "first word" },
+            { v: "prev", label: "previous token" },
+            { v: "first", label: "first token" },
             { v: "self", label: "itself" },
             { v: "spread", label: "spreads out" },
           ]}
@@ -280,9 +278,9 @@ export default function Attention() {
   return (
     <>
       <p>
-        So far, each token's vector only knows about its own token. But “it” means nothing without knowing what came
-        before. <G k="attention">Attention</G> is how a token gathers information from the tokens before it, and it's built
-        entirely out of dot products from the last chapter.
+        Each token's vector so far holds information about that token only. The word “it” needs the words before it.{" "}
+        <G k="attention">Attention</G> is how a token gathers information from the tokens before it. It is built from the
+        dot products of the last chapter.
       </p>
       <p>Each token makes three vectors from its embedding (by multiplying it with three learned matrices):</p>
       <ul className="lr-list">
@@ -303,13 +301,13 @@ export default function Attention() {
       <ToyAttention />
       <Idea>Attention is a soft lookup: score every earlier token with a dot product, turn the scores into percentages, blend the values.</Idea>
       <p>
-        In the real model the vectors are learned, not hand-made, and there isn't one attention but 144 of them running
-        side by side, each free to learn its own habit.
+        In the real model the vectors are learned. GPT-2 has 144 attention heads (12 per layer), and each one learns its
+        own pattern.
       </p>
       <p>
-        Now look at what “it” needed from the words before it: only their keys and values. Those don't change when a new
-        word arrives, so there's no reason to compute them twice. Keeping them is the <b>KV cache</b>: per-request state that
-        grows by one entry per token, and the first big speed-up in part three (chapter 12).
+        Now look at what “it” needed from the tokens before it: only their keys and values. Those don't change when a new
+        token arrives, so there's no reason to compute them twice. Keeping them is the <b>KV cache</b>. It is per-request
+        state that grows by one entry per token, and the first big speed-up in part 3 (chapter 12).
       </p>
       <Deeper title="See GPT-2's real attention heads">
         <RealAttention />
@@ -317,8 +315,8 @@ export default function Attention() {
       <Deeper title="Does attention cost much?">
         <p>
           For one new token, attention is one dot product per earlier token and one blend. With a few dozen tokens of
-          context that's tiny next to the big weight matrices: in the engine's measurements it was <b>0.7%</b> of a token's
-          arithmetic. It grows with the length of the text, though, and at ~1,000 tokens it becomes a real cost.
+          context that's tiny next to the big weight matrices. In the engine's measurements it was <b>0.7%</b> of a token's
+          arithmetic. It grows with the length of the text, though, and at about 1,000 tokens it becomes a real cost.
         </p>
         <p>
           A token can only look backwards. Future tokens are hidden, because when the model is writing they don't exist yet.

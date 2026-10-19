@@ -47,9 +47,9 @@ function LiveTokenizer({ tok, onPickWord }: { tok: Tokenizer; onPickWord: (w: st
       prov="weights"
       caption={
         <>
-          Your text, cut into GPT-2's tokens: each coloured chip is one token (colours just separate neighbours), with its ID
-          number underneath. A small <Tk s=" " /> bracket means a space: most words carry the space in front of them. This is GPT-2's real tokenizer (its own vocabulary files), running in your
-          browser.
+          Your text, cut into GPT-2's tokens. Each chip is one token, with its ID underneath; the chip colours only separate
+          neighbours. A small <Tk s=" " /> bracket marks a space, which most words carry in front. This is GPT-2's real
+          tokenizer, running in your browser.
           {agree != null && (
             <span className="nv-sub">
               {" "}
@@ -60,7 +60,7 @@ function LiveTokenizer({ tok, onPickWord }: { tok: Tokenizer; onPickWord: (w: st
       }
       tryit={
         <>
-          Type a rare word, a long number, or another language, and watch the token count jump. Click a chip to see how its
+          Type a rare word, a long number or another language, and notice the token count. Select a chip to see how its
           word was assembled (in the fold below).
         </>
       }
@@ -118,13 +118,12 @@ function Merges({ tok, word, onWord }: { tok: Tokenizer; word: string; onWord: (
       prov="weights"
       caption={
         <>
-          One word being built. It starts as single bytes (one chip each). At every step the most common neighbouring pair,
-          according to GPT-2's training text, is glued into one piece (highlighted). The merge number is that pair's rank in
-          GPT-2's list of 50,000 merges: small numbers are very common pairs. When no merge applies, the chips left are the
-          tokens.
+          One word being built, starting as single bytes (one chip each). Each step joins the most common neighbouring pair
+          into one chip (highlighted). The merge number is that pair's rank among GPT-2's 50,000 merges; small numbers are
+          common pairs. When no merge applies, the chips left are the tokens.
         </>
       }
-      tryit={<>Pick one of the example words, or click a chip in fig 2.1.</>}
+      tryit={<>Pick one of the example words, or select a chip in fig 2.1. Notice which merges come first.</>}
     >
       <div style={{ minHeight: "5.4rem" }}>
         <div className="lr-small" style={{ marginBottom: "0.5rem" }}>
@@ -171,9 +170,9 @@ export default function Tokens() {
   return (
     <>
       <p>
-        The model can't read letters. It reads numbers, so the text is chopped into pieces called <G k="token">tokens</G> first, and each
-        token is replaced by its ID: a number between 0 and 50,256. A token can be a word, part of a word, or a single byte. A
-        leading space usually travels with the word after it, and a rare emoji can take several single-byte tokens.
+        The model can't read letters. It reads numbers. So the tokenizer first cuts the text into <G k="token">tokens</G> and
+        swaps each one for its ID, a number from 0 to 50,256. A token can be a word, part of a word, or a single byte. A
+        leading space usually stays with the word after it, and a rare emoji can take several single-byte tokens.
       </p>
       <p>Common words get their own token. Rare words get built from smaller pieces. Type something and see:</p>
       {tok ? (
@@ -192,30 +191,28 @@ export default function Tokens() {
         </Fig>
       )}
       <p>
-        Notice the leading spaces: <code><Tk s=" dog" /></code> (with its space) and <code>dog</code> are different tokens. Notice the
-        numbers, which split in odd places. And notice that the count of tokens, not characters or words, is what matters
-        from here on.
+        Leading spaces matter: <code><Tk s=" dog" /></code> (with its space) and <code>dog</code> are different tokens. Numbers
+        split in odd places. From here on, the course counts tokens, not characters or words.
       </p>
-      <Idea>Text becomes a list of integers. Every token costs one trip through the model, so the token count is the real unit of work.</Idea>
-      <h2>Where the pieces come from</h2>
+      <Idea>Text becomes a list of integers. Every token costs one forward pass, so the token count is the real unit of work.</Idea>
+      <h2>Where the tokens come from</h2>
       <p>
-        Nobody chose the vocabulary by hand. It was learned by a simple greedy rule called byte-pair encoding: start with
-        the 256 possible bytes, find the pair that appears side by side most often in a mountain of text, make it a new
-        token, and repeat 50,000 times.
+        A greedy rule called byte-pair encoding (BPE) built the vocabulary. BPE starts with the 256 possible bytes. It finds
+        the most common neighbouring pair in a large body of text, makes that pair a new token, and repeats 50,000 times.
       </p>
       <Deeper title="Watch a word get built, merge by merge" id="bpe">
         {tok && <Merges tok={tok} word={word} onWord={setWord} />}
       </Deeper>
       <Deeper title="Why not just use letters, or whole words?">
         <p>
-          <b>Letters</b> would make every sentence four or five times longer, and the model does one full pass per token, so
-          everything would be four or five times slower. <b>Whole words</b> would need millions of entries and still choke
-          on typos, names and new words. Byte pieces are the compromise: any text at all can be written down (in the worst
-          case, one byte at a time), and common text is short.
+          <b>Letters</b> would make every sentence 4 or 5 times longer. The model does one full pass per token, so everything
+          would be 4 or 5 times slower. <b>Whole words</b> would need millions of entries and still fail on typos, names and
+          new words. Byte-level tokens are the compromise. Any text can be written (in the worst case, one byte at a time),
+          and common text stays short.
         </p>
         <p>
-          50,257 = 256 bytes + 50,000 merges + one special "end of text" token. The vocabulary size matters for speed too: the
-          model's last step scores every one of those tokens, which turns out to be about a third of GPT-2's work per token
+          50,257 = 256 bytes + 50,000 merges + one special “end of text” token. The vocabulary size matters for speed too. The
+          model's last step, the LM head, scores every one of those tokens, which is about a third of GPT-2's work per token
           (chapter 10).
         </p>
       </Deeper>

@@ -78,22 +78,22 @@ function Guesser() {
       caption={
         mine ? (
           <>
-            Your prompt (grey), any tokens you've picked (bright), and below it GPT-2's ten most likely next tokens with their
-            probabilities (out of all 50,257). Each guess is computed when you ask, in this tab.
+            Your prompt (grey), any tokens you've picked (bright), and below it GPT-2's 10 most likely next tokens with their
+            probabilities, out of all 50,257. Each guess is computed in this tab when you ask.
           </>
         ) : (
           <>
-            A real sentence GPT-2 wrote, replayed one token at a time. Grey is the prompt a person typed; bright is what the model
-            has added so far. The bars are the model's ten best guesses for the next token, and the highlighted bar is the one
-            that was picked.
+            A real sentence GPT-2 wrote, replayed one token at a time. Grey text is the prompt a person typed; bright text is
+            what the model has added. The bars are the model's 10 best guesses for the next token. The highlighted bar is the
+            one that was picked.
           </>
         )
       }
       tryit={
         mine ? (
-          <>Click any bar to add that token and see the next guesses. Deliberately pick unlikely tokens and watch the story bend.</>
+          <>Select any bar to add that token. Pick a few unlikely tokens, and notice how the next guesses change.</>
         ) : (
-          <>Press <b>next word</b> a few times. Notice the model is often unsure (no bar near 100%), and the pick isn't always the top bar. Then switch to <b>your prompt</b>.</>
+          <>Press <b>next token</b> a few times, then switch to <b>your prompt</b>. Notice how sure the model is, and whether the pick is always the top bar.</>
         )
       }
     >
@@ -176,10 +176,10 @@ function Guesser() {
             ⟲ start
           </button>
           <button className="lr-btn solid" onClick={() => setStep((s) => Math.min(genCount - 1, s + 1))} disabled={step >= genCount - 1}>
-            next word →
+            next token →
           </button>
           <span className="lr-small">
-            word {step + 1} of {genCount || "…"}
+            token {step + 1} of {genCount || "…"}
           </span>
         </div>
       )}
@@ -232,13 +232,13 @@ function LongTail() {
       prov="recorded"
       caption={
         <>
-          All 50,257 probabilities from one real step, sorted from most to least likely. Across: the rank (1st, 10th,
-          100th…). Up: the probability. Both axes are logarithmic, so each gridline is 100× the one below. The top 10 hold{" "}
+          All 50,257 probabilities from one real step, sorted from most to least likely. Across: rank. Up: probability. Both
+          axes are log scale. The top 10 hold{" "}
           <b>{probs ? (probs.probs.slice(0, 10).reduce((a, b) => a + b.p, 0) * 100).toFixed(0) : "…"}%</b> of the total; the
-          dotted line is the long tail of tokens that each get almost nothing.
+          dotted line is the long tail.
         </>
       }
-      tryit={<>Move along the dots to see which tokens they are.</>}
+      tryit={<>Point to (or tap) the dots to see which tokens they are. Notice what kind of token sits in the tail.</>}
     >
       <div ref={ref} style={{ position: "relative" }}>
         {probs && w > 0 && (
@@ -304,38 +304,37 @@ export default function NextToken() {
   return (
     <>
       <p>
-        Strip away the chat window and a <G k="language model" /> does exactly one thing. You hand it some text. It hands back a list
-        of every piece of text that could come next, each with a <G k="probability" />.
+        Without the chat window, a <G k="language model" /> does one thing. You give it some text. It returns a list of every
+        piece of text that could come next, each with a <G k="probability" />.
       </p>
       <p>
-        That's it. Answering questions, writing code, holding a conversation: all of it is that one trick, done over and
-        over. The pieces of text are called <G k="token">tokens</G> (the next chapter is about them); for now, think of a
-        token as a word.
+        Answering questions, writing code and chatting all come from repeating that one step. The pieces of text are called{" "}
+        <G k="token">tokens</G> (the next chapter is about them). For now, think of a token as a word.
       </p>
       <Guesser />
       <p>
-        To write more than one word, you pick one of the guesses, stick it on the end, and ask again. The sentence above was
-        written by doing that 32 times. Nobody planned the whole sentence. Each word was chosen knowing only the words
-        before it.
+        To write more than one token, you pick one of the guesses, add it to the end, and ask again. The sentence above took
+        32 rounds of that. There was no plan for the whole sentence. Each token was chosen knowing only the tokens before
+        it.
       </p>
-      <Idea>A language model is a function: text in, a probability for every possible next token out. Writing is just calling it in a loop.</Idea>
+      <Idea>A language model is a function: text in, a probability for every possible next token out. Writing is calling it in a loop.</Idea>
       <p>
-        The list really is complete. GPT-2 knows <span className="k">50,257</span> tokens, and every single time it's asked,
-        it scores all of them. Most get almost nothing, but the model still has to compute each one. Hold on to that: doing
-        the same big computation for every single word is what part two of this course is about.
+        The list is complete. GPT-2 knows <span className="k">50,257</span> tokens, and it scores all of them every time.
+        Most get almost nothing, but the model still computes each one. Part 2 is about the cost of that full computation
+        for each token.
       </p>
       <Deeper title="See the whole list of 50,257">
         <LongTail />
       </Deeper>
       <Deeper title="Isn't this just autocomplete?">
         <p>
-          Yes, in the same way a chess engine is "just" picking moves. The mechanism is simple; what's remarkable is how good
-          the guesses get. To guess the next word of a physics paper well, it helps to know some physics. Training squeezes
-          that kind of knowledge into the model's numbers, because it makes the guesses better.
+          Yes. The mechanism is autocomplete. The difference is the quality of the guesses. To predict the next word of a
+          physics paper well, a model has to encode some physics. Training puts that kind of knowledge into the weights,
+          because it makes the guesses better.
         </p>
         <p>
-          The model here is <b>GPT-2 small</b> (124 million numbers, OpenAI, 2019). It's tiny by today's standards, which is
-          why it fits in a browser tab. The engine running it is nanoinfer, written from scratch in Rust. Part three of this
+          The model here is <b>GPT-2 small</b> (124 million weights, OpenAI, 2019). It's tiny by today's standards, which is
+          why it fits in a browser tab. The engine running it is nanoinfer, written from scratch in Rust. Part 3 of the
           course is the story of making that engine fast.
         </p>
       </Deeper>

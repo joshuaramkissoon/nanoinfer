@@ -26,9 +26,9 @@ function WriteOnce() {
       prov="diagram"
       caption={
         <>
-          {narrow ? "First" : "Left"}, <Swatch c={cc.c1}>ember</Swatch>: training, a one-off job that searches for good numbers.{" "}
-          {narrow ? "Then" : "Middle"}, <Swatch c={cc.c2}>blue</Swatch>: the result, a file of frozen numbers.{" "}
-          {narrow ? "Below" : "Right"}: inference, one small job per word per
+          {narrow ? "First" : "Left"}, <Swatch c={cc.c1}>ember</Swatch>: training, a one-off job that searches for good weights.{" "}
+          {narrow ? "Then" : "Middle"}, <Swatch c={cc.c2}>blue</Swatch>: the result, a file of frozen weights.{" "}
+          {narrow ? "Below" : "Right"}: inference, one small job per token per
           user, for as long as the model is in service. Each tick is one forward pass.
         </>
       }
@@ -78,7 +78,7 @@ function WriteOnce() {
           inference
         </text>
         <text x={346} y={46} fontSize={T.xs} fill={pal.sub}>
-          every word, every user, forever
+          every token, every user, forever
         </text>
         {/* the stream fades in and out at its ends rather than cutting ticks in half */}
         <linearGradient id="p0fade" x1={346} x2={632} y1={0} y2={0} gradientUnits="userSpaceOnUse">
@@ -158,16 +158,16 @@ function ModelFile() {
   return (
     <Fig
       n="0.1.2"
-      title="GPT-2, opened up: 124 million numbers in named blocks"
+      title="GPT-2, opened up: 124 million weights in named parts"
       prov="weights"
       caption={
         <>
-          The whole file as one strip, each block's width proportional to how many numbers it holds. All of it is{" "}
+          The whole file as one strip. Each part's width is proportional to how many weights it holds. The whole strip is{" "}
           <Swatch c={cc.c2}>blue</Swatch> because all of it sits in memory and is read on every token. A third is the
-          vocabulary table; the rest is twelve identical-shaped layers.
+          vocabulary table; the rest is 12 layers of the same shape.
         </>
       }
-      tryit={<>Click a layer, then click inside it: four matrices hold almost all its numbers.</>}
+      tryit={<>Select a layer, then select a part inside it. Notice which parts hold most of the layer's weights.</>}
     >
       <div className="p0-strip" role="group" aria-label="the weights file">
         {FILE.map((p) => (
@@ -225,7 +225,7 @@ const JOBS = [
     k: "load",
     label: "1 · load",
     title: "Load the weights",
-    text: "Read the file into the accelerator's memory once, at start-up. For a 70B model that's 140 GB: minutes, not milliseconds. This is your cold start, and why replicas are expensive to add.",
+    text: "Read the file into the accelerator's memory once, at start-up. For a 70B model that's 140 GB, which takes minutes. This is your cold start, and why replicas are expensive to add.",
     analog: "warming a cache · loading a read-only dataset into RAM",
     on: ["disk", "weights"],
   },
@@ -233,7 +233,7 @@ const JOBS = [
     k: "run",
     label: "2 · run",
     title: "Run the forward pass",
-    text: "Each step, push the current tokens through the fixed program: read every weight, read the request's cached state, produce scores for the next token. It's the same code for every request.",
+    text: "Each step pushes the current tokens through the fixed program. It reads every weight and the request's cached state, and produces scores for the next token. Every request runs the same code.",
     analog: "a pure function: (weights, tokens, state) → next-token scores",
     on: ["weights", "compute", "kv", "w2c", "kv2c"],
   },
@@ -241,8 +241,8 @@ const JOBS = [
     k: "schedule",
     label: "3 · schedule",
     title: "Schedule requests",
-    text: "Decide which requests share the next step (a batch), admit new ones, pause or evict others when memory runs out. Requests arrive at random and finish at unpredictable lengths.",
-    analog: "a request scheduler coalescing work every tick",
+    text: "Decide which requests share the next step (a batch). Admit new ones, and pause or evict others when memory runs out. Requests arrive at random and finish at unpredictable lengths.",
+    analog: "a request scheduler coalescing work every step",
     on: ["clients", "sched", "c2s", "s2c", "out"],
   },
   {
@@ -384,7 +384,7 @@ function ServingStack() {
           , one stack per user), and the <Swatch c={cc.c1}>forward pass</Swatch> that reads both.
         </>
       }
-      tryit={<>Step through the four jobs. The second and fourth are where almost all of this course's optimisations live.</>}
+      tryit={<>Step through the four jobs. Notice which ones touch the KV cache: that is where most of this course's optimisations live.</>}
     >
       <div className="lr-controls">
         <Seg options={JOBS.map((j) => ({ v: j.k, label: j.label }))} value={job} onChange={setJob} label="engine job" />
@@ -511,33 +511,32 @@ export default function WhatIsInference() {
   return (
     <>
       <p>
-        You run services. A language model, once trained, is a service with an unusual profile: a fixed, enormous,
-        read-only blob of data, one fixed program, and a request loop that touches the whole blob for every word it writes.
-        That's it. The rest of the field is plumbing around that loop.
+        A trained language model is an unusual service. It has a large read-only file of numbers and one fixed program.
+        Each token it writes runs the program over the whole file.
       </p>
       <h2>Two very different jobs</h2>
       <p>
-        <b>Training</b> finds the numbers: it nudges billions of them, over weeks on thousands of GPUs, until the model
-        predicts text well. <b>Inference</b> uses them: the numbers are frozen, and every request runs the same function
+        <b>Training</b> finds the numbers. It adjusts billions of them, over weeks on thousands of GPUs, until the model
+        predicts text well. <b>Inference</b> uses them. The numbers are frozen, and every request runs the same function
         over them. Training is like building a search index; inference is serving queries against it.
       </p>
       <WriteOnce />
       <p>
-        Training happens once per model. Inference happens on every word of every answer, for every user, for as long as the
-        model is in service, so at scale it's where the money goes. This course, and this engine, are only about inference.
+        Training happens once per model. Inference happens on every token of every answer, for every user, for as long as
+        the model is in service. At scale, inference is where the money goes. This course, and this engine, are only about inference.
       </p>
 
       <h2>What a model physically is</h2>
       <p>
         A file of numbers (the <G k="weights" />, also called <G k="parameters" />) plus a short, fixed program that does
-        arithmetic with them. GPT-2 small, the model on this site, is 124 million numbers. “7B” means seven billion.
+        arithmetic with them. GPT-2 small, the model on this site, has 124 million weights. “7B” means 7 billion.
       </p>
       <ModelFile />
       <p>
-        Most of those numbers are arranged as <b>matrices</b>. Think of a weight matrix as a learned transformation: a vector
-        of 768 numbers goes in, and each output number is a weighted sum of all 768 inputs (a dot product), with the weights
-        chosen by training. Stack a few of those, add a step where each word can look back at earlier words (
-        <G k="attention" />, chapter 05), and repeat twelve times. The program is tiny:
+        Most of the weights are arranged as <b>matrices</b>. Think of a weight matrix as a learned transformation. A vector
+        of 768 numbers goes in. Each output number is a weighted sum of all 768 inputs (a dot product), with the weights
+        chosen by training. Stack a few of those, add a step where each token can look back at earlier tokens (
+        <G k="attention" />, chapter 5), and repeat 12 times. The program is tiny:
       </p>
       <code className="lr-math">{`x = embed[token] + position[i]        # look up 768 numbers
 for layer in 1..12:
@@ -546,20 +545,20 @@ for layer in 1..12:
 scores = norm(x) · embedᵀ              # one score per vocabulary token
 next = sample(softmax(scores))         # pick the next token`}</code>
       <p>
-        Every line except the first and last is matrix × vector, which is why chapter 04 says multiply-and-add is ~99% of
-        the work. <G k="softmax" /> just turns raw scores into percentages that add up to 100.
+        Every line except the first and last is matrix × vector. That is why chapter 4 says multiply-and-add is about 99%
+        of the work. <G k="softmax" /> turns raw scores into percentages that add up to 100.
       </p>
 
       <h2>What an inference engine does</h2>
       <p>
-        An engine (vLLM, TensorRT-LLM, llama.cpp, SGLang, or nanoinfer) wraps that loop in a server. If you squint, it's a
+        An engine (vLLM, TensorRT-LLM, llama.cpp, SGLang, or nanoinfer) wraps that loop in a server. It is a
         stateful service with four jobs:
       </p>
       <ServingStack />
       <p>
-        The weights are the easy part: immutable, shared, cacheable. The hard parts are the ones you'd expect from a
-        distributed-systems background: the per-request state (the <G k="KV cache" />) and the scheduling of many requests
-        with unknown lengths onto a resource that's expensive to leave idle.
+        The weights are the easy part: immutable, shared and cacheable. The hard parts are familiar from distributed
+        systems. One is the per-request state (the <G k="KV cache" />). The other is scheduling many requests of unknown
+        length onto a resource that's expensive to leave idle.
       </p>
       <Idea>
         A model is a big read-only file of numbers plus a fixed program. Inference runs that program once per token, for
@@ -567,7 +566,7 @@ next = sample(softmax(scores))         # pick the next token`}</code>
       </Idea>
       <Deeper title="Why “frozen”? Doesn't the model learn from my chat?">
         <p>
-          Not during inference. The weights don't change between requests; anything the model “remembers” within a
+          Not during inference. The weights don't change between requests. Anything the model “remembers” within a
           conversation is in the prompt and the KV cache, which are per-request. Products that seem to learn about you store
           notes and put them back in the prompt. Changing the weights means another training run (fine-tuning), a separate,
           offline job.

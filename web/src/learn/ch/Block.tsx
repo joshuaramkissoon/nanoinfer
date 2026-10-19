@@ -45,15 +45,14 @@ function BlockDiagram() {
       figRef={onScreen}
       aside={<PlayPause playing={playing} onToggle={() => setPlaying((p) => !p)} />}
       n="6.1"
-      title="One block: read the stream, compute an edit, add it back"
+      title="One layer: read the stream, compute an edit, add it back"
       prov="diagram"
       caption={
         <>
-          The thick grey line is the <b>residual stream</b>: the token's 768 numbers flowing from top to bottom (the dot is one
-          token passing through). A block reads a copy, runs <Swatch c={cc.c1}>attention</Swatch> (gather from earlier tokens,
-          chapter 5), and <b>adds</b> the result back on (+). Then it does the same with the{" "}
-          <Swatch c={cc.c1}>feed-forward network</Swatch> (also called the MLP): two big matrices with a bend in between, working
-          on this token alone. GPT-2 stacks 12 of these blocks.
+          The thick <Swatch c={pal.muted}>grey line</Swatch> is the <b>residual stream</b>, the token's 768 numbers flowing
+          down; the dot is one token. The layer reads a copy, runs <Swatch c={cc.c1}>attention</Swatch> and <b>adds</b> the
+          result back (+). Then it does the same with the <Swatch c={cc.c1}>feed-forward network</Swatch>. GPT-2 stacks 12
+          of these layers.
         </>
       }
     >
@@ -70,7 +69,7 @@ function BlockDiagram() {
           stream
         </text>
         {branch(y(0.05), y(0.47), "attention", "look at earlier tokens", "4 matrices: query, key, value, out")}
-        {branch(y(0.55), y(0.95), "feed-forward (MLP)", "think about this token", "768 → 3072 → 768, 2 matrices")}
+        {branch(y(0.55), y(0.95), "feed-forward (FFN)", "think about this token", "768 → 3072 → 768, 2 matrices")}
       </svg>
     </Fig>
   );
@@ -129,12 +128,12 @@ function Stream() {
       prov="recorded"
       caption={
         <>
-          One real token, “<Tk s=" group" />”, travelling down GPT-2. Each stripe is the actual residual stream (768 numbers, ember
-          positive, blue negative) at that depth: after the embedding, then after each of the 12 layers. Below: if the model
-          stopped right there and turned the stream into a guess, these are the guesses it would make.
+          One real token, <Tk s=" group" />, travelling down GPT-2. Each stripe is the residual stream (768 numbers,{" "}
+          <Swatch c={pal.accent}>ember</Swatch> positive, <Swatch c={pal.cool}>blue</Swatch> negative) after the embedding and after
+          each of the 12 layers. Below: the guesses the model would make if it stopped at that depth.
         </>
       }
-      tryit={<>Press <b>send it down</b>. Early on it mostly guesses words that look like “group”; watch where “<Tk s=" of" />” takes over.</>}
+      tryit={<>Press <b>send it down</b>. Notice what the early guesses have in common, and at which layer <Tk s=" of" /> takes over.</>}
     >
       <div className="lr-text" style={{ fontSize: "var(--t-md)", marginBottom: "0.8rem" }}>
         <span className="ctx">…{decodeTokens(toks.slice(Math.max(0, walk.pos - 12), walk.pos))}</span>
@@ -188,29 +187,31 @@ export default function Block() {
   return (
     <>
       <p>
-        We now have the pieces: embeddings (a token becomes 768 numbers), matrix multiplies (transform those numbers), and
-        attention (mix in information from earlier tokens). A <b>transformer block</b> puts them together, and GPT-2 is
-        just twelve blocks in a row: twelve <G k="layer">layers</G>.
+        You now have the pieces: embeddings (a token becomes 768 numbers), matrix multiplies (transform those numbers) and
+        attention (mix in information from earlier tokens). A <b>transformer block</b> puts them together. GPT-2 is 12 of
+        these blocks in a row, called <G k="layer">layers</G>.
       </p>
       <BlockDiagram />
       <p>
-        The key design choice is the <b>add</b>. A block doesn't replace the token's vector, it adds a small edit to it. So
-        the vector is like a shared notebook travelling down the model: each layer reads it, writes a note in the margin,
-        and passes it on. That notebook is called the residual stream.
+        The key design choice is the <b>add</b>. A layer doesn't replace the token's vector; it adds a small edit to it. So
+        the vector is like a shared notebook travelling down the model. Each layer reads it, writes a note in the margin,
+        and passes it on. That notebook is called the residual stream. Each layer has two parts: attention (chapter 5), and
+        a <b>feed-forward network</b> (FFN, also called the MLP). The FFN is two large matrices with a nonlinear function
+        (GELU) between them, and it works on each token alone.
       </p>
-      <Idea>The model is 12 identical-shaped blocks. Each reads the residual stream, computes an edit (attention, then a feed-forward network), and adds it back. At the end, the stream is turned into a score for every token.</Idea>
-      <p>Because each layer only adds, we can peek at the notebook halfway through and ask: what would you guess right now?</p>
+      <Idea>The model is 12 layers of the same shape. Each reads the residual stream, computes an edit (attention, then a feed-forward network), and adds it back. At the end, the stream becomes a score for every token.</Idea>
+      <p>Because each layer only adds, you can read the notebook halfway through and ask what the model would guess at that point.</p>
       <Stream />
       <Deeper title="What turns the stream into a guess?">
         <p>
-          After the last block, the stream is normalised and dot-producted with every row of the embedding table from chapter
-          3: one score (a <b>logit</b>) per token, 50,257 of them. Softmax turns the scores into the probabilities you saw in
-          chapter 1. The logit lens just does that same final step early.
+          After the last layer, the stream is normalised and multiplied with every row of the embedding table from chapter 3.
+          That is the LM head, the output layer that scores every token. It gives one score (a <b>logit</b>) per token, 50,257
+          of them. Softmax turns them into the probabilities you saw in chapter 1. The logit lens does that same final step
+          early.
         </p>
         <p>
-          The engine runs 4 matrix multiplies per block: query, key and value fused into one, then attention's output, then
-          the MLP's up and down. 12 blocks × 4 + the final scoring matrix = the 49 matrix multiplies in chapter 4's
-          breakdown.
+          The engine runs 4 matrix multiplies per layer. Query, key and value are fused into one, then come attention's output
+          and the FFN's up and down. 12 layers × 4 + the LM head = the 49 matrix multiplies in chapter 4's breakdown.
         </p>
       </Deeper>
     </>

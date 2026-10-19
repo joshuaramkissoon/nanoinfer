@@ -55,12 +55,11 @@ function DotToy() {
       prov="toy"
       caption={
         <>
-          Two vectors of just 2 numbers each, drawn as arrows. Their dot product is on the right: multiply matching numbers,
-          add. Same direction gives a big positive number, right angles give zero, opposite directions give a negative.
-          That's all “similar” means for vectors; chapter 3's neighbours were found this way, with 768 numbers instead of 2.
+          Two vectors of 2 numbers each, drawn as arrows. Their dot product is on the right: multiply matching numbers, then
+          add. The neighbours in chapter 3 come from this, with 768 numbers instead of 2.
         </>
       }
-      tryit={<>Drag the arrow heads. Make the dot product exactly zero, then make it as negative as you can.</>}
+      tryit={<>Drag the arrow heads. Make the dot product zero, then as negative as you can. Notice the angle each time.</>}
     >
       <div style={{ display: "flex", flexWrap: "wrap", gap: "1.2rem 2rem", alignItems: "center" }}>
         <svg ref={svg} viewBox={`0 0 ${S} ${S}`} style={{ width: "100%", maxWidth: 260, flex: "1 1 220px" }} onPointerMove={move} onPointerUp={() => setDrag(null)}>
@@ -147,16 +146,16 @@ function MatVec() {
       prov="weights"
       caption={
         <>
-          Top row: a vector, the first 8 of the 768 numbers for “<Tk s=" dog" />”. The grid: the top-left 8 × 8 corner of GPT-2's first
-          weight matrix (colour is sign, the one place ember and blue don't mean compute and memory). The highlighted row is
-          being dot-producted with the vector, one multiply-add at a time; the sum under the grid grows term by term and lands
-          in the output column. All real numbers from GPT-2.
+          Top row: the first 8 of the 768 numbers for <Tk s=" dog" />. The grid: the top-left 8 × 8 corner of GPT-2's first
+          weight matrix, coloured by sign (<Swatch c={posC}>ember</Swatch> positive, <Swatch c={negC}>blue</Swatch>
+          negative). The highlighted row is multiplied with the vector one term at a time, and the sum lands in the output
+          column.
         </>
       }
       tryit={
         <>
-          Watch one row finish, then count: 8 rows × 8 numbers = 64 multiply-adds. The full matrix is 768 × 2304, which is{" "}
-          <b>1.77 million</b> multiply-adds, for one token, in one of the model's 49 matrices.
+          Watch one row finish, then count the multiply-adds in this corner. Notice how that count scales to the full
+          768 × 2304 matrix.
         </>
       }
     >
@@ -280,9 +279,9 @@ function WorkShare() {
       prov="recorded"
       caption={
         <>
-          Every operation the engine ran to produce one real token, grouped by kind, sized by how much arithmetic it did. The
-          strip on top is the same thing as one bar. “matmul” is fig 4.1's matrix-times-vector, 48 of them; “lm head” is the
-          final one that scores all 50,257 tokens.
+          Every operation the engine ran to produce one real token, grouped by kind and sized by its arithmetic. The strip on
+          top shows the same shares as one bar. “matmul” is fig 4.1's matrix-times-vector, 48 of them. “lm head” is the
+          LM head, the final matrix that scores all 50,257 tokens.
         </>
       }
     >
@@ -326,22 +325,22 @@ export default function DotProduct() {
   return (
     <>
       <p>
-        Here is the operation that does nearly all the work in this whole course. Take two lists of numbers of the same
-        length, multiply them pair by pair, and add up the results. That's a <G k="dot product" />:
+        One operation does nearly all of a model's work. Take two lists of numbers of the same length, multiply them pair by
+        pair, and add up the results. That's a <G k="dot product" />:
       </p>
       <code className="lr-math">[1, 2, 3] · [4, 5, 6]  =  1×4 + 2×5 + 3×6  =  32</code>
       <p>
         Now stack many lists into a grid, a <G k="matrix" />, and take the dot product of every row with the same vector.
         You get a new vector, one number per row. That's a <b>matrix-vector multiply</b>. It's how the model transforms a
-        token's 768 numbers into something new: each row of the matrix asks one question of the input, and the answer is a
-        single number. The rows were learned in training; they are the model's <G k="weights" />.
+        token's 768 numbers into something new. Each row of the matrix asks one question of the input, and the answer is a
+        single number. Training learned the rows; they are the model's <G k="weights" />. One 768 × 2304 matrix is{" "}
+        1.77 million multiply-adds for one token, and GPT-2 has 49 matrices.
       </p>
       <MatVec />
       <p>
-        A model is mostly this, with big matrices, many times over. When the engine counted every operation it ran for one
-        real token, matrix-times-vector came to <span className="k">99%</span> of the arithmetic: about 250 million
-        multiplies and adds, roughly two for every weight in the model. Everything else (attention, the bits in between) is
-        the last 1%.
+        A model is mostly this, with big matrices, many times over. The engine counted every operation it ran for one real
+        token. Matrix-times-vector came to <span className="k">99%</span> of the arithmetic, about 250 million multiplies and
+        adds, roughly two for every weight. Everything else (attention and the steps in between) is the last 1%.
       </p>
       <Idea>Running a model is overwhelmingly multiply-and-add: matrices times vectors. Part 2 shows that the cost is reading those matrices, not the arithmetic.</Idea>
       <Deeper title="What does a dot product measure? (drag some arrows)">
@@ -352,13 +351,13 @@ export default function DotProduct() {
       </Deeper>
       <Deeper title="Two operations per weight, once per token">
         <p>
-          Each weight gets used exactly once per token: multiplied by one input number, and the result added to a running
-          total. That's 2 operations (<G k="FLOP">FLOPs</G>) per weight, so a 124M-weight model needs ~250 million FLOPs per
-          token, and a 7-billion-weight model ~14 billion.
+          Each weight is used once per token. It is multiplied by one input number, and the result is added to a running
+          total. That's 2 operations (<G k="FLOP">FLOPs</G>) per weight. So a 124M-weight model needs about 250 million FLOPs
+          per token, and a 7-billion-weight model about 14 billion.
         </p>
         <p>
           “Once per token” is the important part. Each weight is fetched from memory, used for one multiply-add, and not
-          needed again until the next token. Part two shows why that, and not the arithmetic, sets the speed.
+          needed again until the next token. Part 2 shows why that, and not the arithmetic, sets the speed.
         </p>
       </Deeper>
     </>

@@ -15,10 +15,10 @@ export interface Machine {
 }
 
 export const MACHINES: Machine[] = [
-  { key: "m4cpu", name: "M4 CPU (10 cores)", bw: 98, cap: 24, tflops: 0.6, src: "measured", note: "98 GB/s measured with 10 threads (120 GB/s spec); 24 GB shared with the GPU; ~0.6 TFLOP/s f32 estimated from 4 P-cores × 4 FMA pipes × 4 lanes" },
+  { key: "m4cpu", name: "M4 CPU (10 cores)", bw: 98, cap: 24, tflops: 0.6, src: "measured", note: "98 GB/s measured with 10 threads (120 GB/s spec); 24 GB shared with the GPU; ~0.6 TFLOP/s f32 estimated from 4 performance cores × 4 FMA pipes × 4 lanes" },
   { key: "m4gpu", name: "M4 GPU (10 cores)", bw: 105, cap: 24, tflops: 4.3, src: "measured", note: "105 GB/s measured (Metal read probe, quiet machine); same 24 GB pool as the CPU; ~4.3 TFLOP/s f32" },
   { key: "h100", name: "H100 SXM", bw: 3350, cap: 80, tflops: 989, src: "external", note: "NVIDIA H100 SXM datasheet: 80 GB HBM3 at 3.35 TB/s, ~989 TFLOP/s dense bf16 on tensor cores" },
-  { key: "h100x8", name: "8 × H100 (one server)", bw: 8 * 3350, cap: 640, tflops: 8 * 989, src: "external", note: "an HGX/DGX H100 server: eight H100s joined by NVLink; bandwidth and capacity add up only if the model is split perfectly" },
+  { key: "h100x8", name: "8 × H100 (one server)", bw: 8 * 3350, cap: 640, tflops: 8 * 989, src: "external", note: "an HGX/DGX H100 server: eight H100s joined by NVLink; bandwidth and capacity add up only if the model splits perfectly" },
 ];
 
 export interface Model {
@@ -32,7 +32,7 @@ export interface Model {
 export const MODELS: Model[] = [
   { key: "gpt2", name: "GPT-2 small", params: 124e6, blurb: "the model on this site (2019)" },
   { key: "7b", name: "a 7B model", params: 7e9, blurb: "Llama-2-7B / Mistral-7B class: runs on a laptop when quantised" },
-  { key: "70b", name: "a 70B model", params: 70e9, blurb: "Llama-3-70B class: a serious open model" },
+  { key: "70b", name: "a 70B model", params: 70e9, blurb: "Llama-3-70B class: a large open model" },
   { key: "405b", name: "a 405B model", params: 405e9, blurb: "Llama-3.1-405B: frontier-scale open weights" },
 ];
 
@@ -43,10 +43,10 @@ export interface Format {
 }
 
 export const FORMATS: Format[] = [
-  { key: "fp32", name: "fp32", bytes: 4 },
+  { key: "fp32", name: "f32", bytes: 4 },
   { key: "bf16", name: "bf16", bytes: 2 },
-  { key: "int8", name: "int8", bytes: 1 },
-  { key: "int4", name: "int4", bytes: 0.5 },
+  { key: "int8", name: "8-bit", bytes: 1 },
+  { key: "int4", name: "4-bit", bytes: 0.5 },
 ];
 
 export const SOURCES =

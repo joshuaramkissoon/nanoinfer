@@ -66,16 +66,14 @@ function Sampler() {
       prov="recorded"
       caption={
         <>
-          The real probabilities GPT-2 gave at one step of a real run, for the text shown. Bars: the 12 most likely next
-          tokens, and the share left for everything else. <b>Temperature</b> reshapes them: low makes the favourite win more,
-          high flattens everything out. <b>Top-k</b> keeps only the k best and throws the rest away. “Effectively choosing
-          among” is how many equally likely options this spread is worth.
+          GPT-2's probabilities at one step of a real run, for the text shown. Bars: the 12 most likely next tokens, and the
+          share left for everything else. The run used temperature 0.8 and top-k 40. “Effectively choosing among” is how many
+          equally likely options this spread is worth.
         </>
       }
       tryit={
         <>
-          Press <b>draw 20</b> at temperature 0.8. Then set temperature to 2 and draw again: nonsense creeps in. Set top-k to 5
-          and it's gone. (The run that wrote this text used temperature 0.8, top-k 40.)
+          Press <b>draw 20</b> at temperature 0.8, then at 2, then at 2 with top-k 5. Notice when rare tokens appear.
         </>
       }
     >
@@ -158,21 +156,23 @@ export default function Sampling() {
   return (
     <>
       <p>
-        The model's job ends with a list of probabilities. Choosing a word from that list is a separate, tiny step called{" "}
-        <b>sampling</b>, and it's where a lot of a model's "personality" comes from.
+        The model's job ends with a list of probabilities. Choosing a token from that list is a separate, tiny step called{" "}
+        <b>sampling</b>, and it controls how predictable the text is.
       </p>
       <p>
-        The obvious choice, always take the top token (called <b>greedy</b>), sounds safe but writes dull, repetitive text and
-        often gets stuck in loops. Rolling a weighted die is more natural, but now and then lands on something absurd from
-        the long tail. Two knobs steer between the two:
+        The obvious choice is to always take the top token (called <b>greedy</b>). It sounds safe, but it writes dull,
+        repetitive text and often gets stuck in loops. Rolling a weighted die reads more naturally, but now and then picks
+        something absurd from the long tail. Two settings steer between the two. <b>Temperature</b> reshapes the
+        probabilities: low makes the favourite win more often, high flattens them. <b>Top-k</b> keeps only the k most likely
+        tokens and drops the rest.
       </p>
       <Sampler />
       <Idea>Sampling is a cheap step after the expensive one. Temperature reshapes the probabilities; top-k cuts off the long tail; then you roll a die.</Idea>
       <Deeper title="Why this is free, in engine terms">
         <p>
-          Producing the scores took a full forward pass: ~250 million multiply-adds and reading ~500 MB of weights. Sampling
-          from them is a few thousand operations. That's why the lab can re-sample a token with a different temperature
-          instantly: the expensive part is already done, the scores are just kept.
+          Producing the scores took a full forward pass: about 250 million multiply-adds and a read of about 500 MB of
+          weights. Sampling from them is a few thousand operations. So the lab can re-sample a token at a different
+          temperature instantly. The expensive part is done, and the scores are kept.
         </p>
         <p>
           With a temperature of 0 the output is deterministic, which is how the engine is tested: the same prompt must give
