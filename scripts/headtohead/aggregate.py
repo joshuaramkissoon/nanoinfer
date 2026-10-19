@@ -15,7 +15,7 @@ MLX_BYTES = {"f32": fmt_bytes(32, 32), "f16": fmt_bytes(16, 16) - small * 2, "q8
 TORCH_BYTES = {"float32": fmt_bytes(32, 32), "float16": fmt_bytes(16, 16) - small * 2}
 FAMILY = {  # what each config is, for grouping
     "gpt2-f32": "f32", "gpt2-f16": "f16", "gpt2-q8_0": "q8", "gpt2-q4_0-q8head": "q4+q8head", "gpt2-q4_0-default": "q4+q6Khead",
-    "metal-mma": "f32", "metal-pipelined-f16": "f16", "metal-pipelined-q8": "q8", "metal-lanes": "q4+q8head",
+    "metal-mma": "f32", "metal-pipelined-f32": "f32", "metal-pipelined-f16": "f16", "metal-pipelined-q8": "q8", "metal-lanes": "q4+q8head",
     "webgpu-kv16": "q8", "webgpu-vec": "q8",
     "fast-ops": "f32", "f16": "f16", "q8-kv16": "q8", "q4-kv16": "q4+f16head(rescored)", "q8-prefill": "q8",
     "mlx-f32": "f32", "mlx-f16": "f16", "mlx-q8g32": "q8", "mlx-q4g32": "q4 (q4 head)", "mlx-q4g32-q8head": "q4+q8head",
@@ -42,6 +42,9 @@ for f in sorted(glob.glob(os.path.join(h2h, "raw", "round*.jsonl"))) + glob.glob
                 by = 139.5e6
             a = acc.setdefault(key, {"pp": [], "tg": [], "bytes": by, "build": d["git_sha"]})
             a["pp"].append(d["prefill_tok_s"]); a["tg"].append(d["decode_tok_s"]); a.setdefault("load1", []).append(d["load1"])
+            if d.get("decode_stream_tok_s") is not None:  # metal pipelined stages: per-token readback decode
+                a.setdefault("stream", []).append(d["decode_stream_tok_s"])
+            a.setdefault("dirty", []).append(d.get("git_dirty", "-dirty" in d["git_sha"]))
         else:
             eng, lab = d["engine"], d["label"]
             key = (eng, "metal (MLX)" if eng == "mlx" else "mps", f"{'mlx' if eng == 'mlx' else 'torch'}-{lab}", 0)
@@ -58,13 +61,17 @@ for (eng, dev, cfg, thr), a in acc.items():
                  "bytes_per_token_mb": round(a["bytes"] / 1e6, 1), "spec_ceiling_tok_s": round(SPEC / a["bytes"]),
                  "pct_spec_ceiling": round(100 * tg * a["bytes"] / SPEC, 1), "decode_gbs": round(tg * a["bytes"] / 1e9, 1),
                  "version": a.get("build"), **({"head_type": a["head_type"]} if "head_type" in a else {}),
-                 "max_load1": max(a["load1"])})
+                 "max_load1": max(a["load1"]),
+                 **({"decode_stream_tok_s": round(max(a["stream"]), 1)} if a.get("stream") else {}),
+                 **({"git_dirty": any(a["dirty"])} if "dirty" in a else {})})
 rows.sort(key=lambda r: (r["device"].split()[0] != "metal" and r["device"] != "mps", r["family"], r["threads"] or 0, -r["decode_tok_s"]))
 res = {
     "what": "GPT-2 124M head-to-head on one machine: nanoinfer vs llama.cpp vs MLX vs PyTorch MPS",
     "machine": "Apple M4 (base, 4P+6E CPU, 10-core GPU), 24 GB, macOS 26",
     "method": {"prompt_len": 64, "decode_tokens": 64, "decode_context": "64..128", "batch": 1, "greedy": True,
                "reps": "1 warmup + 7 timed per config, median; 3 rounds (whole suite, strictly sequential), best round reported",
+               "order": "each round: GPU jobs then CPU jobs, each block shuffled with a per-round seed (rows carry order + seed); CPU jobs wait for 1-min load <= 2, GPU jobs <= 8",
+               "streaming": "nanoinfer metal pipelined stages also report decode_stream_tok_s: one command buffer per token, committed, waited on and read back before the next (what a chat server sees)",
                "llama_bench": "pp: -p 64 -n 0; tg: -p 0 -n 64 -d 64 (decode after 64 tokens of context); KV f16; -fa auto; -ngl 99 GPU, -ngl 0 -nopo 1 CPU",
                "llama_metal_warm": "llama.cpp Metal tg also re-measured after heating the GPU (warm_check.sh, 15 reps); its decode is the max over rounds and the warm check",
                "bandwidth_ceiling": "120 GB/s spec / bytes per token (weights read per decode step, position table excluded, tied head counted once)"},
