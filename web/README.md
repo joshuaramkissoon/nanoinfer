@@ -175,10 +175,11 @@ The panels only depend on React, `src/engine/*`, `src/ui/*` and `src/lib/*`, plu
   now covers all 22 stages (it had 13). Its timings feed the landing hero's replay speed, chapter 8's loop timeline, and
   in the lab, until the reader goes live: figs 1, 2, 5, 6, 7 and the ladder's dashed browser bars. The WebGPU
   recording (`webgpu.json`, 18 Oct) was made with nothing else benchmarking.
-- **Quantised stages are slow in wasm.** In the new recording q8 decodes at 26 tok/s and q4 at 35, against 111–119 for
-  the f32 rungs (the old recording had q8 38 / q4 91 from an earlier build; not bisected). Off aarch64 the int8 dot
-  these stages decode with is a scalar fallback, so wasm gets no SIMD on it. Anything on the page that says 4-bit is
-  fastest in the browser is out of date until core grows a simd128 int8 dot.
+- **Quantised stages in wasm** (re-recorded 19 Oct, 02:35, after core got a simd128 int8 dot and f16 widening,
+  `docs/LOG.md` "Browser stage 4"): q8-rescore / q4-rescore / -attn decode at ~194 tok/s, kv16 / q8-prefill at ~162,
+  q8 / q4 / -fast at ~97 (capped by their f16 LM head), f16 at 42, against 122–130 for the f32 rungs. Before the fix
+  the same stages were 26–36 tok/s (scalar int8 dot). Same conditions as above (load 2.0, screen-sharing encoder
+  running), roofs 71.6 GB/s / 108 GFLOP/s.
 - Some browsers' storage quota is too small to cache 548 MB (incognito-like profiles cap OPFS at about 64 MB). The page
   still works there; it just downloads again next time.
 - The first bandwidth probe right after loading reads about 40% low, so the page takes the best of two probes. It's still

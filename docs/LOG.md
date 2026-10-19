@@ -1947,6 +1947,57 @@ the walkthrough's residual stream and logits, per-stage Ladder numbers and race 
 `web/public/recorded/`. Op traces are packed as interned op defs + per-forward gaps/durations in 0.1 µs, with shape
 overrides only where an op differs from its decode shape (215 KB → 116 KB for the run).
 
+### Browser stage 4: simd128 int8 dots and f16 widening in core (19 Oct)
+
+**Symptom.** The 19 Oct quiet recording had every quantised rung at 26–36 tok/s decode, a third of the f32 rungs
+(112–119). Off aarch64, core's Q8_0 / Q4_0 block dot (`dot_q8`, `dot_q4`, `dot_hilo`) was a scalar i32 loop, and
+f16 weights (stage 8, and the f16 LM head of q8 / q4 / q8-fast / q4-fast) were widened one at a time by bit-twiddling.
+**Change** (`crates/core/src/kernels/i8dot.rs`, `f16.rs`; aarch64 paths untouched):
+- **Q8_0, simd128:** `i16x8_extmul_{low,high}_i8x16` + `i32x4_extadd_pairwise_i16x8` per 16 bytes, exact for any i8.
+- **Q4_0, relaxed build:** `i32x4_relaxed_dot_i8x16_i7x16_add`. Its second operand must be 0..=127 or the result is
+  implementation-defined, so it gets the raw nibbles (0..=15) and the zero point comes out as a second dot:
+  Σ (n − 8)·x = Σ n·x − Σ 8·x. Exact on every engine, and no unpack-and-subtract. simd128 build: unpack + extmul.
+- **Q8_0 on relaxed: tried, dropped.** Both operands are signed, so one has to be made i7 by moving x's sign onto w
+  (Σ w·x = Σ (±w)·|x|, valid on −127..=127): 4 extra ops per 16 bytes. **9% slower** than extmul (q8-rescore 166.8
+  vs 183.2, q8-kv16 142.5 vs 156.1, two interleaved rounds each), so the relaxed build uses extmul for Q8.
+- Each block's i32 sum is reduced exactly and scaled in the same order as the scalar loop, so `dot_q8` / `dot_q4`
+  are **bit-identical** to the old wasm output (race tokens in the new recording: 22/22 lanes identical).
+- **f16:** zip each half into the top of a 32-bit lane, `i32x4_shr` by 3, mask to `sign | exp | mantissa`, multiply
+  by 2¹¹² (exact for normals and subnormals; wasm keeps f32 subnormals), select-patch inf/NaN. Bit-identical to
+  `f16_to_f32` on all 65,536 halves (test). The f16 dot now runs 4 independent f32x4 chains like the NEON loop,
+  which changes its summation order (close to, not bit-equal with, the old scalar loop; greedy tokens unchanged).
+- **Tests:** in wasm via `wasm32-wasip1` on Node's WASI (scalar, +simd128, +simd128,+relaxed-simd): 20,000 random and
+  saturated (±127/−128, nibbles 0x0/0xf) blocks bit-exact against the scalar sums; `dot_q8` / `dot_q4` bit-exact on
+  random quantised rows; every half widened exactly. Native: core unit + reference tests pass with and without
+  `threads`.
+
+**Result** (Node 25.5 / V8 14.1, relaxed build, Ladder shape, same session; load 1.9–2.6, screen-sharing encoder
+running; before = HEAD's build re-measured best of 3, after = `record.mjs` best of 4):
+
+| stage | before decode | after decode | × | prefill before → after |
+|---|---|---|---|---|
+| f16 | 14.4 | 41.5 | 2.9 | 159 → 204 |
+| q8 / q8-fast (f16 head) | 25.8 | 97.8 / 97.6 | 3.8 | 199 → 207 |
+| q4 / q4-fast (f16 head) | 34.7 | 96.8 / 96.4 | 2.8 | 193 → 200 |
+| q8-rescore / q8-attn | 26.4 | 194.7 / 195.1 | 7.4 | 199 → 214 |
+| q4-rescore / q4-attn | 36.0 | 194.1 / 193.9 | 5.4 | 193 → 203 |
+| q8-kv16 | 25.7 | 162.7 | 6.3 | 181 → 190 |
+| q4-kv16 | 34.8 | 162.1 | 4.7 | 174 → 185 |
+| q8-prefill | 25.7 | 163.7 | 6.4 | 56 → 306 |
+| (f32: unrolled / fast-ops / wasm-fma) | | 121.8 / 129.9 / 122.1 | | wasm-fma 444 |
+
+simd128-only build (no relaxed): Q8 rows the same; q4-rescore 168.9, q4-kv16 143.5 (the relaxed Q4 dot is +13–15%).
+
+- **The quantised rungs are now the fastest decode in the browser**: ~195 tok/s, 1.5× the best f32 rung. That's
+  38% of q8's 71.6 GB/s ÷ 139.5 MB ≈ 513 tok/s ceiling, and q4 (fewer bytes) is no faster than q8: in wasm these
+  stages are bound by instructions per weight, not bytes (native q8 / q4 are bandwidth-bound). The relaxed i7 dot
+  only pays when one side is non-negative, which Q4's nibbles are and Q8's weights aren't.
+- **What's left, measured:** q8 / q4 / -fast are capped at ~97 by their f16 LM head (38.6 M weights at ~3 SIMD ops
+  each); the conversion's inf/NaN select alone is worth +13% there (an experiment without it: q8 109, f16 49), which
+  could be skipped when a matrix is known finite at pack time. The kv16 stages lose 16% against -attn because the f16
+  KV cache's narrow / widen (`stages/kv16.rs`) is still scalar off aarch64.
+- Recording re-made: `web/public/recorded/` (`record.mjs`, roofs 71.6 GB/s / 108 GFLOP/s).
+
 ---
 
 ## Stage 8: f16 weights
@@ -2671,4 +2722,5 @@ The quantised rungs are a **regression in wasm** against the "as they landed" nu
 Decode on stages 9+ is int8 activations × int8 weights, and off aarch64 that dot is the scalar fallback
 (`dot_block_scalar` in `kernels/q4.rs`, likewise `q8.rs`), so wasm pays a scalar multiply-add per weight. The older
 numbers came from an earlier build of those stages; the cause is not bisected. Fix: a simd128 int8 dot
-(`i16x8_extmul` + `i32x4_dot_i16x8`) in the `cfg(not(target_arch = "aarch64"))` paths. Not done here.
+(`i16x8_extmul` + `i32x4_dot_i16x8`) in the `cfg(not(target_arch = "aarch64"))` paths. Done: see "Browser stage 4"
+under "Browser (WASM)" (q8 / q4 rungs 26 / 35 → 98 / 97, rescored stages → ~195 tok/s).

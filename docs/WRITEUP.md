@@ -536,6 +536,8 @@ cross-origin isolation, built with nightly). Measured with the page's Ladder ben
 | q4 (core, scalar dequant) | core | 91–125* | 150–198* | n/a yet |
 | q8 (core, scalar dequant) | core | 36–39* | 168–199* | |
 | f16 (core, scalar convert) | core | 12–14* | 125–158* | |
+| f16 / q8 / q4, simd128 (19 Oct, V8) | core | 41.5 / 97.8 / 96.8 | 204 / 207 / 200 | |
+| **q8-rescore / q4-rescore**, simd128 | core | **194.7 / 194.1** | 214 / 202 | |
 
 V8 numbers from Node on a lightly loaded machine; the threads and quantised rows (*) are Chrome while the native
 hillclimb agents had the machine at load average ~25, so treat them as lower bounds and their ratios as the signal.
@@ -569,6 +571,14 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
   uses NEON `fcvt`), while q4's nibble unpack is cheap integer work on a third of the bytes. Natively all three
   should be ordered by bytes; in a tab the decode cost of the format matters as much as its size. (q4 also changes
   the greedy output: "to read the right, the right, ...". Fewer bytes, worse model.)
+- **Stage 4: the int8 dot gets SIMD, and the quantised rungs overtake f32 (19 Oct).** A quiet re-recording showed
+  the quantised stages at 26–36 tok/s: off aarch64 their int8 block dot was a scalar loop. Core now has a simd128 one
+  (`i16x8_extmul` + pairwise add for Q8; for Q4 relaxed-SIMD's `i32x4_relaxed_dot_i8x16_i7x16_add`, whose second
+  operand must be 0..=127, so it gets the raw nibbles and the −8 zero point becomes a second dot) and a simd128 f16
+  widening (shift, mask, one exact multiply by 2¹¹²). Bit-identical to the scalar code. Decode: q8-rescore 26 →
+  **195 tok/s** (7.4×), q4-rescore 36 → 194, q8 / q4 26 / 35 → 98 / 97, f16 14 → 42; the best f32 rung is 130. The
+  relaxed dot for Q8 (sign moved onto the weights to make x non-negative) was 9% *slower* than extmul and was dropped.
+  q4 is no faster than q8 any more: in a tab these stages are bound by instructions per weight, not by bytes.
 - **f16 download.** The page now fetches a pre-converted f16 safetensors (`web/scripts/to-f16.mjs`): **274 MB instead
   of 548**, widened to f32 inside wasm while it streams (`Bytes::from_f16`), so the heap peak is unchanged (~1.05 GB)
   and every kernel still sees f32. Cost: max |Δlogit| 0.03–0.05 against the f32 checkpoint; greedy output identical
