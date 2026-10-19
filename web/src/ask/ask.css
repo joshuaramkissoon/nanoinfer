@@ -11,7 +11,7 @@
   background: var(--m-fg);
   color: var(--m-bg);
   box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
-  font-size: 0.78rem;
+  font-size: var(--t-sm);
   animation: ask-in 0.16s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 @keyframes ask-in {
@@ -25,7 +25,7 @@
   background: transparent;
   color: inherit;
   padding: 0.38rem 0.6rem;
-  border-radius: 6px;
+  border-radius: var(--r);
   cursor: pointer;
   font: inherit;
   white-space: nowrap;
@@ -133,7 +133,7 @@
   box-shadow: -18px 0 50px rgb(0 0 0 / 0.07);
   transform: translateX(105%);
   transition: transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
-  font-size: 0.86rem;
+  font-size: var(--t-sm);
   color: var(--m-fg);
 }
 .ask-panel.open {
@@ -146,28 +146,28 @@
   padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--m-rule);
   font-weight: 700;
-  font-size: 0.8rem;
+  font-size: var(--t-sm);
 }
 .ask-model {
   font-weight: 400;
   color: var(--m-muted);
-  font-size: 0.7rem;
+  font-size: var(--t-xs);
 }
 .ask-modes {
   display: inline-flex;
   border: 1px solid var(--m-rule);
-  border-radius: 6px;
+  border-radius: var(--r);
   padding: 2px;
 }
 .ask-modes button {
   border: 0;
   background: transparent;
   font: inherit;
-  font-size: 0.7rem;
+  font-size: var(--t-xs);
   font-weight: 400;
   color: var(--m-sub);
   padding: 0.15rem 0.45rem;
-  border-radius: 4px;
+  border-radius: var(--r);
   cursor: pointer;
 }
 .ask-modes button[aria-pressed="true"] {
@@ -178,7 +178,7 @@
 .ask-x {
   border: 0;
   background: none;
-  font-size: 1.3rem;
+  font-size: var(--t-lg);
   line-height: 1;
   color: var(--m-muted);
   cursor: pointer;
@@ -200,12 +200,12 @@
   padding: 0.1rem 0 0.1rem 0.8rem;
   border-left: 2px solid var(--m-accent);
   color: var(--m-sub);
-  font-size: 0.8rem;
+  font-size: var(--t-sm);
   line-height: 1.6;
 }
 .ask-q {
   font-weight: 700;
-  font-size: 0.82rem;
+  font-size: var(--t-sm);
 }
 .ask-a {
   line-height: 1.7;
@@ -226,10 +226,10 @@
 }
 .ask-a pre {
   background: var(--m-code-bg);
-  border-radius: 6px;
+  border-radius: var(--r);
   padding: 0.6rem 0.7rem;
   overflow-x: auto;
-  font-size: 0.78rem;
+  font-size: var(--t-sm);
 }
 .ask-a pre code {
   background: none;
@@ -243,7 +243,7 @@
 }
 .ask-dots {
   color: var(--m-muted);
-  font-size: 0.78rem;
+  font-size: var(--t-sm);
 }
 .ask-dots::after {
   content: "…";
@@ -251,15 +251,15 @@
 }
 .ask-err {
   color: var(--m-up);
-  font-size: 0.8rem;
+  font-size: var(--t-sm);
   margin-top: 0.4rem;
 }
 .ask-err button {
   border: 1px solid var(--m-rule);
   background: none;
-  border-radius: 5px;
+  border-radius: var(--r);
   font: inherit;
-  font-size: 0.74rem;
+  font-size: var(--t-sm);
   color: var(--m-fg);
   cursor: pointer;
   padding: 0.1rem 0.45rem;
@@ -268,20 +268,20 @@
 .ask-empty {
   margin-top: 1rem;
   color: var(--m-sub);
-  font-size: 0.8rem;
+  font-size: var(--t-sm);
   line-height: 1.7;
 }
 .ask-note {
   margin-top: 0.8rem;
   color: var(--m-muted);
-  font-size: 0.72rem;
+  font-size: var(--t-xs);
   line-height: 1.6;
 }
 .ask-ai {
   align-self: center;
   padding: 0 0.35rem 0 0.25rem;
   color: var(--m-muted);
-  font-size: 0.66rem;
+  font-size: var(--t-xs);
   letter-spacing: 0.04em;
 }
 .ask-off code {
@@ -296,11 +296,11 @@
 .ask-follow input {
   width: 100%;
   border: 1px solid var(--m-rule);
-  border-radius: 8px;
+  border-radius: var(--r);
   background: var(--nv-panel);
   color: var(--m-fg);
   font: inherit;
-  font-size: 0.84rem;
+  font-size: var(--t-sm);
   padding: 0.55rem 0.7rem;
   outline: none;
 }
@@ -318,7 +318,7 @@
   border-radius: 999px;
   padding: 0.45rem 0.85rem;
   font: inherit;
-  font-size: 0.76rem;
+  font-size: var(--t-sm);
   cursor: pointer;
   box-shadow: 0 6px 24px rgb(0 0 0 / 0.08);
 }

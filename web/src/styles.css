@@ -1,6 +1,6 @@
-/* nanoinfer live page. Tokens copied from jkmr's .minimal theme (src/index.css)
-   so these components drop straight into a jkmr post. Everything is scoped under
-   .minimal; the nv- prefix keeps class names from colliding with jkmr's. */
+/* The Climb (nanoinfer's site). Tokens started from jkmr's .minimal theme (src/index.css) so these components still
+   drop into a jkmr post. Everything is scoped under .minimal; the nv- prefix keeps class names from colliding.
+   The system is documented in web/DESIGN.md: two faces, seven sizes, one radius, AA-passing text tokens. */
 
 @font-face {
   font-family: "JetBrains Mono";
@@ -18,6 +18,20 @@
   font-family: "JetBrains Mono";
   src: url("/fonts/jetbrains-mono-400-italic.woff2") format("woff2");
   font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+/* Source Serif 4 (SIL OFL 1.1, Adobe), variable weight, latin subset via fontsource: the reading face */
+@font-face {
+  font-family: "Source Serif 4";
+  src: url("/fonts/source-serif-4-normal.woff2") format("woff2-variations"), url("/fonts/source-serif-4-normal.woff2") format("woff2");
+  font-weight: 200 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Source Serif 4";
+  src: url("/fonts/source-serif-4-italic.woff2") format("woff2-variations"), url("/fonts/source-serif-4-italic.woff2") format("woff2");
+  font-weight: 200 900;
   font-style: italic;
   font-display: swap;
 }
@@ -39,12 +53,41 @@ select {
 }
 
 .minimal {
+  /* faces */
+  --f-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --f-serif: "Source Serif 4", "Source Serif Pro", Charter, Georgia, serif;
+  /* the type scale: seven sizes, no others (SVG text uses T.xs / T.sm from kit.tsx: 11 and 12.5) */
+  --t-xs: 0.75rem; /* 12px   axis ticks, provenance, kbd hints, rail numbers */
+  --t-sm: 0.84375rem; /* 13.5px controls, figure labels, stat labels, UI */
+  --t-md: 0.9375rem; /* 15px   captions, folds, definitions, figure titles */
+  --t-base: 1.125rem; /* 18px   prose (serif) */
+  --t-lg: 1.3125rem; /* 21px   h2, the idea, stat numbers */
+  --t-xl: 1.75rem; /* 28px   hero numbers */
+  --t-2xl: 2.5rem; /* 40px   h1 (clamped down on phones) */
+  /* spacing: 4px base */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-7: 3rem;
+  --s-8: 4rem;
+  /* one radius (pills are for tokens only) */
+  --r: 6px;
+  --r-pill: 999px;
+
   --m-bg: #f6f4ef;
   --m-fg: #1f1d1a;
   --m-sub: #57534c;
-  --m-muted: #8b867d;
+  /* 5.2:1 on bg, 4.7:1 on code bg */
+  --m-muted: #6b665e;
+  /* decorative hairlines only; control borders use --m-line-ui */
   --m-rule: #e2ded5;
-  --m-accent: #b8541f;
+  /* control borders, 3.1:1 on bg (WCAG 1.4.11) */
+  --m-line-ui: #8f8a80;
+  /* text accent, 5.5:1 on bg; marks use the chart ember (chartColors().c1, #b8541f) */
+  --m-accent: #a3471a;
   --m-code-bg: #ece8df;
   --m-heat-0: #e9e5dc;
   --m-heat-1: #f1cfae;
@@ -59,19 +102,23 @@ select {
   background-color: var(--m-bg);
   color: var(--m-fg);
   color-scheme: light;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9375rem;
+  font-family: var(--f-mono);
+  font-size: var(--t-md);
   line-height: 1.6;
   overflow-wrap: break-word;
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 .minimal[data-theme="dark"] {
   --m-bg: #1d1c1a;
   --m-fg: #dedad2;
   --m-sub: #aaa59b;
-  --m-muted: #7f7a71;
+  /* 5.4:1 on bg, 4.9:1 on code bg */
+  --m-muted: #96918a;
   --m-rule: #33312d;
+  /* 3.3:1 on bg */
+  --m-line-ui: #726d65;
   --m-accent: #e3915e;
   --m-code-bg: #272522;
   --m-heat-0: #292724;
@@ -95,6 +142,9 @@ select {
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
+.minimal [id="content"]:focus {
+  outline: none;
+}
 .minimal :focus-visible {
   outline: 2px solid var(--m-accent);
   outline-offset: 3px;
@@ -103,9 +153,9 @@ select {
 
 /* ---- page frame ------------------------------------------------------------ */
 .nv {
-  --nv-prose: 44rem;
+  --nv-prose: 34rem;
   --nv-wide: 64rem;
-  padding: 0 1rem 6rem;
+  padding: 0 var(--s-4) 6rem;
 }
 .nv-col {
   max-width: var(--nv-prose);
@@ -119,21 +169,18 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 1.6rem 0 0;
-  font-size: 0.8125rem;
+  gap: var(--s-4);
+  padding: var(--s-5) 0 0;
+  font-size: var(--t-sm);
 }
 .nv-top .nv-brand {
   font-weight: 700;
   letter-spacing: -0.01em;
 }
-.nv-top .nv-brand span {
-  color: var(--m-accent);
-}
 .nv-iconbtn {
   background: none;
   border: 0;
-  color: var(--m-muted);
+  color: var(--m-sub);
   cursor: pointer;
   padding: 0.35rem;
   display: inline-flex;
@@ -141,51 +188,79 @@ select {
 .nv-iconbtn:hover {
   color: var(--m-fg);
 }
+/* the first focusable thing on every page: jump past the header and the rail */
+.nv-skip {
+  position: absolute;
+  left: var(--s-4);
+  top: -4rem;
+  z-index: 60;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r);
+  background: var(--m-fg);
+  font-size: var(--t-sm);
+  text-decoration: none;
+}
+.minimal a.nv-skip {
+  color: var(--m-bg);
+  text-decoration: none;
+}
+.nv-skip:focus {
+  top: var(--s-3);
+}
+.nv-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 .nv-hero {
-  padding: 4.5rem 0 1rem;
+  padding: 4.5rem 0 var(--s-4);
 }
+/* the page kicker: once per page, mono, quiet */
 .nv-kicker {
-  color: var(--m-accent);
-  font-size: 0.8125rem;
-  letter-spacing: 0.02em;
+  color: var(--m-muted);
+  font-size: var(--t-sm);
+  letter-spacing: 0.01em;
 }
 .nv-h1 {
-  font-size: clamp(1.6rem, 4.2vw, 2.35rem);
-  line-height: 1.15;
+  font-size: clamp(1.875rem, 5vw, var(--t-2xl));
+  line-height: 1.1;
   font-weight: 700;
   letter-spacing: -0.035em;
-  margin: 0.8rem 0 1.4rem;
+  margin: var(--s-3) 0 var(--s-5);
   text-wrap: balance;
 }
-.nv-h1 em {
-  font-style: italic;
-  font-weight: 400;
-  color: var(--m-accent);
-}
 .nv-lead {
-  font-size: 1rem;
-  line-height: 1.75;
+  font-family: var(--f-serif);
+  font-size: var(--t-base);
+  line-height: 1.6;
   color: var(--m-sub);
   margin: 0;
 }
 .nv-prose {
-  line-height: 1.8;
+  font-family: var(--f-serif);
+  font-size: var(--t-base);
+  line-height: 1.6;
 }
 .nv-prose p {
-  margin: 1.25em 0 0;
+  margin: 0.9em 0 0;
 }
 .nv-prose h2 {
-  font-size: 1.125rem;
-  margin: 3.2em 0 0;
-  line-height: 1.4;
-  letter-spacing: -0.01em;
+  font-family: var(--f-mono);
+  font-size: var(--t-lg);
+  margin: var(--s-7) 0 0;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
 }
 .nv-prose code {
+  font-family: var(--f-mono);
   background: var(--m-code-bg);
   border-radius: 3px;
   padding: 0.1em 0.35em;
-  font-size: 0.875em;
+  font-size: var(--t-md);
 }
 .nv-sub {
   color: var(--m-sub);
@@ -205,7 +280,7 @@ select {
 .nv-engine {
   margin-top: 2.4rem;
   border: 1px solid var(--m-rule);
-  border-radius: 10px;
+  border-radius: var(--r);
   padding: 1rem 1.1rem;
   background: var(--nv-panel);
   display: grid;
@@ -216,7 +291,7 @@ select {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem 1.1rem;
-  font-size: 0.8125rem;
+  font-size: var(--t-sm);
 }
 .nv-dot {
   width: 0.5rem;
@@ -264,10 +339,10 @@ select {
   border: 1px solid var(--m-fg);
   background: var(--m-fg);
   color: var(--m-bg);
-  border-radius: 6px;
+  border-radius: var(--r);
   padding: 0.5rem 0.9rem;
   min-height: 2.5rem;
-  font-size: 0.8125rem;
+  font-size: var(--t-sm);
   font-weight: 700;
   cursor: pointer;
   transition: transform 0.12s ease, background 0.15s ease, opacity 0.15s;
@@ -286,44 +361,54 @@ select {
 .nv-btn.ghost {
   background: transparent;
   color: var(--m-fg);
-  border-color: var(--m-rule);
+  border-color: var(--m-line-ui);
 }
 .nv-btn.ghost:hover:not(:disabled) {
   background: transparent;
-  border-color: var(--m-accent);
-  color: var(--m-accent);
+  border-color: var(--m-fg);
+  color: var(--m-fg);
 }
-.nv-seg {
+/* Segmented choices are text toggles: the chosen one is fg, bold and underlined (3:1+ against the surface), the rest
+   secondary. No box: frames are for inputs and buttons. Shared by .lr-seg (course) and .nv-seg (lab). */
+.nv-seg,
+.lr-seg {
   display: inline-flex;
-  border: 1px solid var(--m-rule);
-  border-radius: 6px;
-  padding: 2px;
-  gap: 2px;
   flex-wrap: wrap;
+  gap: 0 var(--s-1);
 }
-.nv-seg button {
+.nv-seg button,
+.lr-seg button {
   border: 0;
   background: transparent;
-  padding: 0.3rem 0.65rem;
+  padding: 0.3rem 0.45rem;
   min-height: 2rem;
-  border-radius: 4px;
-  font-size: 0.78rem;
+  border-radius: 0;
+  font-size: var(--t-sm);
   color: var(--m-sub);
   cursor: pointer;
+  box-shadow: inset 0 -1px 0 var(--m-rule);
+  transition: color 0.15s, box-shadow 0.15s;
 }
-.nv-seg button[aria-pressed="true"] {
-  background: var(--m-code-bg);
+.nv-seg button[aria-pressed="true"],
+.lr-seg button[aria-pressed="true"] {
   color: var(--m-fg);
   font-weight: 700;
+  box-shadow: inset 0 -2px 0 var(--m-fg);
 }
-.nv-seg button:hover {
+.nv-seg button:hover,
+.lr-seg button:hover {
   color: var(--m-fg);
+  box-shadow: inset 0 -1px 0 var(--m-line-ui);
+}
+.nv-seg button[aria-pressed="true"]:hover,
+.lr-seg button[aria-pressed="true"]:hover {
+  box-shadow: inset 0 -2px 0 var(--m-fg);
 }
 .nv-field {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.78rem;
+  font-size: var(--t-sm);
   color: var(--m-sub);
 }
 .nv-field input[type="range"] {
@@ -335,9 +420,9 @@ select {
   width: 100%;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--m-rule);
+  border-bottom: 1px solid var(--m-line-ui);
   padding: 0.6rem 0;
-  font-size: 1rem;
+  font-size: var(--t-md);
   outline: none;
 }
 .nv-input:focus {
@@ -350,59 +435,15 @@ select {
   align-items: center;
 }
 
-/* ---- figures ----------------------------------------------------------------- */
-.nv-fig {
-  margin: 3.2rem auto 0;
-  max-width: var(--nv-wide);
-}
-.nv-fig.narrow {
-  max-width: var(--nv-prose);
-}
-.nv-fig-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 1rem;
-  border-top: 1px solid var(--m-fg);
-  padding-top: 0.6rem;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-}
-.nv-fig-title {
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-.nv-fig-title .n {
-  color: var(--m-accent);
-  font-weight: 400;
-  margin-right: 0.6rem;
-}
-.nv-prov {
-  font-size: 0.72rem;
-  color: var(--m-muted);
-}
-.nv-fig-body {
-  position: relative;
-}
-.nv-cap {
-  margin-top: 1rem;
-  font-size: 0.8125rem;
-  line-height: 1.65;
-  color: var(--m-sub);
-  max-width: var(--nv-prose);
-}
-.nv-cap b {
-  color: var(--m-fg);
-}
+/* ---- figures: the lab uses the course template (.lr-fig, src/learn/learn.css) ---------------------------- */
 .nv-empty {
   display: grid;
   place-items: center;
   min-height: 9rem;
   border: 1px dashed var(--m-rule);
-  border-radius: 8px;
+  border-radius: var(--r);
   color: var(--m-muted);
-  font-size: 0.8125rem;
+  font-size: var(--t-sm);
   text-align: center;
   padding: 1.5rem;
 }
@@ -415,10 +456,10 @@ select {
   color: var(--m-fg);
   border: 1px solid var(--m-rule);
   box-shadow: 0 6px 22px rgb(0 0 0 / 0.14);
-  font-size: 0.72rem;
+  font-size: var(--t-xs);
   line-height: 1.5;
   padding: 0.4rem 0.6rem;
-  border-radius: 6px;
+  border-radius: var(--r);
   white-space: nowrap;
   z-index: 5;
   transform: translate(-50%, calc(-100% - 10px));
@@ -433,7 +474,7 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem 1rem;
-  font-size: 0.72rem;
+  font-size: var(--t-xs);
   color: var(--m-sub);
   margin-top: 0.8rem;
 }
@@ -450,25 +491,26 @@ select {
   gap: 0.1rem;
 }
 .nv-stat .k {
-  font-size: 0.7rem;
+  font-size: var(--t-xs);
   color: var(--m-muted);
-  letter-spacing: 0.02em;
 }
 .nv-stat .v {
-  font-size: 1.15rem;
+  font-size: var(--t-lg);
   font-weight: 700;
   letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 .nv-stat .v small {
-  font-size: 0.72rem;
+  font-size: var(--t-xs);
   font-weight: 400;
   color: var(--m-muted);
   margin-left: 0.25rem;
+  letter-spacing: 0;
 }
 .nv-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.9rem 2rem;
+  gap: var(--s-3) var(--s-6);
 }
 svg.nv-svg {
   display: block;
@@ -477,9 +519,9 @@ svg.nv-svg {
   overflow: visible;
 }
 svg.nv-svg text {
-  font-family: inherit;
+  font-family: var(--f-mono);
   fill: var(--m-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 svg.nv-svg .axis line,
 svg.nv-svg .axis path {
@@ -504,7 +546,7 @@ canvas.nv-canvas {
 }
 .nv-stream {
   min-height: 11rem;
-  font-size: 1.02rem;
+  font-size: var(--t-base);
   line-height: 2.05;
   padding: 0.4rem 0 0;
   white-space: pre-wrap;
@@ -562,7 +604,7 @@ canvas.nv-canvas {
   display: grid;
   gap: 0.3rem;
   align-content: start;
-  font-size: 0.78rem;
+  font-size: var(--t-sm);
 }
 .nv-prob {
   display: grid;
@@ -572,7 +614,7 @@ canvas.nv-canvas {
   border: 0;
   background: none;
   padding: 0.18rem 0.25rem;
-  border-radius: 4px;
+  border-radius: var(--r);
   text-align: left;
   cursor: pointer;
   color: var(--m-fg);
@@ -590,21 +632,22 @@ canvas.nv-canvas {
 }
 .nv-prob .b {
   height: 0.7rem;
-  background: var(--m-heat-0);
+  background: transparent;
   border-radius: 2px;
   overflow: hidden;
 }
 .nv-prob .b i {
   display: block;
   height: 100%;
-  background: var(--m-heat-3);
+  /* grey; only the chosen token wears ember (one focal point, same as fig 1.1) */
+  background: color-mix(in srgb, var(--m-sub) 50%, transparent);
   transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .nv-prob.chosen .b i {
   background: var(--m-accent);
 }
 .nv-prob.chosen .tk {
-  color: var(--m-accent);
+  color: var(--m-fg);
   font-weight: 700;
 }
 .nv-prob .pc {
@@ -633,7 +676,7 @@ canvas.nv-canvas {
   align-items: center;
 }
 .nv-heads .lab {
-  font-size: 0.65rem;
+  font-size: var(--t-xs);
   color: var(--m-muted);
   text-align: center;
 }
@@ -663,7 +706,7 @@ canvas.nv-canvas {
   }
 }
 .nv-attn-tokens {
-  font-size: 0.86rem;
+  font-size: var(--t-sm);
   line-height: 1.9;
   white-space: pre-wrap;
 }
@@ -679,7 +722,7 @@ canvas.nv-canvas {
   margin-top: 6rem;
   border-top: 1px solid var(--m-rule);
   padding-top: 1rem;
-  font-size: 0.75rem;
+  font-size: var(--t-xs);
   color: var(--m-muted);
 }
 
@@ -695,27 +738,26 @@ canvas.nv-canvas {
   justify-content: flex-end;
   gap: 0.25rem 0.7rem;
 }
+/* the "run it live" affordance: a small outlined button, the same family as .lr-btn */
 .nv-live-btn {
-  border: 1px solid color-mix(in srgb, var(--m-accent) 55%, var(--m-rule));
-  background: color-mix(in srgb, var(--m-accent) 8%, transparent);
-  color: var(--m-accent);
-  border-radius: 999px;
-  padding: 0.15rem 0.7rem 0.18rem;
-  font-size: 0.7rem;
+  border: 1px solid var(--m-line-ui);
+  background: transparent;
+  color: var(--m-fg);
+  border-radius: var(--r);
+  padding: 0.15rem 0.6rem;
+  min-height: 1.75rem;
+  font-family: var(--f-mono);
+  font-size: var(--t-xs);
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
+  transition: border-color 0.15s, background 0.15s;
 }
 .nv-live-btn:hover:not(:disabled) {
-  background: var(--m-accent);
-  color: var(--m-bg);
-}
-.nv-live-btn:hover:not(:disabled) .nv-muted {
-  color: inherit;
-  opacity: 0.8;
+  border-color: var(--m-fg);
 }
 .nv-live-btn.busy {
   cursor: default;
+  color: var(--m-muted);
   animation: nv-pulse 1.2s ease-in-out infinite;
 }
 
@@ -725,9 +767,9 @@ canvas.nv-canvas {
   gap: 0.35rem;
   align-items: baseline;
   padding: 0.05rem 0.45rem;
-  border-radius: 4px;
+  border-radius: var(--r);
   background: var(--m-code-bg);
-  font-size: 0.75rem;
+  font-size: var(--t-sm);
   white-space: pre;
 }
 .nv-chip.next {
@@ -738,19 +780,19 @@ canvas.nv-canvas {
   align-items: baseline;
   gap: 0.4rem;
   padding: 0.02rem 0.45rem;
-  border-radius: 5px;
+  border-radius: var(--r);
   background: var(--m-code-bg);
   border: 1px solid var(--m-rule);
   white-space: pre;
   font-weight: 700;
 }
 .nv-tokchip.big {
-  font-size: 1.25rem;
+  font-size: var(--t-lg);
   padding: 0.25rem 0.75rem;
   letter-spacing: -0.02em;
 }
 .nv-tokchip small {
-  font-size: 0.65rem;
+  font-size: var(--t-xs);
   font-weight: 400;
   color: var(--m-muted);
   letter-spacing: 0;
@@ -772,10 +814,10 @@ canvas.nv-canvas {
   display: grid;
   gap: 2px;
   min-width: 46rem;
-  font-size: 0.68rem;
+  font-size: var(--t-xs);
 }
 .nv-lens-lab {
-  font-size: 0.65rem;
+  font-size: var(--t-xs);
   color: var(--m-muted);
   align-self: center;
   text-align: right;
@@ -848,7 +890,7 @@ canvas.nv-canvas {
   display: grid;
   grid-template-columns: 2.4rem 1fr;
   align-items: center;
-  font-size: 0.72rem;
+  font-size: var(--t-xs);
 }
 .nv-lens-row .chips {
   display: flex;
@@ -870,7 +912,7 @@ canvas.nv-canvas {
 }
 .nv-walk {
   border: 1px solid var(--m-rule);
-  border-radius: 10px;
+  border-radius: var(--r);
   background: var(--nv-panel);
   padding: 1.1rem 1.2rem 1.2rem;
   display: grid;
@@ -919,10 +961,10 @@ canvas.nv-canvas {
   gap: 0.6rem;
 }
 .nv-walk-counters .nv-stat .v {
-  font-size: 1.05rem;
+  font-size: var(--t-base);
 }
 .nv-walk-op {
-  font-size: 0.74rem;
+  font-size: var(--t-sm);
   color: var(--m-sub);
   min-height: 2.4em;
   border-top: 1px solid var(--m-rule);
@@ -936,7 +978,7 @@ canvas.nv-canvas {
   flex-wrap: wrap;
   gap: 0.3rem;
   align-items: baseline;
-  font-size: 0.72rem;
+  font-size: var(--t-xs);
 }
 .nv-scrolly-steps {
   padding-bottom: 20vh;
@@ -949,18 +991,21 @@ canvas.nv-canvas {
   max-width: 28rem;
   opacity: 0.32;
   transition: opacity 0.35s;
-  font-size: 0.86rem;
+  font-size: var(--t-sm);
   line-height: 1.7;
 }
 .nv-step.on .nv-step-card {
   opacity: 1;
 }
 .nv-step-card h3 {
-  font-size: 0.95rem;
+  font-size: var(--t-md);
   margin: 0.2rem 0 0.6rem;
 }
 .nv-step-card p {
   margin: 0 0 0.8rem;
+  font-family: var(--f-serif);
+  font-size: var(--t-md);
+  line-height: 1.6;
   color: var(--m-sub);
 }
 .nv-step-card p b,
@@ -968,8 +1013,8 @@ canvas.nv-canvas {
   color: var(--m-fg);
 }
 .nv-step-n {
-  font-size: 0.7rem;
-  color: var(--m-accent);
+  font-size: var(--t-xs);
+  color: var(--m-muted);
 }
 @media (max-width: 860px) {
   .nv-scrolly {
@@ -985,7 +1030,7 @@ canvas.nv-canvas {
     box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.5);
   }
   .nv-walk-counters .nv-stat .v {
-    font-size: 0.9rem;
+    font-size: var(--t-md);
   }
   .nv-walk-barcode,
   .nv-walk-lanes .nv-legend {
@@ -994,7 +1039,7 @@ canvas.nv-canvas {
   .nv-step-card {
     background: var(--m-bg);
     border: 1px solid var(--m-rule);
-    border-radius: 8px;
+    border-radius: var(--r);
     padding: 0.9rem 1rem;
     position: relative;
     z-index: 3;
@@ -1006,10 +1051,10 @@ canvas.nv-canvas {
 
 /* ---- stage race ---------------------------------------------------------------------- */
 .nv-race-clock {
-  font-size: 0.78rem;
+  font-size: var(--t-sm);
 }
 .nv-race-clock b {
-  font-size: 1.05rem;
+  font-size: var(--t-base);
   letter-spacing: -0.02em;
 }
 .nv-race {
@@ -1022,7 +1067,7 @@ canvas.nv-canvas {
   grid-template-columns: 6.5rem minmax(0, 1fr) 12.5rem;
   gap: 0.8rem;
   align-items: center;
-  font-size: 0.78rem;
+  font-size: var(--t-sm);
 }
 .nv-race-lane .nm {
   font-weight: 700;
@@ -1031,7 +1076,7 @@ canvas.nv-canvas {
   position: relative;
   height: 1.75rem;
   background: var(--m-code-bg);
-  border-radius: 4px;
+  border-radius: var(--r);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -1106,15 +1151,15 @@ canvas.nv-canvas {
   display: inline-flex;
   align-items: baseline;
   gap: 0.3em;
-  font-size: 0.7rem;
+  font-size: var(--t-xs);
   color: var(--m-muted);
   white-space: nowrap;
 }
 
 /* ---- engine version picker (src/panels/StagePicker.tsx) ----------------------------- */
 .nv-sp {
-  border: 1px solid var(--m-rule);
-  border-radius: 10px;
+  border: 1px solid var(--m-line-ui);
+  border-radius: var(--r);
   background: var(--nv-panel);
 }
 .nv-sp-current {
@@ -1128,7 +1173,7 @@ canvas.nv-canvas {
   padding: 0.7rem 0.9rem;
   text-align: left;
   cursor: pointer;
-  border-radius: 10px;
+  border-radius: var(--r);
 }
 .nv-sp-current:disabled {
   cursor: default;
@@ -1142,26 +1187,24 @@ canvas.nv-canvas {
   box-shadow: inset 0 0 0 1px var(--m-accent);
 }
 .nv-sp-k {
-  font-size: 0.68rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: var(--t-xs);
   color: var(--m-muted);
 }
 .nv-sp-v {
-  font-size: 0.86rem;
+  font-size: var(--t-sm);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .nv-sp-speed {
-  font-size: 0.95rem;
+  font-size: var(--t-md);
   font-weight: 700;
-  color: var(--m-accent);
+  color: var(--m-fg);
   white-space: nowrap;
 }
 .nv-sp-speed small {
-  font-size: 0.68rem;
+  font-size: var(--t-xs);
   font-weight: 400;
   color: var(--m-muted);
 }
@@ -1189,7 +1232,7 @@ canvas.nv-canvas {
 }
 .nv-sp-intro {
   margin: 0.3rem 0.6rem 0.2rem 1.9rem;
-  font-size: 0.72rem;
+  font-size: var(--t-xs);
   line-height: 1.5;
   color: var(--m-sub);
 }
@@ -1201,7 +1244,7 @@ canvas.nv-canvas {
   align-items: end;
   margin: 0 -0.4rem;
   padding: 0.5rem 1rem 0.4rem 2.3rem;
-  font-size: 0.68rem;
+  font-size: var(--t-xs);
   color: var(--m-muted);
   line-height: 1.35;
   background: var(--nv-panel);
@@ -1209,19 +1252,17 @@ canvas.nv-canvas {
 }
 .nv-sp-cols b {
   display: block;
-  font-size: 0.72rem;
+  font-size: var(--t-xs);
   color: var(--m-fg);
 }
 .nv-sp-cols small {
   display: block;
-  font-size: 0.64rem;
+  font-size: var(--t-xs);
   color: var(--m-muted);
 }
 .nv-sp-dead {
   margin-left: 0.5rem;
-  font-size: 0.6rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: var(--t-xs);
   color: var(--m-sub);
   border: 1px dashed var(--m-rule);
   border-radius: 999px;
@@ -1236,14 +1277,14 @@ canvas.nv-canvas {
 .nv-sp-group h4 {
   margin: 0.9rem 0 0.25rem;
   padding: 0 0.6rem 0 1.9rem;
-  font-size: 0.74rem;
+  font-size: var(--t-sm);
   font-weight: 700;
   color: var(--m-fg);
 }
 .nv-sp-group h4 span {
   display: block;
   font-weight: 400;
-  font-size: 0.68rem;
+  font-size: var(--t-xs);
   color: var(--m-muted);
   line-height: 1.5;
   margin-top: 0.1rem;
@@ -1256,9 +1297,9 @@ canvas.nv-canvas {
   background: none;
   text-align: left;
   padding: 0.42rem 0.6rem 0.42rem 1.9rem;
-  border-radius: 7px;
+  border-radius: var(--r);
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: var(--t-sm);
   color: var(--m-fg);
 }
 .nv-sp-opt:hover {
@@ -1288,13 +1329,13 @@ canvas.nv-canvas {
   min-width: 0;
 }
 .nv-sp-name code {
-  font-size: 0.66rem;
+  font-size: var(--t-xs);
   color: var(--m-muted);
   margin-left: 0.5rem;
 }
 .nv-sp-what {
   display: block;
-  font-size: 0.7rem;
+  font-size: var(--t-xs);
   color: var(--m-sub);
   line-height: 1.5;
 }
@@ -1308,17 +1349,15 @@ canvas.nv-canvas {
 }
 .nv-sp-rec {
   margin-left: 0.5rem;
-  font-size: 0.6rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--m-accent);
-  border: 1px solid color-mix(in srgb, var(--m-accent) 45%, transparent);
+  font-size: var(--t-xs);
+  color: var(--m-fg);
+  border: 1px solid var(--m-line-ui);
   border-radius: 999px;
   padding: 0 0.4rem;
   vertical-align: 1px;
 }
 .nv-sp-opt .nv-sp-num {
-  font-size: 0.76rem;
+  font-size: var(--t-sm);
   color: var(--m-sub);
 }
 .nv-sp-opt .nv-sp-num.rec {
@@ -1327,7 +1366,7 @@ canvas.nv-canvas {
 }
 .nv-sp-foot {
   margin: 0.9rem 0.6rem 0.2rem 1.9rem;
-  font-size: 0.68rem;
+  font-size: var(--t-xs);
   line-height: 1.6;
   color: var(--m-muted);
 }
@@ -1361,16 +1400,15 @@ canvas.nv-canvas {
   }
 }
 .nv-stat .v.nv-accent {
-  font-size: 1.55rem;
-  line-height: 1.2;
+  color: var(--m-fg);
 }
 .nv-sp-more {
   margin: 0.15rem 0 0 1.9rem;
   border: 1px solid var(--m-rule);
   background: none;
-  border-radius: 6px;
+  border-radius: var(--r);
   padding: 0.2rem 0.6rem;
-  font-size: 0.7rem;
+  font-size: var(--t-xs);
   color: var(--m-sub);
   cursor: pointer;
 }
@@ -1383,7 +1421,7 @@ canvas.nv-canvas {
   justify-content: space-between;
   align-items: baseline;
   gap: 0.8rem;
-  font-size: 0.72rem;
+  font-size: var(--t-xs);
   margin-bottom: 0.5rem;
 }
 
