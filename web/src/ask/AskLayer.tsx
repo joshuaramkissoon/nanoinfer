@@ -410,7 +410,7 @@ export function AskLayer() {
               <button onClick={() => ask("simplify")} title="Plain-words version of this paragraph">
                 Simplify ¶
               </button>
-              <button className="ask-deeper" onClick={() => ask("deeper")} title="Go down the rabbit hole: a short reading on this">
+              <button className="ask-deeper" onClick={() => ask("deeper")} title="A short reading on this">
                 <span className="spark">✦</span> Deeper
               </button>
               <button className="mic" onPointerDown={micDown} onPointerUp={micUp} onContextMenu={(e) => e.preventDefault()} aria-label="Hold to ask out loud" title="Hold to talk (or hold V)">

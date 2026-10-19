@@ -39,7 +39,7 @@ export default function Roofline() {
   }, [gpu, src, run?.done, busy, status]);
 
   if (!run || !dec.length || !bw || (!gpu && !peak))
-    return <NeedsEngine>Every op of a real forward pass, placed by how much math it does per byte it reads.</NeedsEngine>;
+    return <NeedsEngine>Every operation of a real forward pass, placed by how much arithmetic it does per byte it reads.</NeedsEngine>;
 
   const H = Math.min(420, Math.max(280, w * 0.55));
   const m = { l: 46, r: 14, t: 12, b: 34 };

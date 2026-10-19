@@ -21,9 +21,9 @@ export default function App() {
           The lab: every stage of the engine, running in this tab.
         </h1>
         <p className="nv-lead">
-          This is for after the <a href="/learn">course</a>. Every figure here is drawn from the engine as it runs, with
-          nothing simplified away, and each one links back to the chapter that explains its idea. Load GPT-2 below (once,
-          cached afterwards) to drive them all live; until then they show a recorded run.
+          This is for after the <a href="/learn">course</a>. Each figure is drawn from the engine as it runs, with nothing
+          simplified away, and links back to the chapter that explains its idea. Load GPT-2 below (once; it stays cached) to
+          run them live. Until then they show a recorded run.
         </p>
         <EngineCard />
       </header>

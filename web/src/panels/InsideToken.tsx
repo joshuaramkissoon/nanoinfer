@@ -64,7 +64,7 @@ export default function InsideToken() {
       ) : src === "live" ? (
         <div className="nv-empty">following one token through the network…</div>
       ) : (
-        <NeedsEngine>One token, followed through every op of the network.</NeedsEngine>
+        <NeedsEngine>One token, followed through every operation of the network.</NeedsEngine>
       )}
     </div>
   );
@@ -137,27 +137,27 @@ function Walk({ walk, tokens }: { walk: WalkData; tokens: number[] }) {
       body: (
         <>
           <p>
-            Layer 1 normalises the vector, then one matmul turns it into a query, a key and a value ({qkv0 ? `${qkv0.dims[1]}→${qkv0.dims[2]}` : "768→2304"},{" "}
+            Layer 1 normalises the vector, then one matrix multiply turns it into a query, a key and a value ({qkv0 ? `${qkv0.dims[1]}→${qkv0.dims[2]}` : "768→2304"},{" "}
             {qkv0 ? fmtBytes(qkv0.bytes) : ""} of weights). The key and value go into the KV cache for later tokens.
           </p>
           <p>
-            Then the query is compared with the keys of all {ctx} tokens in the cache across 12 heads, and their values are mixed.
-            That's the only step where tokens talk to each other: {attn0 ? fmtBytes(attn0.bytes) : ""} read in{" "}
+            Then the query is compared with the keys of all {ctx} tokens in the KV cache, in 12 attention heads, and their values are
+            mixed. This is the only step where tokens exchange information: {attn0 ? fmtBytes(attn0.bytes) : ""} read in{" "}
             {attn0 ? fmtMs(attn0.dur) : ""}.
           </p>
         </>
       ),
     },
     {
-      title: "The MLP: think",
+      title: "The feed-forward network",
       from: idx.l0mlp,
       to: idx.l1start,
       vh: 85,
       body: (
         <>
           <p>
-            Then the MLP widens the vector to 3,072 numbers, applies GELU, and squeezes it back to 768. Those two matmuls hold
-            two-thirds of a layer's weights ({fc0 ? fmtBytes(fc0.bytes * 2) : "19 MB"}), so they take most of its time.
+            Then the feed-forward network (FFN) widens the vector to 3,072 numbers, applies GELU and narrows it back to 768. Its two
+            matrix multiplies hold two-thirds of a layer's weights ({fc0 ? fmtBytes(fc0.bytes * 2) : "19 MB"}), so they take most of its time.
           </p>
           <p>
             One whole layer: <b>{fmtMs(layerMs)}</b>, about {fmtBytes(sum(idx.l0start, idx.l1start, (o) => o.bytes))} read.
@@ -173,27 +173,27 @@ function Walk({ walk, tokens }: { walk: WalkData; tokens: number[] }) {
       body: (
         <>
           <p>
-            The same 11 operations repeat in layers 2 to 12, each with its own weights. Watch the barcode: it's the real residual
-            stream after each layer. It grows, and a handful of dimensions get huge. GPT-2 is known for these "massive
-            activations".
+            The same 11 operations repeat in layers 2 to 12, each with its own weights. The barcode is the real residual
+            stream after each layer. It grows, and a handful of dimensions become very large. GPT-2 is known for these “massive
+            activations”.
           </p>
           <p>
             The line under it is the <b>logit lens</b> (fig 3): what the model would say if it stopped at this depth. Early
-            layers guess common words; the real answer usually only firms up in the last few layers.
+            layers guess common tokens, and the final answer usually appears only in the last few layers.
           </p>
         </>
       ),
     },
     {
-      title: "The LM head: score every word",
+      title: "The LM head: score every token",
       from: idx.headStart,
       to: N,
       vh: 90,
       body: (
         <>
           <p>
-            A final LayerNorm, then the biggest single op: compare the vector with <b>all 50,257</b> token embeddings. GPT-2
-            reuses its token table here, so this one matmul reads {lm ? fmtBytes(lm.bytes) : "154 MB"}, about a third of all
+            A final LayerNorm, then the biggest single operation: compare the vector with <b>all 50,257</b> token embeddings. GPT-2
+            reuses its token table here, so this one matrix multiply reads {lm ? fmtBytes(lm.bytes) : "154 MB"}, about a third of all
             the bytes in the step.
           </p>
           <p>
@@ -211,8 +211,8 @@ function Walk({ walk, tokens }: { walk: WalkData; tokens: number[] }) {
         <>
           <p>
             Out come 50,257 scores. A softmax turns them into probabilities. The model chose <TokChip id={chosen} accent />. Try
-            the controls: <b>temperature</b> sharpens or flattens the distribution, and <b>top-k</b> throws away everything
-            except the k best before picking. These are the real logits from this step.
+            the controls. <b>Temperature</b> sharpens or flattens the distribution, and <b>top-k</b> drops all but the k best
+            tokens before picking. These are the real logits from this step.
           </p>
         </>
       ),

@@ -149,7 +149,7 @@ export default function Ladder() {
           <text transform={`translate(11 ${(H - m.b) / 2}) rotate(-90)`} textAnchor="middle">{metric} tok/s (log) →</text>
           {metric === "decode" &&
             [
-              { v: nativeCeil, l: `M4 speed of light (f32) ${sig(nativeCeil, 3)}`, c: pal.fg },
+              { v: nativeCeil, l: `M4 speed limit (f32) ${sig(nativeCeil, 3)}`, c: pal.fg },
               browserCeil && { v: browserCeil, l: `${live ? "this" : "recorded"} tab's ${sig(browserCeil, 3)}`, c: pal.accent },
             ]
               .filter(Boolean)
@@ -182,7 +182,7 @@ export default function Ladder() {
                   transform={small ? `rotate(-28 ${x} ${H - m.b + 16})` : undefined}>{n}</text>
                 {!small && <text x={x} y={H - m.b + 30} textAnchor="middle" style={{ fontSize: T.xs, fill: st?.browserOnly ? pal.accent : undefined }}>{tag}</text>}
                 {nVal > 0 && (
-                  <g onPointerEnter={() => setHover({ x: x - bar * 0.7, y: y(nVal), text: `native ${nr?.backend === "wgpu-metal" ? "(wgpu on Metal) " : ""}${n}: ${sig(nVal, 3)} tok/s ${metric}${metric === "decode" ? ` · ${pct(nVal / nativeCeil, 1)} of ceiling` : ""}${nr?.threads && nr.threads !== 1 ? ` · ${nr.threads} threads` : ""}${nr?.note ? ` · ${nr.note}` : ""}` })}>
+                  <g onPointerEnter={() => setHover({ x: x - bar * 0.7, y: y(nVal), text: `native ${nr?.backend === "wgpu-metal" ? "(wgpu on Metal) " : ""}${n}: ${sig(nVal, 3)} tok/s ${metric}${metric === "decode" ? ` · ${pct(nVal / nativeCeil, 1)} of the speed limit` : ""}${nr?.threads && nr.threads !== 1 ? ` · ${nr.threads} threads` : ""}${nr?.note ? ` · ${nr.note}` : ""}` })}>
                     <rect x={x - bar * 1.2} width={bar} y={y(nVal)} height={H - m.b - y(nVal)} fill={pal.fg} opacity={0.85} />
                     {!tiny && <text x={x - bar * 0.7} y={y(nVal) - 5} textAnchor="middle" style={{ fill: pal.fg, fontSize: T.xs }}>{sig(nVal, small ? 2 : 3)}</text>}
                   </g>
@@ -211,7 +211,7 @@ export default function Ladder() {
                       <line x1={x - step * 0.4} x2={x + step * 0.4} y1={y(c)} y2={y(c)} stroke={pal.fg} strokeDasharray="3 3" opacity={0.6} />
                       {label && (
                         <text x={x - step * 0.4} y={y(c) - 4} textAnchor="start" style={{ fontSize: T.xs }}>
-                          {st.weightFormat} ceiling {key}
+                          {st.weightFormat} limit {key}
                         </text>
                       )}
                     </g>

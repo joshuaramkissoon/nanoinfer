@@ -117,7 +117,7 @@ export function NeedsEngine({ children }: { children?: ReactNode }) {
     <div className="nv-empty">
       <div>
         {children ?? "Live figure."} <br />
-        <a href="#engine">Load the engine</a> to drive it with the real thing.
+        <a href="#engine">Load GPT-2</a> to run this figure live.
       </div>
     </div>
   );

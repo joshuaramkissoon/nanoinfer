@@ -141,7 +141,7 @@ export default function KvRace() {
     ctx.globalAlpha = 1;
   }, [kvLane?.kvLen, w, cfg, pal, target]);
 
-  if (!ready && !shownLanes) return <NeedsEngine>Race two stages on the same prompt and watch one of them drown in recomputation.</NeedsEngine>;
+  if (!ready && !shownLanes) return <NeedsEngine>Two stages on the same prompt: one recomputes the whole text for every token, one uses the KV cache.</NeedsEngine>;
 
   const H = 220;
   const m = { l: 44, r: 12, t: 10, b: 28 };

@@ -78,7 +78,7 @@ export default function TimeStrip() {
   const { rows, totalMs } = useMemo(() => aggregateByName(all), [all]);
   const kinds = useMemo(() => [...new Set(fwds.flatMap((f) => f.ops.map((o) => o.kind)))], [fwds]);
 
-  if (!all.length) return <NeedsEngine>Generate some text in fig 1 and every op of every token appears here.</NeedsEngine>;
+  if (!all.length) return <NeedsEngine>Generate some text in fig 1, and every operation of every token appears here.</NeedsEngine>;
 
   const lm = rows.find((r) => r.kind === "lm_head");
   return (

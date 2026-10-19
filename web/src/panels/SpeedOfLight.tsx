@@ -35,7 +35,7 @@ export default function SpeedOfLight() {
     if (gpuRun && src === "live" && run?.done && !busy && status === "ready") void measureGpuRoof();
   }, [gpuRun, src, run?.done, busy, status]);
 
-  if (!cfg) return <NeedsEngine>The fastest any engine could ever decode on this machine, and how close this one gets.</NeedsEngine>;
+  if (!cfg) return <NeedsEngine>The speed limit for decode on this machine, and how close this engine gets.</NeedsEngine>;
 
   const st = roofs.stage;
   const runFmt = st?.weightFormat ?? "f32";
@@ -112,8 +112,8 @@ export default function SpeedOfLight() {
           );
         })}
         {[
-          ceilBrowser && { v: ceilBrowser, l: `${tab} ceiling`, c: pal.fg },
-          { v: ceilNative, l: "M4 ceiling", c: pal.sub },
+          ceilBrowser && { v: ceilBrowser, l: `${tab} limit`, c: pal.fg },
+          { v: ceilNative, l: "M4 limit", c: pal.sub },
           bestNative > 0 && { v: bestNative, l: "best native", c: pal.cool },
         ]
           .filter(Boolean)

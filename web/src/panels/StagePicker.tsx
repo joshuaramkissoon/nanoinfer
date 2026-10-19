@@ -145,11 +145,11 @@ export function StagePicker({ value, onChange, disabled }: { value: string; onCh
         </span>
       </button>
       {open && (
-        <div className="nv-sp-list" id="nv-sp-list" role="radiogroup" aria-label="engine version">
-          <p className="nv-sp-intro">Each version is a real step of the climb: pick one and press Generate, and that engine writes the text.</p>
+        <div className="nv-sp-list" id="nv-sp-list" role="radiogroup" aria-label="engine stage">
+          <p className="nv-sp-intro">Each stage is a real step of the climb. Pick one and press Generate, and that stage writes the text.</p>
           <div className="nv-sp-cols" aria-hidden>
             <span>
-              <b>engine version</b>
+              <b>engine stage</b>
               <small>speed: tokens per second, higher is faster</small>
             </span>
             <span className="nv-sp-num" title="Native code on the M4 Mac mini, outside any browser (bench/results.jsonl)">
@@ -224,11 +224,11 @@ export function StagePicker({ value, onChange, disabled }: { value: string; onCh
           })}
           <p className="nv-sp-foot">
             Decode speed: tokens written per second for one user, after a 64-token prompt. <b>Mac</b>: native code on the M4 Mac mini
-            (bench/results.jsonl); for the WebGPU versions, the same WebGPU code run natively. <b>this browser</b>: measured when you
+            (bench/results.jsonl), or for WebGPU stages the same WebGPU code run natively. <b>this browser</b>: measured when you
             generate here, or by the benchmark in the ladder below. <i>Grey italic</i> numbers are a recording made on the M4
-            {wr ? ` (WebGPU: ${wr.browser ?? "a browser"}, ${wr.recordedAt.slice(0, 10)})` : ""}, shown until your own replace them. <span className="nv-sp-fb">≈</span> marks
-            versions written for the Mac's CPU: a browser can't run their key trick, so here they run simpler code and their speed says
-            little about the idea.
+            {wr ? ` (WebGPU: ${wr.browser ?? "a browser"}, ${wr.recordedAt.slice(0, 10)})` : ""}, shown until your own replace them.{" "}
+            <span className="nv-sp-fb">≈</span> marks stages written for the M4's CPU. A browser can't run their key trick, so here
+            they run simpler code, and their speed says little about the idea.
           </p>
         </div>
       )}
