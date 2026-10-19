@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { boot, claim, decodeTokens, engine, loadModel, release, useEngine, weightLabel } from "../engine/client";
 import { Seg, bestStage, useLearnData, useRecorded } from "../learn/kit";
-import { climbFactor } from "../learn/Climb";
+import { climbPct } from "../learn/Climb";
 import { CHAPTERS, GUIDE_HREF, chapterHref } from "../learn/chapters";
 import { linkTo } from "../learn/router";
 import { Journey } from "./Journey";
@@ -95,6 +95,7 @@ function Demo() {
   useEffect(() => () => void (stop.current = true), []);
 
   const words = speed ? speed * 0.75 : null;
+  const gpuPct = climbPct(data)?.best;
   const mine = mode === "mine";
   const switchTo = (m: "example" | "mine") => {
     if (m === mode) return;
@@ -155,15 +156,16 @@ function Demo() {
           <div className="ld-speed">
             {speed ? (
               <>
-                <b>{speed.toFixed(0)} tokens a second</b>, about {words!.toFixed(0)} words, on one CPU core in a browser tab with
-                32-bit weights. For every one of those tokens, the computer read all {MB_PER_TOKEN.toFixed(0)} MB of GPT-2's numbers
-                from memory: about {((speed * MB_PER_TOKEN) / 1000).toFixed(0)} GB every second. That is why it isn't faster, and the
-                course explains how to change it.
+                <b>{speed.toFixed(0)} tokens per second</b> (about {words!.toFixed(0)} words) on one CPU core in a browser tab,
+                with 32-bit weights. Each token read all {MB_PER_TOKEN.toFixed(0)} MB of GPT-2's weights from memory, about{" "}
+                {((speed * MB_PER_TOKEN) / 1000).toFixed(0)} GB per second. Memory bandwidth sets this speed, and the course shows how
+                to raise it.
                 {data && (
                   <>
                     {" "}
-                    The engine's first version wrote {data.headline.naive.decode} tokens a second; its fastest, on the M4's GPU with
-                    4-bit weights, writes {Math.round(data.headline.gpu.decode).toLocaleString("en-GB")}.
+                    The engine's first stage, deliberately naive, wrote {data.headline.naive.decode} tokens per second. Its best
+                    single-user stage writes {Math.round(data.headline.gpu.decode).toLocaleString("en-GB")}: 4-bit weights on the M4's
+                    GPU, with each token's work queued ahead{gpuPct ? `, ${gpuPct}% of that machine's speed limit` : ""}.
                   </>
                 )}
               </>
@@ -178,7 +180,7 @@ function Demo() {
       {!mine && (
         <div className="ld-actions">
           <button className="lr-btn" onClick={() => !running && replay()} disabled={running || !rec}>
-            ⟲ replay
+            <span aria-hidden>⟲</span> replay
           </button>
           <span className="nv-muted ld-note">
             the grey prompt was typed by a person; the rest is GPT-2, at the speed it ran
@@ -191,26 +193,26 @@ function Demo() {
 
 export default function Landing() {
   useEffect(() => {
-    document.title = "The Climb · an inference engine, climbing toward the speed limit";
+    document.title = "The Climb · an inference engine, climbing towards the speed limit";
     void boot();
   }, []);
   const first = CHAPTERS[0];
   const part1 = CHAPTERS.find((c) => c.part === 1)!;
-  const factor = climbFactor(useLearnData());
+  const pct = climbPct(useLearnData());
   const ask = useAskAvailable();
   return (
     <main className="nv lr ld" data-askable data-ask-title="The Climb: home">
       <TopBar here="home" />
       <header className="nv-col ld-hero" id="content" tabIndex={-1} data-ask-section>
-        <div className="nv-kicker">an inference engine, climbing toward the speed limit · and a course in how it works</div>
+        <div className="nv-kicker">an inference engine, climbing towards the speed limit, and a course on how it works</div>
         <h1 className="ld-h1">
           What happens when a model writes the next word, <em>and how fast can one computer do it?</em>
         </h1>
         <p className="nv-lead">
-          Below, GPT-2 is writing, run by nanoinfer: a small engine written from scratch in Rust, compiled to run in your
-          browser. The course starts with what inference is and why it's expensive, framed for engineers who know systems
-          but not ML; builds up to why this is slow; then follows the engine as it gets
-          {factor ? ` ${factor}× faster for one user` : " thousands of times faster"}, one measured step at a time.
+          Below, GPT-2 is writing, run by nanoinfer: a small engine written from scratch in Rust and compiled to run in your
+          browser. The course is for engineers who know systems but not ML. Part 0 explains what inference is and why it
+          is expensive. Parts 1 and 2 explain why it is slow. Part 3 follows the engine
+          {pct ? ` from ${pct.first}% to ${pct.best}% of its speed limit` : " towards its speed limit"}, one measured stage at a time.
         </p>
       </header>
       <div className="nv-col">

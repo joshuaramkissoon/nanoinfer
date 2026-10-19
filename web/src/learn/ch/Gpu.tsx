@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
 import { Climb } from "../Climb";
-import { chartColors, Deeper, Fig, G, Idea, useLearnData, type LearnData, T } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Swatch, useLearnData, type LearnData, T } from "../kit";
 
 // One decode token on the M4 GPU, four ways: quiet-machine runs from bench/webgpu.json
 // (the paired Metal rungs) and bench/results.jsonl, via public/learn/data.json.
@@ -25,13 +25,12 @@ function FourWays({ STEPS }: { STEPS: Step[] }) {
       prov="measured"
       caption={
         <>
-          The time to write one token on the M4's GPU, in milliseconds (shorter is better). Ember: the GPU doing work. Grey:
-          the GPU sitting idle, waiting for the CPU (estimated: the number of waits per token × the 130 µs one wait was
-          measured to take). Each row is a later version of the engine's GPU code; the number at the end is its speed in
-          tokens per second. Measured on a quiet machine, prompt 64 then 64 tokens.
+          The time to write one token on the M4's GPU, in milliseconds (shorter is better). Each row is a later GPU stage, with
+          its tokens per second at the end. <Swatch c={cc.c1}>Ember</Swatch> bars: the GPU working.{" "}
+          <Swatch c={pal.muted}>Grey</Swatch> bars: the GPU idle, waiting for the CPU (an estimate: waits per token × 130 µs).
         </>
       }
-      tryit={<>Hover each row for what changed. Notice the second row: identical GPU code, just less waiting, {(STEPS[1].tokS / STEPS[0].tokS).toFixed(1)}× faster.</>}
+      tryit={<>Select each row to see what changed. Notice which colour shrinks between the first two rows, and which between the last two.</>}
     >
       <div ref={ref}>
         {w > 0 && (
@@ -77,6 +76,8 @@ function FourWays({ STEPS }: { STEPS: Step[] }) {
 
 // MB read per decoded token by metal-lanes: Q4_0 blocks + Q8_0 scoring matrix (docs/LOG.md, Metal Q4 table)
 const Q4_MB = 89.3;
+// one-user speed limit: 120 GB/s spec bandwidth ÷ 89.3 MB per token
+const LIMIT = (120 * 1000) / Q4_MB;
 
 export default function Gpu() {
   const d = useLearnData();
@@ -88,54 +89,84 @@ export default function Gpu() {
     <>
       <h2 style={{ marginTop: "2.2rem" }}>The bottleneck</h2>
       <p>
-        A CPU has a handful of strong cores. A <G k="GPU" /> has thousands of simple arithmetic lanes, built to do the
-        same arithmetic on lots of numbers at once. That's exactly what prefill needs. On our Mac it reads the same shared memory
-        as the CPU (about {h ? h.gpuReadGBs : "…"} GB/s in practice), so for decode it should at least keep up. It should win easily.
+        A CPU has a handful of strong cores. A <G k="GPU" /> has thousands of simple arithmetic lanes that do the same
+        arithmetic on many numbers at once, which is what prefill needs. On the M4 Mac mini the GPU reads the same shared
+        memory as the CPU, about {h ? h.gpuReadGBs : "…"} GB/s in practice. So for decode it should at least match the CPU.
       </p>
       <p>
-        The first GPU version wrote <span className="k">{first ? first.toFixed(0) : "…"} tokens per second</span>: no faster
-        than a single CPU core (19).
+        The first GPU stage wrote <span className="k">{first ? first.toFixed(0) : "…"} tokens per second</span>, no faster
+        than one CPU core with a KV cache (19).
       </p>
       <h2>The idea: stop waiting, and think like a GPU</h2>
       <p>
-        Two things were wrong. First, the CPU sent the GPU one operation at a time and waited to hear it was done before
-        sending the next: 135 operations per token, each wait about 130 microseconds. Asking the GPU to do one small job
-        costs less than a microsecond; asking whether it's finished costs 130. Second, the code was shaped for a CPU: some
-        jobs ran on one GPU thread out of thousands, like asking one worker to carry a whole delivery while the rest watch.
+        Two things were wrong. First, the CPU sent the GPU one operation at a time and waited for each to finish before
+        sending the next. That is 135 operations per token, and each wait took about 130 µs. Sending the GPU a small job
+        costs less than a microsecond; hearing that it has finished costs 130. Second, the code was shaped for a CPU. Some
+        jobs ran on one GPU thread while thousands sat idle.
       </p>
       {steps ? <FourWays STEPS={steps} /> : <div className="lr-empty">loading…</div>}
-      <h2>The result</h2>
+      <h2>The result: {best ? Math.round((100 * best.decode) / LIMIT) : "…"}% of the speed limit</h2>
       <p>
-        Decode <span className="k">{best ? Math.round(best.decode).toLocaleString("en-GB") : "…"} tokens per second</span> (4-bit
-        weights), {best && first ? Math.round(best.decode / first) : "…"}× the first GPU version and the fastest single-user
-        number in the project. That's each token in {best ? (1000 / best.decode).toFixed(2) : "…"} ms, reading 89 MB of
-        weights: {best ? Math.round((Q4_MB / 1000) * best.decode) : "…"} GB/s averaged over the whole token,{" "}
-        {best && h ? Math.round(((Q4_MB / 1000) * best.decode * 100) / h.gpuReadGBs) : "…"}% of the {h ? h.gpuReadGBs : "…"} GB/s the GPU
-        can read at all. The biggest matrix, the scoring matrix, reads at the full 106 GB/s. The others manage 66–86 GB/s,
-        and attention adds time without adding many bytes. Prefill, which can keep thousands of GPU
-        threads busy, reads a 64-token prompt at <b>{best ? best.prefill.toLocaleString("en-GB") : "…"} tokens per second</b> using the
-        GPU's built-in matrix-multiply hardware.
+        Decode reached <span className="k">{best ? Math.round(best.decode).toLocaleString("en-GB") : "…"} tokens per second</span>{" "}
+        for one user with 4-bit weights. That is {best && first ? Math.round(best.decode / first) : "…"}× the first GPU stage,
+        and {best ? Math.round((100 * best.decode) / LIMIT) : "…"}% of the {Math.round(LIMIT).toLocaleString("en-GB")} tok/s
+        speed limit for 89 MB per token. Each token takes {best ? (1000 / best.decode).toFixed(2) : "…"} ms, an average of{" "}
+        {best ? Math.round((Q4_MB / 1000) * best.decode) : "…"} GB/s, or{" "}
+        {best && h ? Math.round(((Q4_MB / 1000) * best.decode * 100) / h.gpuReadGBs) : "…"}% of the {h ? h.gpuReadGBs : "…"} GB/s
+        the GPU can read at all.
+      </p>
+      <p>
+        The biggest matrix, the LM head, reads at the full 106 GB/s. The others manage 66 to 86 GB/s, and attention adds
+        time without adding many bytes. This number is pipelined: the CPU queues each token's work before the last one
+        finishes, so it never waits (the second fold below shows what streaming to a user costs). Prefill keeps thousands of
+        GPU threads busy, and reads a 64-token prompt at <b>{best ? best.prefill.toLocaleString("en-GB") : "…"} tokens per
+        second</b> on the GPU's matrix-multiply hardware.
       </p>
       <Climb upto={5} n="16.2" />
-      <Idea>A GPU wins only once the code is shaped for it, and only if the CPU stops making it wait. At this model size the last big gains came from removing waiting, not from faster maths.</Idea>
+      <Idea>A GPU wins only once the code is shaped for it and the CPU stops making it wait. At this model size, the last big gains came from removing waits.</Idea>
       <Deeper title="Fewer kernels didn't help; not waiting did">
         <p>
-          A popular trick is fusing small GPU operations together so there are fewer of them. Halving the count (137 → 64)
-          changed speed by about 5%, inside the noise. Letting the GPU read each next token from its own memory, so the CPU
-          never has to wait between tokens, gave +30%. The expensive thing was never the number of kernels; it was the CPU and
-          GPU taking turns.
+          A popular trick is fusing small GPU operations so there are fewer of them. Halving the count (137 → 64) changed
+          speed by about 5%, inside the noise. Letting the GPU read each next token from its own memory, so the CPU never
+          waits between tokens, gave +30%. The cost was the CPU and GPU taking turns, so removing the waits mattered more
+          than cutting the kernel count.
         </p>
         <p>
           The last step was a better-shaped multiply: 8 GPU threads per row of 4-bit weights instead of 32, so each thread
-          has several loads in flight at once. That took the narrow matrices from 38 to 58 GB/s and decode up 5–8%.
+          has several memory reads in flight. That took the narrow matrices from 38 to 58 GB/s and decode up 5 to 8%.
+        </p>
+      </Deeper>
+      <Deeper title="Pipelined decode isn't what a chat server sees">
+        <p>
+          A chat server has to read each token back to the CPU before it encodes the next pass. It needs the token to stream
+          it, detokenise it and check for a stop. With that per-token synchronisation, which is also how llama.cpp's
+          benchmark runs, each token costs about 0.37 ms more. Keeping one token in flight (sending pass t+1 before reading
+          token t back) hides that cost. Decode tok/s for one user on the M4's GPU:
+        </p>
+        <ul>
+          <li>4-bit: 760 pipelined, 593 with per-token sync, 760 with one token in flight. MLX 694, llama.cpp 622.</li>
+          <li>8-bit: 589 pipelined, 486 with per-token sync, 577 with one token in flight. MLX 534, llama.cpp 502.</li>
+          <li>16-bit: 347 pipelined, 305 with per-token sync, 339 with one token in flight. MLX 342, llama.cpp 333.</li>
+          <li>32-bit: 186 pipelined, 174 with per-token sync, 185 with one token in flight. MLX 178, llama.cpp 192.</li>
+        </ul>
+        <p>
+          So with per-token sync, nanoinfer is slightly behind llama.cpp and MLX at every format. With one token in flight it
+          is ahead of both at 4-bit and 8-bit, level at 16-bit, and a little behind llama.cpp at 32-bit. A server can run that loop:
+          it notices a stop one token late and discards the extra pass. Prefill is a clear loss. llama.cpp reads a prompt
+          about 1.6 to 1.9× faster on this GPU, because it stages its matrix tiles in 16-bit and ours are 32-bit.
+        </p>
+        <p>
+          Our rows come from one session on 19 Oct that ran about 3% slower than the 18 Oct head-to-head, where MLX and
+          llama.cpp were measured (nanoinfer's pipelined 4-bit made 787 there). Every engine read the same bytes per token
+          and had its quality checked against its own 32-bit model.
         </p>
       </Deeper>
       <Deeper title="Measuring on a busy machine">
         <p>
-          The Mac's memory is shared by CPU and GPU, so anything else running eats into the GPU's budget. Our first runs of
-          this chapter's best version, with other benchmarks and a search indexer competing for memory, gave 592 tokens per
-          second and a GPU read speed of about 80 GB/s. Re-measured with nothing else running: {best ? Math.round(best.decode) : "…"} tokens per
-          second and {h ? h.gpuReadGBs : "…"} GB/s. The numbers on this site are the quiet ones; the log keeps both.
+          The M4's memory is shared by the CPU and GPU, so anything else running takes part of the GPU's bandwidth. The first
+          runs of this chapter's best stage competed with other benchmarks and a search indexer. They gave 592 tokens per
+          second and about 80 GB/s. With nothing else running, the same stage made {best ? Math.round(best.decode) : "…"} tokens
+          per second and {h ? h.gpuReadGBs : "…"} GB/s. The numbers on this site are the quiet ones, and the log keeps both.
         </p>
       </Deeper>
     </>

@@ -29,7 +29,7 @@ export const limitOf = (m: Milestone) => (m.mb ? (SPEC_GBS * 1000) / m.mb : null
 // Bytes per token (docs/LOG.md, "every stage back to back" and the Metal Q4 table): f32 494.6 MB; CPU q4-kv16 97 MB
 // (4-bit blocks with an f32 scale, 8-bit scoring matrix); GPU metal-lanes 89.3 MB (Q4_0 blocks, Q8_0 scoring matrix).
 const CPU_STEPS: Milestone[] = [
-  { key: "naive", label: "first version", tokS: 0.37, mb: 494.6, what: "recomputes the whole text for every token · 1 core · 32-bit" },
+  { key: "naive", label: "first stage", tokS: 0.37, mb: 494.6, what: "recomputes the whole text for every token · 1 core · 32-bit" },
   { key: "kv", label: "+ KV cache", tokS: 18.95, mb: 494.6, what: "remembers past tokens' keys and values · 1 core · 32-bit" },
   { key: "arith", label: "+ faster arithmetic", tokS: 100.5, mb: 494.6, what: "16 running totals, SIMD · 1 core · 32-bit" },
   { key: "threads", label: "+ many cores", tokS: 146, mb: 494.6, what: "6 threads that don't sleep, vectorised small ops · 32-bit" },
@@ -49,17 +49,21 @@ export function milestones(d: LearnData | null): Milestone[] {
   return [
     { ...CPU_STEPS[0], tokS: d?.headline.naive.decode ?? CPU_STEPS[0].tokS },
     ...CPU_STEPS.slice(1),
-    { key: "gpu", label: "+ the GPU", tokS: gpu, mb: 89.3, what: "Metal kernels shaped for the GPU, never waiting, 4-bit · M4 GPU · quiet machine" },
+    { key: "gpu", label: "+ the GPU", tokS: gpu, mb: 89.3, what: "Metal kernels shaped for the GPU, tokens pipelined, 4-bit · M4 GPU · quiet machine" },
     { key: "batch", label: "+ batching", tokS: total, what: `${B} users at once: ${Math.round(per)} tok/s each · M4 GPU`, total: true },
   ];
 }
 
-/** "N× faster": best single-user decode over the first version, rounded to two figures. */
-export function climbFactor(d: LearnData | null): string | null {
-  if (!d) return null;
-  const x = d.headline.gpu.decode / d.headline.naive.decode;
-  const p = 10 ** Math.max(0, Math.floor(Math.log10(x)) - 1);
-  return (Math.round(x / p) * p).toLocaleString("en-GB");
+/** The headline metric: % of its own speed limit, first stage → best single-user stage (the GPU milestone). */
+export function climbPct(d: LearnData | null): { first: string; best: string } | null {
+  const ms = milestones(d);
+  const pct = (m: Milestone) => {
+    const lim = limitOf(m);
+    return lim && isFinite(m.tokS) ? (m.tokS / lim) * 100 : null;
+  };
+  const a = pct(ms[0]), b = pct(ms.find((m) => m.key === "gpu")!);
+  if (a == null || b == null) return null;
+  return { first: a < 1 ? a.toFixed(2) : a.toFixed(0), best: b.toFixed(0) };
 }
 
 const fmtTok = (v: number) => (v < 1 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : Math.round(v).toLocaleString("en-GB"));
@@ -93,14 +97,12 @@ export function Climb({ upto, n }: { upto: number; n: string }) {
       alt={`Decode speed after each optimisation, up to ${cur.label.replace(/^\+ /, "")}: ${fmtTok(cur.tokS)} tokens per second.`}
       caption={
         <>
-          How fast the engine writes after each optimisation: tokens per second for one user on our M4 Mac mini, on a log
-          scale (each gridline is 10×). Grey dots are earlier steps, the <Swatch c={cc.c1}>ember</Swatch> dot is this chapter's.
-          The short tick on each row is that step's own speed limit (chapter 10): {SPEC_GBS} GB/s ÷ the bytes it reads per
-          token; the percentage is how much of it the step reached.
-          {upto >= 4 && " Smaller numbers mean fewer bytes, so from chapter 15 on the limit itself moves right."}
-          {upto >= 5 &&
-            " The GPU and batching steps were measured on a quiet machine (64-token prompt, then 64 tokens). An earlier GPU run, with other benchmarks competing for memory, gave about three quarters as much."}
-          {MILESTONES[upto].total && " The batching ring counts every user's tokens together, so a one-user limit doesn't apply to it."}
+          Decode speed after each optimisation, in tokens per second for one user on the M4 Mac mini (log scale). Grey dots:
+          earlier stages. <Swatch c={cc.c1}>Ember</Swatch> dot: this chapter's. The short tick on each row is that stage's own
+          speed limit (chapter 10), {SPEC_GBS} GB/s ÷ its bytes per token, and the percentage is the share it reached.
+          {upto >= 4 && " From chapter 15, fewer bytes per token move the limit right."}
+          {upto >= 5 && " GPU rows are pipelined: each token's work is queued before the last one finishes (chapter 16)."}
+          {MILESTONES[upto].total && " The hollow ring counts all users' tokens together, so no one-user limit applies."}
         </>
       }
     >
@@ -170,7 +172,7 @@ export function Climb({ upto, n }: { upto: number; n: string }) {
         {shown === upto && prev && (
           <>
             {" "}
-            · {(cur.tokS / prev.tokS).toFixed(cur.tokS / prev.tokS < 10 ? 1 : 0)}× the step before
+            · {(cur.tokS / prev.tokS).toFixed(cur.tokS / prev.tokS < 10 ? 1 : 0)}× the stage before
           </>
         )}
       </div>
@@ -221,23 +223,23 @@ export function WorkGrid({ n, mode: fixed }: { n: string; mode?: "naive" | "cach
       prov="toy"
       caption={
         <>
-          Columns are passes through the model, left to right in time; rows are the tokens of the text, the first {P} typed by a
-          person. <Swatch c={cc.c1}>Ember</Swatch>: pushed through all 12 layers in that pass.{" "}
+          Across: passes through the model, in time order. Down: the tokens of the text, the first {P} typed by a person.{" "}
+          <Swatch c={cc.c1}>Ember</Swatch> squares: tokens pushed through all 12 layers in that pass.{" "}
           {cache ? (
             <>
-              <Swatch c={cc.c2}>Blue</Swatch>: read back from the KV cache instead (each token's saved keys and values). The
-              strip underneath is the cache itself: one page per token, growing by one every pass.
+              <Swatch c={cc.c2}>Blue</Swatch> squares: keys and values read back from the KV cache instead. The strip underneath
+              is the KV cache itself, one page per token.
             </>
           ) : (
-            <>Nothing is remembered between passes, so every column is taller than the last.</>
+            <>Nothing is kept between passes.</>
           )}
         </>
       }
       tryit={
         fixed ? (
-          <>Watch the total under the grid: the work grows with the square of the text.</>
+          <>Press play and watch the total under the grid. Notice how each column compares with the one before.</>
         ) : (
-          <>Switch to no cache and compare the totals; switch back and watch the cache grow by one page per pass.</>
+          <>Switch between no cache and KV cache and compare the totals. Notice what the strip underneath does on each pass.</>
         )
       }
     >

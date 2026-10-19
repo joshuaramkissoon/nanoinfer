@@ -5,7 +5,7 @@ import { boot } from "../engine/client";
 import { CHAPTERS, GUIDE_HREF, PARTS, chapterHref, chapterNum, type Chapter } from "./chapters";
 import { checksFor, CheckYourself } from "./Check";
 import FieldGuide from "./FieldGuide";
-import { climbFactor } from "./Climb";
+import { climbPct } from "./Climb";
 import { useLearnData } from "./kit";
 import { Journey } from "../site/Journey";
 import { linkTo, navigate, usePath } from "./router";
@@ -193,17 +193,18 @@ function ChapterPage({ ch, idx }: { ch: Chapter; idx: number }) {
 function Index() {
   const [visited] = useState(readVisited);
   const firstUnseen = CHAPTERS.find((c) => !visited.has(c.slug)) ?? CHAPTERS[0];
-  const factor = climbFactor(useLearnData());
+  const pct = climbPct(useLearnData());
   return (
     <div className="lr-index" id="content" tabIndex={-1} data-askable data-ask-title="The course: contents">
       <header className="nv-col lr-ihero" data-ask-section>
         <div className="nv-kicker">The course · {CHAPTERS.length} short chapters in 4 parts · about 90 minutes</div>
         <h1 className="nv-h1">How a language model runs, from the ground up.</h1>
         <p className="nv-lead">
-          One idea per page, each with a figure you can poke. Part 0 frames the field for people who know systems but not
-          ML: what a model is, why serving one is expensive, the hardware, and the jargon. Then a machine that guesses the next
-          word; then why it's slow, what made our engine {factor ? `${factor}×` : "thousands of times"} faster, and how to work
-          out the speed limit of any model on any computer. No maths beyond multiplying and adding.
+          One idea per page, each with a figure to explore. Part 0 frames the field for people who know systems but not ML:
+          what a model is, why serving one is expensive, the hardware and the jargon. Part 1 builds a machine that guesses the
+          next token. Part 2 shows why it is slow and how to work out the speed limit of any model on any computer. Part 3
+          follows our engine {pct ? `from ${pct.first}% to ${pct.best}% of that limit` : "towards that limit"}. No maths beyond
+          multiplying and adding.
         </p>
         <div className="lr-start">
           <a className="nv-btn" href={chapterHref(firstUnseen)} onClick={linkTo(chapterHref(firstUnseen))}>
@@ -222,12 +223,12 @@ function Index() {
           <span className="k">reference</span>
           <span className="t">The field guide →</span>
           <span className="q">
-            MoE, GQA, bf16, AWQ, FlashAttention, TTFT, goodput, NVLink… every term people throw around, in one plain sentence
-            each, with the constraint it works around.
+            MoE, GQA, bf16, AWQ, FlashAttention, TTFT, goodput, NVLink and the rest, each in one plain sentence, with the
+            limit it works around.
           </span>
         </a>
         <p className="nv-muted lr-foot">
-          Numbers come from nanoinfer's own logs: GPT-2 124M on an Apple M4 Mac mini (CPU and GPU), and the same Rust compiled
+          Numbers come from nanoinfer's own logs: GPT-2 small on an Apple M4 Mac mini (CPU and GPU), and the same Rust compiled
           to WebAssembly in your browser. Toy figures are labelled as toys.
         </p>
       </div>

@@ -1,6 +1,6 @@
 import { CHAPTERS, PARTS, PART_BLURB, chapterHref, chapterNum } from "../learn/chapters";
 import { linkTo } from "../learn/router";
-import { limitOf, milestones } from "../learn/Climb";
+import { climbPct } from "../learn/Climb";
 import { useLearnData } from "../learn/kit";
 
 const VISITED_KEY = "nanoinfer-learn-visited";
@@ -16,14 +16,9 @@ export function readVisited(): Set<string> {
  *  `compact` (the landing) shows each part with its chapter count and leaves the chapter rows to /learn. */
 export function Journey({ showQuestions = false, compact = false }: { showQuestions?: boolean; compact?: boolean }) {
   const visited = readVisited();
-  // the headline metric: % of the speed limit, first version → fastest single-user step
-  const ms = milestones(useLearnData());
-  const pctOf = (i: number) => {
-    const lim = limitOf(ms[i]);
-    return lim && isFinite(ms[i].tokS) ? (ms[i].tokS / lim) * 100 : null;
-  };
-  const first = pctOf(0), best = pctOf(ms.findIndex((m) => m.key === "gpu"));
-  const climb = first != null && best != null ? `${first < 1 ? first.toFixed(1) : first.toFixed(0)}% → ${best.toFixed(0)}% of the speed limit` : null;
+  // the headline metric: % of the speed limit, first stage → best single-user stage
+  const pct = climbPct(useLearnData());
+  const climb = pct ? `${pct.first}% → ${pct.best}% of the speed limit` : null;
   return (
     <ol className="jr">
       {PARTS.map((p, pi) => (
@@ -34,7 +29,7 @@ export function Journey({ showQuestions = false, compact = false }: { showQuesti
           <div className="jr-head">
             <span className="jr-k">
               part {pi}
-              {pi === 0 && <span className="jr-rec"> · start here if ML is new to you</span>}
+              {pi === 0 && <span className="jr-rec"> · start here if you know systems but not ML</span>}
             </span>
             <h3>
               {compact ? (
@@ -81,8 +76,8 @@ export function Journey({ showQuestions = false, compact = false }: { showQuesti
             </a>
           </h3>
           <p>
-            The engine room, for after the course: every stage of the engine runnable in your tab, the real per-operation
-            timings, all 144 attention heads, the roofline, and the full ladder of results.
+            For after the course: every stage of the engine running in your tab, real per-operation timings, all 144 attention
+            heads, the roofline and the full ladder of results.
           </p>
         </div>
       </li>
