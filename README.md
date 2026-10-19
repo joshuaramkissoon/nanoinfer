@@ -6,6 +6,34 @@ It starts at a naive forward pass (0.37 tok/s) and climbs, one stage per idea, t
 stage is still in the code and still runs, so you can compare any two. The journal of how it got there, including the
 dead ends, is [`docs/LOG.md`](docs/LOG.md).
 
+## What's in it
+
+- **One engine, four backends.** A portable core (loader, byte-level BPE tokenizer, kernels) with NEON + threaded CPU
+  stages, a Metal backend, a WebGPU backend (native and in the browser) and a WebAssembly build that runs in a tab.
+- **About 60 stages, each a measured hypothesis.** KV cache, accumulator unrolling, NEON, tiling, a low-latency
+  thread pool, f16 / Q8_0 / Q4_0 weights, a rescored LM head, an f16 KV cache, GPU kernels shaped for SIMD-groups,
+  flash-decoding, batched and paged decode, continuous batching and speculative decoding.
+- **Correctness first.** Every stage on every backend is tested against Hugging Face reference logits; lossy stages
+  are gated on WikiText-2 perplexity, KL and top-1 agreement against f32.
+- **Measured against the hardware.** Each result is reported as a share of its speed limit (memory bandwidth ÷ bytes
+  read per token), and against llama.cpp and MLX in a randomised head-to-head on the same machine.
+- **A course built on it.** [`web/`](web/) is an interactive course and lab that run the real engine in the browser,
+  so every figure shows live numbers rather than mock-ups.
+
+## The climb
+
+Decode, GPT-2 124M, batch 1, one Apple M4. "% of limit" divides by memory bandwidth ÷ bytes read per token for that
+stage's number format.
+
+| Stage | What changed | Decode tok/s | % of limit |
+|---|---|---|---|
+| naive | f32, recompute the whole sequence per token | 0.37 | 0.15% |
+| kv-cache | cache keys and values | 19 | 8% |
+| unrolled | 16 independent accumulators (now memory-bound) | 101 | 41% |
+| fast-ops | threads + low-latency pool, vectorised ops | 146 | 60% |
+| q4-kv16 | 4-bit weights, f16 LM head and KV cache (CPU) | 497 | 40% |
+| metal-lanes | 4-bit on the GPU, one command buffer per token | 792 | 59% |
+
 ## Results
 
 GPT-2 124M on one Apple M4 (base: 4P + 6E cores, 10-core GPU, 24 GB). Same job for every engine: read a 64-token
@@ -59,7 +87,7 @@ Where we stand:
   the low-latency thread pool). At 10 threads the order flips (llama.cpp drops with the E-cores).
 - WebGPU (the same WGSL through `wgpu`) reaches 571 tok/s at Q8 natively and 558 in Chrome on the same machine,
   about 93% of the matching hand-written Metal stage. In the browser's CPU fallback (wasm, one thread) the quantised
-  stages now decode at ~195 tok/s with simd128 int8 dots, 1.5× the best f32 rung
+  stages now decode at ~195 tok/s with simd128 int8 dots, 1.5× the best f32 stage
   ([`docs/LOG.md`](docs/LOG.md#browser-stage-4-simd128-int8-dots-and-f16-widening-in-core-19-oct)).
 
 All of this is GPT-2 small, where per-token fixed costs dominate, and that favours this design. On a 7B model every

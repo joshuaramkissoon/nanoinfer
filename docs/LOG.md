@@ -1596,7 +1596,7 @@ reference kernel on a 7 × 13 × 10 problem with all three ragged edges (exact m
 on integer data).
 
 **Numbers** (prompt 64, 64 decode, 7 runs; neon in the same session: prefill
-183 ± 24, decode 100.2 ± 3.0). The machine was busy (other agents' builds and GPU
+183 ± 24, decode 100.2 ± 3.0). The machine was busy (other builds and GPU
 benches plus Backdrop), so stddevs are large and medians are what to read:
 
 | | prefill tok/s | prefill GFLOP/s | decode tok/s |
@@ -1648,7 +1648,7 @@ interactive|utility|background`. macOS has no core pinning, but a thread's QoS
 class steers it: `background` threads stay on E-cores.
 
 **Numbers** (prompt 64, 64 decode, 7 runs; P-cores preferred; Backdrop.app using
-~2 cores throughout, and other agents compiling and benchmarking at times):
+~2 cores throughout, and other builds and benchmarks running at times):
 
 | threads | prefill tok/s | prefill GFLOP/s | decode tok/s | decode GB/s |
 |---|---|---|---|---|
@@ -1836,7 +1836,7 @@ and decode at long context more (attention grows with context).
 | **fast-ops** | **1392 / 1500** | **119.2 / 119.9** | **1203 / 1369** | **102.6 / 119.0** |
 
 Recorded single runs were very noisy (P=64 prefill 1126 ± 323 and 1327 ± 301,
-decode 105 ± 8 and 95 ± 18) while other agents were benchmarking. The
+decode 105 ± 8 and 95 ± 18) while other benchmarks were running. The
 interleaved pairs above are the trustworthy comparison. 4 threads: prefill
 1010, decode 111.9.
 
@@ -2380,7 +2380,7 @@ reference, not to each other.
 **Measurement caveat.** During this stage the machine's memory bandwidth
 collapsed: `membw` read **26 / 42 / 44 / 59 GB/s** at 1 / 4 / 6 / 10 threads
 (median), against 57 / 91 / 96 / 98 earlier, with normal CPU load. Something on
-the GPU side (other agents' Metal/WebGPU benches and a Chrome renderer at 98%)
+the GPU side (other Metal/WebGPU benches and a Chrome renderer at 98%)
 was saturating memory. The A/B ratios above are valid; absolute numbers from
 this period (recorded: q8-kv16 271 / 240 / 206 tok/s at prompts 64 / 512 / 900,
 q4-kv16 278) are depressed ~2× and don't compare with earlier stages.
@@ -2726,7 +2726,7 @@ real `bytes()` for every stage, so this can't drift silently again.
 
 ## Metal f32 on the pipelined path, and what streaming costs (19 Oct)
 
-Two things from the engine review (`docs/review/04-engine.md` §2.5 item 8, §3.2e).
+Two things from an engine code review.
 
 **Conditions.** Clean engine tree (records `2e20ebc`/`de3b77a`, `git_dirty: false`), load 1.4–2.9, AC power, a
 video encoder (screen sharing) running in the background. metal-lanes ran at 755–760 tok/s pipelined, against 787

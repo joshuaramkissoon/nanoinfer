@@ -1,6 +1,6 @@
 # Decisions
 
-The ten decisions from [`IMPROVEMENT_PLAN.md`](IMPROVEMENT_PLAN.md) §2, settled on 19 Oct 2026. Each line is the
+Project decisions, settled on 19 Oct 2026. Each line is the
 chosen option and why. Change a decision by adding a dated line under it, not by editing the old one.
 
 | # | Decision | Chosen | Why |

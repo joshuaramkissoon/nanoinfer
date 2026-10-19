@@ -1,7 +1,7 @@
 # The Climb: copy style
 
 How the words on the site are written. `DESIGN.md` covers how they look. Rules are numbered so a review can cite
-them ("R5"). The source audit is `docs/review/02-copy.md`; `node scripts/copystats.mjs --long` checks the numeric
+them ("R5"). `node scripts/copystats.mjs --long` checks the numeric
 limits.
 
 ## Who you write for

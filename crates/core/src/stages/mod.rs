@@ -182,7 +182,7 @@ impl Stage {
     /// packed weights and KV cache. Everything else ([`Self::weight_format`],
     /// [`Self::head_format`], [`Self::decode_bytes`]) is derived from it.
     ///
-    /// TODO(docs/IMPROVEMENT_PLAN.md 0.23, review 04 §1.2): the forward
+    /// TODO: the forward
     /// dispatch in [`Session::step`] is still its own `match`; collapse it onto
     /// this table too.
     pub const fn spec(self) -> StageSpec {

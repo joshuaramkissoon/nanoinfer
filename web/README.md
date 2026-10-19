@@ -157,7 +157,7 @@ The panels only depend on React, `src/engine/*`, `src/ui/*` and `src/lib/*`, plu
   loads from the cache automatically (it never auto-downloads).
 - **Later (production):** pre-transposed f16 or Q8_0 shards of 16–32 MB with a `manifest.json` (sha256, offsets), hosted
   on the HF Hub. Use whole-shard GETs, because Range requests fail CORS on the Xet hop. That needs a core loader for
-  packed shards (see `NEEDS_FROM_CORE.md`). Never ship f32 over the wire.
+  packed shards. Never ship f32 over the wire.
 
 ## Known issues
 
