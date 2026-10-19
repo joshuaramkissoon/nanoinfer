@@ -32,12 +32,12 @@ function Pantry() {
       prov="measured"
       caption={
         <>
-          How fast the M4's CPU can read memory with 1 to 10 cores working at once, measured by the engine. The dashed line is
-          Apple's 120 GB/s spec. Each extra core adds less: by 6 cores the memory system is saturated at ~98 GB/s, and the last
-          4 cores (the M4's slower “efficiency” cores) add nothing.
+          The M4 Mac mini's CPU memory bandwidth with 1 to 10 cores reading at once, measured by the engine. Across: cores
+          working. Up: GB/s. The dashed line is Apple's 120 GB/s spec. The last 4 cores are the M4's slower efficiency
+          cores.
         </>
       }
-      tryit={<>Click the bars. Read the speed limit each thread count allows, and notice where it stops growing.</>}
+      tryit={<>Select each bar. Read the speed limit each core count allows, and notice where it stops growing.</>}
     >
       <div ref={ref}>
         {w > 0 && (
@@ -90,42 +90,41 @@ function Pantry() {
 export default function Threads() {
   return (
     <>
-      <h2 style={{ marginTop: "2.2rem" }}>The bottleneck</h2>
+      <h2 style={{ marginTop: "2.2rem" }}>The bottleneck: one core's bandwidth</h2>
       <p>
-        At 100 tokens per second, one core reads memory as fast as one core can: about 57 GB/s. The M4 has ten cores, and the
-        memory is rated at 120 GB/s. The obvious move: split every matrix into slices and give each core a slice, each running
-        its own <G k="thread" />.
+        At 100 tokens per second, one core reads memory as fast as one core can, about 57 GB/s. The M4 has 10 cores, and
+        the memory is rated at 120 GB/s. The obvious move is to split every matrix into slices and give each core a slice,
+        each running its own <G k="thread" />.
       </p>
-      <h2>The idea, and the catch</h2>
+      <h2>The idea, and the catch: one memory bus</h2>
       <p>
-        Ten cooks in a kitchen can chop ten times as fast. But if they all fetch ingredients through one narrow pantry door,
-        the door sets the pace. Memory is that door:
+        Ten cores can do 10 times the arithmetic, but they share one memory bus. In chapter 9's terms, that is one truck and
+        10 factories:
       </p>
       <Pantry />
       <p>
-        So threads can at best take decode from one core's 57 GB/s to the whole chip's 98: <b>1.7×</b>, not 10×. And there was a
-        second catch. A token has 49 matrix multiplies, each only about a fifth of a millisecond, and waking a sleeping thread
-        to help costs tens of microseconds. Hand ten threads a tiny job and they spend much of it getting started. The fix was
-        a thread pool whose workers never fully go to sleep, so they see new work in about a tenth of a microsecond, plus
-        threading the small operations in between the matrices too.
+        So threads can at best take decode from one core's 57 GB/s to the whole chip's 98 GB/s: <b>1.7×</b>, not 10×. There
+        was a second catch. A token has 49 matrix multiplies, each only about a fifth of a millisecond. Waking a sleeping
+        thread to help costs tens of microseconds, so 10 threads given a tiny job spend much of it getting started. The fix
+        was a thread pool whose workers never fully sleep, so they see new work in about a tenth of a microsecond. The
+        small operations between the matrices were threaded too.
       </p>
-      <h2>The result</h2>
+      <h2>The result: 146 tokens per second</h2>
       <p>
-        Decode <span className="k">100 → 146 tokens per second</span> (6 threads), 60% of the speed limit. The big win was
-        prefill, which is compute-bound, so more cores really is more speed: <b>185 → 1,456 tokens per second</b>, and later
-        2,415 with 8-bit integer arithmetic on all ten cores.
+        Decode went from <span className="k">100 to 146 tokens per second</span> (6 threads), 60% of the speed limit. The big
+        win was prefill, which is compute-bound, so more cores give more speed. Prefill went from <b>185 to 1,456 tokens per
+        second</b>, and later to 2,415 with 8-bit integer arithmetic on all 10 cores.
       </p>
       <Climb upto={3} n="14.2" />
       <Idea>Cores share one memory system. More threads help a memory-bound job only until memory is saturated (here 1.7×), and only if handing out the work costs less than doing it.</Idea>
       <Deeper title="The thread pool that made things slower">
         <p>
-          The first never-sleeping pool spun its threads flat out, and on a busy laptop went from 93 to <b>36</b> tokens per
-          second with ten threads: spinning threads stole the CPU from the one thread still finishing the last slice, and
-          everyone waited for it. Spin, then yield, then sleep fixed it. A spin pool assumes you own the machine, and a laptop
-          never does.
+          The first never-sleeping pool spun its threads at full speed. On a busy laptop, decode fell from 93 to <b>36</b>{" "}
+          tokens per second with 10 threads. The spinning threads took CPU time from the one thread that was still finishing,
+          and every thread waited for it. A pool that spins, then yields, then sleeps fixed it.
         </p>
         <p>
-          The best thread count for decode turned out to be 4 to 6, not 10: every step waits for the slowest thread, and the
+          The best thread count for decode turned out to be 4 to 6. Every step waits for the slowest thread, and the
           efficiency cores add stragglers without adding bandwidth.
         </p>
       </Deeper>

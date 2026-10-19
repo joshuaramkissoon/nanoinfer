@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useEngine } from "../../engine/client";
 import { usePalette } from "../../ui/theme";
-import { chartColors, Deeper, Fig, G, Idea, Seg, useLearnData, type LearnData } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, Swatch, useLearnData, type LearnData } from "../kit";
 
 type Fmt = 32 | 16 | 8 | 4;
 const BYTES_PER_WEIGHT: Record<Fmt, number> = { 32: 4, 16: 2, 8: 1.0625, 4: 0.5625 }; // 8/4-bit: blocks of 32 + a 16-bit scale
@@ -15,8 +15,8 @@ const MODELS = [
 const MACHINES = [
   { v: "m4", label: "M4 Mac mini (spec)", bw: 120, mem: 24e9, note: "Apple's spec figure for the base M4" },
   { v: "core", label: "one M4 core", bw: 57, mem: 24e9, note: "measured: what one CPU core can stream" },
-  { v: "gpu", label: "M4 GPU", bw: 105, mem: 24e9, note: "measured: the GPU's practical read speed, on a quiet machine" },
-  { v: "h100", label: "datacentre GPU", bw: 3350, mem: 80e9, note: "NVIDIA H100's spec (HBM3), 80 GB" },
+  { v: "gpu", label: "M4 GPU", bw: 105, mem: 24e9, note: "measured: the GPU's practical bandwidth, on a quiet machine" },
+  { v: "h100", label: "H100 (datacentre GPU)", bw: 3350, mem: 80e9, note: "NVIDIA H100's spec (HBM3), 80 GB" },
 ] as const;
 
 // Our best measured decode for GPT-2 on the M4 (docs/LOG.md), by machine and format.
@@ -60,15 +60,15 @@ function Calculator() {
       prov="measured"
       caption={
         <>
-          Pick a model, a number format and a machine. The big number is the fastest that machine could possibly write
-          tokens for one user: memory speed divided by the bytes of weights read per token. The bar below compares it with
-          the best our engine actually measured, where we have a measurement (GPT-2 on the M4).
+          The big number is the speed limit for one user: memory bandwidth ÷ the bytes of weights read per token. Below it,
+          the <Swatch c={pal.muted}>grey bar</Swatch> is that limit and the <Swatch c={cc.c1}>ember bar</Swatch> is the best
+          the engine measured, where a measurement exists (GPT-2 small on the M4).
         </>
       }
       tryit={
         <>
-          Start at GPT-2, 32-bit, M4: 243. Switch to 4-bit: the limit goes up about 7× (chapter 15 is about this). Then pick a 70B
-          model on the Mac: it doesn't even fit.
+          Start at GPT-2 small, 32-bit, M4. Switch the number format, then pick a 70B model. Notice which choice changes
+          the speed and which decides whether it runs at all.
           {tabBw ? ` (Your tab measured ${tabBw.toFixed(0)} GB/s.)` : ""}
         </>
       }
@@ -143,34 +143,35 @@ export default function SpeedOfLight() {
   return (
     <>
       <p>
-        If decode is waiting on memory, we can work out how fast it could ever go, before writing a line of code. To write
-        one token, the computer has to read every weight once. (If you read chapter 0.2, you've seen this division; here it
-        becomes the yardstick for every step of the engine.) So:
+        If decode waits on memory, you can work out how fast it could ever go before writing any code. To write one token,
+        the computer reads every weight once. Chapter 0.2 introduced this division. Here it becomes the speed limit that
+        every stage is measured against:
       </p>
-      <code className="lr-math">{"fastest possible tokens per second  =  memory speed  ÷  bytes of weights"}</code>
+      <code className="lr-math">{"speed limit (tokens per second)  =  memory bandwidth  ÷  bytes of weights"}</code>
       <p>
-        For GPT-2 small: 124 million weights at 4 bytes each is 495 MB per token. Our Mac mini's memory is rated at 120 GB/s
+        For GPT-2 small, 124 million weights at 4 bytes each is 495 MB per token. The M4 Mac mini's memory is rated at 120 GB/s
         (<G k="GB" />
         /s). 120 GB/s ÷ 495 MB = <span className="k">243 tokens per second</span>. No engine, however clever, can write
         faster than that on this machine, for one user, with 32-bit weights.
       </p>
       <Calculator />
       <p>
-        That one division explains a lot about the AI industry. It's why people pay for chips with faster memory, why models
-        are shrunk to fewer bits, and why a 70-billion-weight model writes slower than a small one on the same machine: it's
-        just more bytes to read per token.
+        This division explains three industry habits. Chips with faster memory cost more. Models are quantised to fewer
+        bits. And a 70B model writes more slowly than a small one on the same machine, because it reads more bytes per
+        token.
       </p>
-      <Idea>Speed limit = memory bandwidth ÷ bytes per token. It's a ceiling you can compute on the back of an envelope, and every optimisation in part three is measured against it.</Idea>
+      <Idea>Speed limit = memory bandwidth ÷ bytes per token. You can compute it on the back of an envelope, and part 3 measures every optimisation against it.</Idea>
       <Deeper title="Why can't we ever quite reach it?">
         <p>
-          The spec figure is a best case; real programs get 70–90% of it. Our CPU cores together can stream about 98 GB/s
-          (82% of spec), the GPU about 105 (88%) when nothing else is running, and much less when something is. On top of that, each token has fixed costs that don't shrink with the bytes:
-          starting threads, waiting for the GPU, the small operations between the big ones. The faster the model gets, the
-          bigger those fixed costs loom.
+          The spec figure is a best case, and real programs get 70% to 90% of it. The M4's CPU cores together stream about
+          98 GB/s (82% of spec). The GPU reads about 105 GB/s (88%) when nothing else is running, and much less when
+          something is. Each token also has fixed costs that don't shrink with the bytes: starting threads, waiting for the
+          GPU, and the small operations between the big ones. The faster the model gets, the larger their share.
         </p>
         <p>
-          The limit also moves. Store each weight in 4 bits instead of 32, and there are about 7× fewer bytes to read (8×, less the scale each block of 32 carries). Serve 64
-          users at once and each weight read does 64 users' work. Part three does both.
+          The limit also moves. Store each weight in 4 bits instead of 32, and there are about 7× fewer bytes to read (8×,
+          less the scale each block of 32 weights carries). Serve 64 users at once, and each weight read does 64 users'
+          work. Part 3 does both.
         </p>
       </Deeper>
     </>

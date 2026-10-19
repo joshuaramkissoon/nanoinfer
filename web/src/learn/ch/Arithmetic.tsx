@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
 import { Climb } from "../Climb";
-import { chartColors, Deeper, Fig, G, Idea, Seg, useFrame, useOnScreen, PlayPause, usePlaying } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, Swatch, useFrame, useOnScreen, PlayPause, usePlaying } from "../kit";
 
 const LAT = 4; // ticks an add takes before its result can be used
 const MEM = 3; // numbers memory delivers per tick (so 16 lanes become memory-bound)
@@ -57,13 +57,12 @@ function Lanes() {
       prov="toy"
       caption={
         <>
-          Each row is a running total (an “accumulator”). Adding a number to a total takes {LAT} ticks before the total can
-          take the next one, so one total can only finish an add every {LAT} ticks, however fast the numbers arrive. With
-          several totals, several adds are in flight at once (each bar is an add in progress). Memory here delivers {MEM}{" "}
-          numbers per tick. The meter compares adds finished per tick with what memory delivers.
+          Each row is a running total (an “accumulator”), and each <Swatch c={cc.c1}>ember bar</Swatch> is an add in
+          progress. An add takes {LAT} ticks before its total can take the next number. Memory delivers {MEM} numbers per
+          tick. The meters compare adds finished per tick with what memory delivers.
         </>
       }
-      tryit={<>Go from 1 to 4 to 16 running totals. At 16 the totals are no longer the problem: memory is.</>}
+      tryit={<>Switch from 1 to 4 to 16 running totals. Notice which meter is full at each setting.</>}
     >
       <div className="lr-controls">
         <Seg
@@ -123,48 +122,47 @@ function Lanes() {
 export default function Arithmetic() {
   return (
     <>
-      <h2 style={{ marginTop: "2.2rem" }}>The bottleneck</h2>
+      <h2 style={{ marginTop: "2.2rem" }}>The bottleneck: one running total</h2>
       <p>
-        With the cache, decode should be waiting on memory. It wasn't: it read 10 GB/s, a twelfth of what the memory can do.
-        The engine was waiting on its own arithmetic, and the culprit was the humblest line in the program, the dot product's
-        running total:
+        With the KV cache, decode should be waiting on memory. It wasn't. It read 10 GB/s, a twelfth of what the memory can
+        do. The engine was waiting on its own arithmetic, and the cause was the simplest line in the program, the dot
+        product's running total:
       </p>
       <code className="lr-math">{"total = total + weight[i] × x[i]     // 768 times, one after another"}</code>
       <p>
         Every add needs the result of the previous add. A processor can start a new add every cycle, but each one takes a
-        few cycles to finish, so with one running total it spends most of its time waiting on itself.
+        few cycles to finish. So with one running total, it spends most of its time waiting on itself.
       </p>
-      <h2>The idea</h2>
+      <h2>The idea: sixteen totals</h2>
       <p>
-        Keep sixteen running totals instead of one, each summing every sixteenth number, and add them together at the end.
-        Now sixteen adds can be in flight at once. It's like opening more checkout lanes.
+        Keep 16 running totals instead of one, each summing every 16th number, and add them together at the end. Now 16
+        adds can be in flight at once.
       </p>
       <Lanes />
       <p>
-        There was a bonus. Once the program spelled out sixteen independent totals, the compiler grouped them four at a time
-        into <G k="SIMD" /> instructions, which do the same operation on four numbers at once: a paint roller instead of a
-        brush. The compiler hadn't done that before, because adding decimals in a different order can change the last digit
-        of the answer, so it isn't allowed to reorder them on its own. Writing sixteen totals gave it permission.
+        There was a second gain. With 16 independent totals, the compiler grouped them into <G k="SIMD" /> instructions,
+        which add 4 numbers at once. It couldn't do this before. Floating-point addition gives slightly different results in
+        a different order, so a compiler may not reorder the adds by itself. Writing out 16 totals told it the order was
+        allowed.
       </p>
-      <h2>The result</h2>
+      <h2>The result: 5.3× faster</h2>
       <p>
-        Sixteen variables instead of one: decode <span className="k">19 → 100 tokens per second</span>, 5.3× the KV-cache
-        step (fig 13.2). Run back to back in one session, the two stages measured 17.3 and 101.6: 5.9×. Every
-        matrix now read about 55 GB/s, essentially all that one core can pull from memory (57). Decode had become truly
-        memory-bound.
+        With 16 variables instead of one, decode went from <span className="k">19 to 100 tokens per second</span>, 5.3× the
+        KV-cache stage (fig 13.2). Run back to back in one session, the two stages measured 17.3 and 101.6, or 5.9×. Every
+        matrix now read about 55 GB/s, close to the 57 GB/s one core can read. Decode was now memory-bound.
       </p>
       <Climb upto={2} n="13.2" />
-      <Idea>A single running total makes every add wait for the last one. Many independent totals (and SIMD) keep the arithmetic busy until memory, not maths, is the limit.</Idea>
+      <Idea>A single running total makes every add wait for the last one. Many independent totals (and SIMD) keep the arithmetic busy until memory becomes the limit.</Idea>
       <Deeper title="The hand-written version that wasn't faster">
         <p>
-          The next stage rewrote the loop by hand with the chip's own SIMD instructions (fused multiply-add, NEON). It was{" "}
-          <b>exactly</b> as fast: 100.3 vs 100.5 tokens per second. Decode was waiting on memory, so fewer instructions bought
-          nothing. A version that read four weight rows at once to save loads was even 25% <i>slower</i>: memory likes one
-          long, straight read.
+          The next stage rewrote the loop by hand with the chip's own SIMD instructions (fused multiply-add, NEON). It was
+          as fast to within noise: 100.3 vs 100.5 tokens per second. Decode was waiting on memory, so fewer instructions
+          bought nothing. A version that read 4 weight rows at once to save loads was 25% <i>slower</i>, because memory
+          streams one long, straight read best.
         </p>
         <p>
-          The same trick did pay off for prefill, which is compute-bound: computing a 4 × 4 block of outputs at once, reusing
-          each weight from a register four times, made prefill 2.5× faster (185 → ~460 tokens per second).
+          The same trick did pay off for prefill, which is compute-bound. Computing a 4 × 4 tile of outputs at once reuses
+          each weight from a register 4 times. That made prefill 2.5× faster, from 185 to about 460 tokens per second.
         </p>
       </Deeper>
     </>

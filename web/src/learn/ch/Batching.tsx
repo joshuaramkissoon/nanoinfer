@@ -27,9 +27,6 @@ function BatchCurve({ d }: { d: LearnData }) {
   const line = (j: 1 | 2) => pts.map((p, n) => `${n ? "L" : "M"}${x(p[0])},${y(p[j])}`).join(" ");
   const ring = pal.dark ? "#211f1d" : "#fbfaf7";
   const last = pts[pts.length - 1];
-  const q4 = (d.batching.series.find((s) => s.label === "q4_0") ?? series).points;
-  const at4 = q4.find((p) => p[0] === 4) ?? q4[2];
-  const q4last = q4[q4.length - 1];
   // nearest batch size to the pointer, so the whole plot is the hit target
   const pick = (px: number) => {
     let best = 0;
@@ -43,18 +40,15 @@ function BatchCurve({ d }: { d: LearnData }) {
       prov="measured"
       caption={
         <>
-          GPT-2 on the M4's GPU. Across: how many users share each step (the <G k="batch" /> size), doubling each time. Up:
-          tokens per second, on a log scale (each gridline is 10× the last). <b style={{ color: pal.fg }}>Ember</b>: everything the
-          GPU writes, all users together. <b style={{ color: pal.fg }}>Grey</b>: what one user gets. At 1 user the two are the
-          same number. Measured on a quiet machine: 64-token prompts, then 64 tokens each.
+          GPT-2 small on the M4's GPU, quiet machine, 64-token prompts then 64 tokens each. Across: users per step (the{" "}
+          <G k="batch" /> size), doubling. Up: tok/s, log scale. <Swatch c={cc.c1}>Ember line</Swatch>: total for all users.{" "}
+          <Swatch c={pal.sub}>Grey line</Swatch>: what one user gets.
         </>
       }
       tryit={
         <>
-          With 4-bit weights, drag from 1 to 4 users: the total grows {(at4[1] / q4[0][1]).toFixed(1)}× while each user slows by{" "}
-          {Math.round((1 - at4[2] / q4[0][2]) * 100)}%. Keep going to {q4last[0]}: the GPU writes {Math.round(q4last[1] / q4[0][1])}× as much in
-          total, but each user waits {Math.round(q4[0][2] / q4last[2])}× longer for every token. Then try 32-bit weights, where waiting on memory was a bigger share of the time: there, 8 users are
-          almost free.
+          With 4-bit weights, drag from 1 user to the most. Notice where the grey line starts to fall. Then switch to 32-bit
+          and compare where that happens.
         </>
       }
     >
@@ -64,7 +58,7 @@ function BatchCurve({ d }: { d: LearnData }) {
           <input type="range" min={0} max={pts.length - 1} value={k} onChange={(e) => setI(+e.target.value)} />
           <span className="v">{B}</span>
         </label>
-        <Seg options={["q4_0", "q8_0", "f16", "f32"].map((v) => ({ v, label: DT_LABEL[v] }))} value={dt} onChange={setDt} label="weights" />
+        <Seg options={["q4_0", "q8_0", "f16", "f32"].map((v) => ({ v, label: DT_LABEL[v] }))} value={dt} onChange={setDt} label="number format" />
       </div>
       <div className="nv-legend" style={{ marginBottom: "0.3rem" }}>
         <span>
@@ -156,14 +150,13 @@ function Timeline({ srv }: { srv: ServingRate }) {
       prov="measured"
       caption={
         <>
-          The first {n} of {srv.requests} requests, arriving at random (about 16 a second), on the M4's GPU with up to{" "}
-          {srv.maxBatch} served at once. Each row is one request, left to right in time. <b style={{ color: pal.fg }}>Grey</b>: waiting
-          for its first word. <b style={{ color: pal.fg }}>Ember</b>: being answered, first word to last. Top: static batches, which
-          run until their longest answer is finished. Bottom: continuous batching, which lets requests join and leave at every
-          step.
+          The first {n} of {srv.requests} requests, arriving at random (about 16 a second) on the M4's GPU, up to{" "}
+          {srv.maxBatch} at once. Each row is one request over time. <Swatch c={pal.sub}>Grey bar</Swatch>: waiting for its
+          first token. <Swatch c={cc.c1}>Ember bar</Swatch>: first token to last. Top: static batches. Bottom: continuous
+          batching.
         </>
       }
-      tryit={<>Compare the grey. Then hover a bar for one request's story.</>}
+      tryit={<>Compare the grey bars in the two panels. Then select a row to see one request's timings.</>}
     >
       <div ref={ref} style={{ position: "relative" }} onMouseLeave={() => setHover(null)}>
         {w > 0 && (
@@ -185,13 +178,13 @@ function Timeline({ srv }: { srv: ServingRate }) {
                     {pol === "static" ? "static batches" : "continuous batching"}
                     {!narrow && (
                       <tspan fontWeight={400} fill={pal.sub}>
-                        {"  "}median wait for the first word: {fmtMs(r.ttft_p50_ms)}
+                        {"  "}median wait for the first token: {fmtMs(r.ttft_p50_ms)}
                       </tspan>
                     )}
                   </text>
                   {narrow && (
                     <text x={pl} y={y0 + 27} fontSize={T.xs} fill={pal.sub}>
-                      median wait for the first word: {fmtMs(r.ttft_p50_ms)}
+                      median wait for the first token: {fmtMs(r.ttft_p50_ms)}
                     </text>
                   )}
                   {r.gantt.map(([arr, , first, fin], i) => {
@@ -257,13 +250,13 @@ function PagedKv({ srv }: { srv: ServingRate }) {
       prov="measured"
       caption={
         <>
-          Snapshots of the continuous server's KV-cache memory as it ran. Each square is one <G k="page" /> of 16 tokens' keys and
-          values (the first {shown} of {nf(kv.pages)} pages in the pool). <Swatch c={cc.c2}>Blue</Swatch>: in use by some
-          request. Outline: free. <Swatch c={cc.c1}>Ember</Swatch>: the pages of the request you picked. The row of boxes above is that request's <b>block table</b>: its tokens in order,
-          16 per box, and which page each lives in.
+          Snapshots of the continuous server's KV cache as it ran. Each square is one <G k="page" /> of 16 tokens' keys and
+          values (the first {shown} of {nf(kv.pages)} pages). <Swatch c={cc.c2}>Blue squares</Swatch>: in use. Outlined: free.{" "}
+          <Swatch c={cc.c1}>Ember squares</Swatch>: the chosen request's pages. The boxes above are its <b>block table</b>, 16
+          tokens per box.
         </>
       }
-      tryit={<>Move through time and watch the pool fill and empty. Pick a request that started late: its pages are wherever space was free.</>}
+      tryit={<>Drag through time and watch the pool fill and empty. Then select a request that started late, and notice where its pages are.</>}
     >
       <div className="lr-controls">
         <label className="lr-slider">
@@ -364,60 +357,61 @@ export default function Batching() {
   const sizes = d ? d.batching.series.filter((s) => s.label !== "q4_0").map((s) => s.points[s.points.length - 1][1]) : [];
   return (
     <>
-      <h2 style={{ marginTop: "2.2rem" }}>The bottleneck</h2>
+      <h2 style={{ marginTop: "2.2rem" }}>The bottleneck: an idle factory</h2>
       <p>
         Serving one user, the GPU reads every weight for every token and does one multiply-add with it. In chapter 9's terms,
-        the factory is almost always idle, waiting for the truck. A server has the same problem, multiplied: many users, and
-        a chip that's mostly waiting.
+        the factory is almost always idle, waiting for the truck. A server has the same problem with many users.
       </p>
-      <h2>The idea</h2>
+      <h2>The idea: one weight read, many users</h2>
       <p>
         Read each weight once and use it for many users. Put the next token of 64 different conversations through the model
-        together, as a <G k="batch" />, and each weight fetched from memory now does 64 multiply-adds instead of one. The
-        truck delivers the same, the factory finally has work.
+        together, as a <G k="batch" />. Each weight read from memory now does 64 multiply-adds instead of 1. In chapter 9's
+        terms, the same truckload now keeps the factory busy.
       </p>
-      <p>It isn't free, though. More users per step means more arithmetic per step, so each step takes longer, and every user waits for every step.</p>
+      <p>This has a cost. More users per step means more arithmetic per step, so each step takes longer, and every user waits for every step.</p>
       {d ? <BatchCurve d={d} /> : <div className="lr-empty">loading…</div>}
       <p>
-        That is the trade-off every server picks a point on. While the GPU is still waiting on memory, extra users ride along
-        almost free. Once the arithmetic catches up with the bytes (the crossover from chapter 9), more users share a fixed
-        amount of maths: the total keeps creeping up while each user slows down.
+        Every server picks a point on this curve. While the GPU is still waiting on memory, extra users cost almost nothing.
+        Past the crossover from chapter 9, the step is compute-bound. Total throughput then rises slowly and each user's speed
+        falls.
       </p>
-      <h2>The result</h2>
+      <h2>The result: thousands of tokens per second in total</h2>
       <p>
         With 4-bit weights, one GPU went from {q4 ? nf(q4.points[0][1]) : "…"} tokens per second for one user to{" "}
-        <span className="k">{nf(total)} tokens per second</span> in total for {B}, about {Math.round(per)} each: still faster
-        than anyone reads. And at large batches every number format lands close together
-        {sizes.length ? ` (${nf(Math.min(...sizes, total))}–${nf(Math.max(...sizes, total))})` : ""}: once the job is
-        compute-bound, smaller numbers stop helping.
+        <span className="k">{nf(total)} tokens per second</span> in total for {B} users, about {Math.round(per)} each. That is
+        still faster than anyone reads. At large batches every number format ends up close together
+        {sizes.length ? ` (${nf(Math.min(...sizes, total))} to ${nf(Math.max(...sizes, total))} tok/s total)` : ""}. Once the job
+        is compute-bound, smaller numbers stop helping.
       </p>
       <Climb upto={6} n="17.2" />
       <h2>Users don't arrive in neat batches</h2>
       <p>
-        A simple server collects a batch, runs it until the <i>longest</i> answer is done, then takes the next batch. Short
-        answers sit in their seats doing nothing, and new arrivals wait for the whole batch. A continuous server re-forms the
-        batch at every step: finished requests leave, waiting ones join. Same GPU, same model, same requests:
+        A simple server collects a batch, runs it until the <i>longest</i> answer is done, then takes the next batch.
+        Finished requests hold their slots until the longest request ends, and new arrivals wait for the whole batch. A
+        continuous server re-forms the batch at every step: finished requests leave, and waiting ones join. Here are the same
+        GPU, model and requests, served both ways:
       </p>
       {srv ? <Timeline srv={srv} /> : <div className="lr-empty">loading…</div>}
       {srv && (
         <p>
-          The median wait for the first word fell from <b>{fmtMs(srv.static.ttft_p50_ms)} to {fmtMs(srv.continuous.ttft_p50_ms)}</b>, and
-          the total output rose {(srv.continuous.throughput / srv.static.throughput).toFixed(1)}×. The static server was busy the
-          whole time and still made people wait seconds: much of its work was finished requests holding their seats.
+          The median wait for the first token fell from <b>{fmtMs(srv.static.ttft_p50_ms)} to {fmtMs(srv.continuous.ttft_p50_ms)}</b>,
+          and the total output rose {(srv.continuous.throughput / srv.static.throughput).toFixed(1)}×. The static server was busy
+          the whole time and still made people wait seconds, because finished requests held many of its slots.
         </p>
       )}
-      <Idea>Batching turns a memory-bound job into a compute-bound one: each weight read serves many users. Continuous batching keeps the batch full without making anyone wait for a seat.</Idea>
+      <Idea>Batching turns a memory-bound job into a compute-bound one, because each weight read serves many users. Continuous batching keeps the batch full without making anyone wait for a slot.</Idea>
       <p>
-        Continuous batching has one more requirement: memory for KV caches that grow and finish at unpredictable times. Servers
-        solve it the way an operating system does, with pages (the fold below).
+        Continuous batching needs one more thing: memory for KV caches that grow and finish at unpredictable times. Servers
+        manage it the way an operating system does, with pages (the fold below).
       </p>
       <Deeper title="Paged attention: virtual memory for the KV cache">
         <p>
-          Every live request needs its <G k="KV cache" />, and it grows by one token per step. Reserving a contiguous region big
-          enough for the longest possible answer wastes most of it. So the server does what an OS does for processes: it cuts
-          cache memory into fixed-size pages, hands a request a new page whenever it fills one, and keeps a per-request page
-          table (here called the <b>block table</b>) mapping token positions to physical pages. Attention reads through that
-          table, so a request's pages can sit anywhere. Waste is at most the unfilled end of each request's last page.
+          Every live request has a <G k="KV cache" /> that grows by one token per step. If the server reserves room for the
+          longest possible answer, most of that room is never used. So the server manages the KV cache like an operating
+          system manages memory. It splits memory into fixed-size pages of 16 tokens. It gives a request a new page when the
+          last one is full. A per-request <b>block table</b> maps each token position to its page. Attention reads through
+          that table, so a request's pages can be anywhere in memory. Waste is at most the unfilled end of each request's last
+          page.
         </p>
         {srv && <PagedKv srv={srv} />}
       </Deeper>

@@ -24,18 +24,16 @@ function Ring() {
     <Fig
       figRef={onScreen}
       n="19.1"
-      title="Passing dishes round a table"
+      title="Ring all-reduce: each GPU passes one chunk per step"
       prov="toy"
       caption={
         <>
           GPUs in a ring, each holding its own partial result split into {n} chunks (the segments). At every step each GPU
-          passes one chunk to its neighbour over the <Swatch c={cc.c3}>link</Swatch> and adds in the one it receives; a chunk
-          turns <Swatch c={cc.c1}>ember</Swatch> once it holds the complete sum. After {n - 1} steps every chunk has a complete sum
-          somewhere; after {steps} steps everyone has every complete chunk. No link is ever idle, so the time hardly depends on
-          how many GPUs sit at the table.
+          passes one chunk to its neighbour as an <Swatch c={cc.c3}>olive dot</Swatch> over the link, and adds in the one it
+          receives. A segment turns <Swatch c={cc.c1}>ember</Swatch> once it holds the complete sum. Grey segments are partial.
         </>
       }
-      tryit={<>Change the number of GPUs: more steps, but each step sends a smaller chunk.</>}
+      tryit={<>Switch between 2, 4 and 8 GPUs. Notice how the number of steps and the size of each chunk change together.</>}
     >
       <div className="lr-controls">
         <Seg options={[2, 4, 8].map((v) => ({ v, label: `${v} GPUs` }))} value={n} onChange={(v) => (setN(v), setT(0))} label="GPUs" />
@@ -80,47 +78,47 @@ export default function ManyGpus() {
   return (
     <>
       <p>
-        Everything so far fits on one chip. Big models don't. A 70-billion-weight model at 16 bits is 140 GB of weights, and
-        one datacentre GPU holds 80. So the model is split across several GPUs, and now there's a new cost: they have to talk.
+        Everything so far fits on one chip. Big models don't. A 70B model at 16 bits is 140 GB of weights, and one H100 holds
+        80 GB. So the model is split across several GPUs, and that adds a new cost: the GPUs have to communicate.
       </p>
       <p>Three ways to split it:</p>
       <ul className="lr-list">
         <li>
-          <b>By layer</b> (pipeline): GPU 1 runs layers 1–40, GPU 2 runs 41–80. An assembly line: simple, but one token still
-          has to go through every station in turn.
+          <b>By layer</b> (pipeline parallelism): GPU 1 runs layers 1 to 40, and GPU 2 runs 41 to 80. It is simple, but one
+          token still goes through every pipeline stage in turn.
         </li>
         <li>
-          <b>Within each layer</b> (tensor parallel): every GPU holds a slice of every matrix and does a slice of every
-          multiply. Chefs working on one dish at once: fast, but after each layer they must combine their partial results.
+          <b>Within each layer</b> (tensor parallelism): every GPU holds a slice of every matrix and does a slice of every
+          multiply. It is fast, but after each layer the GPUs must combine their partial results.
         </li>
         <li>
-          <b>By expert</b> (expert parallelism), for mixture-of-experts models: each GPU holds a few whole experts, and tokens
-          are sent to whichever GPUs hold the experts they were routed to. Key-based routing to shards, hot keys included.
+          <b>By expert</b> (expert parallelism), for mixture-of-experts models: each GPU holds a few whole experts. Each token
+          goes to the GPUs that hold its chosen experts. This is key-based routing to shards, hot keys included.
         </li>
       </ul>
       <p>Combining partial results so every GPU ends up with the total is called an <b>all-reduce</b>, and the classic way to do it is a ring:</p>
       <Ring />
       <p>
-        The same arithmetic from part two decides whether this is worth it. Inside an H100, memory moves about 3.35 TB/s. Between
-        GPUs in one server, NVLink moves ~450 GB/s each way. Between servers, ~50 GB/s. Every byte that has to cross a link is slow next to
-        a byte read locally.
+        The same arithmetic from part 2 decides whether this is worth it. Inside an H100, memory moves about 3.35 TB/s.
+        Between GPUs in one server, NVLink moves about 450 GB/s each way. Between servers, about 50 GB/s. Every byte that
+        crosses a link is slow next to a byte read locally.
       </p>
       <p>
-        The third split needs a word. A <b>mixture-of-experts</b> (MoE) model replaces each layer's feed-forward network with,
-        say, 8 or 256 smaller ones (experts), plus a tiny router that sends each token to just a few of them. Each token does
-        the arithmetic of a small model, but every expert must sit in memory, and a busy batch touches most of them. It buys
-        knowledge without FLOPs, not without bytes. The{" "}
+        The third split needs a word of explanation. A <b>mixture-of-experts</b> (MoE) model replaces each layer's
+        feed-forward network with many smaller ones (experts), say 8 or 256. A small router sends each token to a few of
+        them. Each token does the arithmetic of a small model, but every expert must stay in memory, and a busy batch reads
+        most of them. So MoE adds weights without adding FLOPs per token, but it does add bytes. The{" "}
         <a href="/learn/field-guide#moe" onClick={linkTo("/learn/field-guide#moe")}>
           MoE lab in the field guide
         </a>{" "}
         lets you route a batch and watch what gets read.
       </p>
-      <Idea>When a model doesn't fit on one chip, you split it, and pay for the conversation between the pieces. The bytes-vs-maths thinking from this course is exactly how you decide how to split.</Idea>
+      <Idea>When a model doesn't fit on one chip, you split it and pay for the communication between the pieces. Bytes against arithmetic, as in the rest of the course, decides how to split.</Idea>
       <Deeper title="Why splitting GPT-2 small would make it slower">
         <p>
-          Splitting GPT-2 within each layer would need 24 all-reduces per token, each only ~1.5 KB. Tiny messages are all
-          latency (the cost of starting a conversation), no bandwidth. For a model this small, the talking would cost more than
-          the work it saves.
+          Splitting GPT-2 within each layer would need 24 all-reduces per token, each only about 1.5 KB. Tiny messages cost
+          latency (the fixed cost of sending anything), not bandwidth. For a model this small, the communication would cost
+          more than the work it saves.
         </p>
       </Deeper>
     </>

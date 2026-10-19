@@ -62,16 +62,16 @@ function Factory() {
       prov="toy"
       caption={
         <>
-          Left, <Swatch c={cc.c2}>memory</Swatch>, where the weights live; the road is its <G k="bandwidth" />, the truck
-          delivering boxes of bytes at a steady rate. Right, the <Swatch c={cc.c1}>processor</Swatch> (the factory), doing the
-          arithmetic each box needs. The two bars say how busy each side is. The crossover is this browser tab's measured
-          numbers: ~97 billion operations per second against ~59 GB/s, so <b>1.6 operations per byte</b>.
+          Left, <Swatch c={cc.c2}>memory</Swatch>, where the weights live. The truck delivers boxes of bytes at a steady
+          rate, its <G k="bandwidth" />. Right, the <Swatch c={cc.c1}>processor</Swatch> (the factory) does the arithmetic each
+          box needs. The two bars show how busy each side is. The crossover uses this tab's measured numbers: about 97
+          billion operations per second ÷ 59 GB/s, or <b>1.6 operations per byte</b>.
         </>
       }
       tryit={
         <>
-          Press <b>decode</b>: the factory mostly waits. Press <b>prefill</b>: now boxes pile up at the factory door. Slide
-          slowly from one to the other and find the crossover.
+          Press <b>decode</b>, then <b>prefill</b>. Then drag slowly from one to the other and find the crossover. Notice
+          which side waits on each side of it.
         </>
       }
     >
@@ -191,13 +191,13 @@ function Roofline() {
       prov={m === "tab" ? (liveBw ? "live" : "recorded") : "measured"}
       caption={
         <>
-          The truck-and-factory story as engineers draw it (a “roofline”). Across: work per byte. Up: arithmetic per second
-          you can actually get. Both axes are logarithmic. You're capped by the blue slanted roof (memory) or the ember flat
-          one (compute), whichever is lower. Decode sits at 0.5 operations per byte; prefill moves right as the prompt grows.
-          {m === "gpu" && " GPU numbers: ~105 GB/s measured on our M4 (quiet machine); ~4.3 trillion operations per second is Apple's spec figure."}
+          The truck and the factory as engineers draw them, a “roofline”. Across: work per byte. Up: arithmetic per second
+          you can get. Both axes are log scale. The lower of two roofs caps you: the <Swatch c={pal.cool}>blue</Swatch> slanted
+          line (memory) or the <Swatch c={pal.accent}>ember</Swatch> flat line (compute).
+          {m === "gpu" && " GPU numbers: about 105 GB/s measured on the M4 (quiet machine) and Apple's spec of about 4.3 trillion operations per second."}
         </>
       }
-      tryit={<>Step through 1 → 4. Then drag the prompt length and find where prefill hits the flat roof.</>}
+      tryit={<>Step through 1 to 4. Then drag the prompt length and notice where the prefill dot meets the flat roof.</>}
     >
       <div className="lr-controls">
         <Seg
@@ -323,12 +323,12 @@ function Ridges() {
       prov="estimate"
       caption={
         <>
-          Each dot is one machine's ridge: peak arithmetic ÷ memory bandwidth, in operations per byte, on a log scale. The{" "}
-          <Swatch c={cc.c2}>blue band</Swatch> is decode for one user: 0.5 operations per byte with 32-bit weights, 1 with 16-bit.
-          It sits left of every ridge, so one user's decode is memory-bound on all four.
+          Each grey dot is one machine's ridge: peak arithmetic ÷ memory bandwidth, in operations per byte. Across: log
+          scale. The <Swatch c={cc.c2}>blue band</Swatch> is decode for one user: 0.5 operations per byte with 32-bit weights, 1
+          with 16-bit.
         </>
       }
-      source="Browser tab: measured by the engine in this page (recorded M4 values when not running). M4 CPU: 98 GB/s measured, ~0.6 TFLOP/s estimated from 4 P-cores × 4 FMA pipes × 4 lanes. M4 GPU: 105 GB/s measured, ~4.3 TFLOP/s f32 (Apple). H100 SXM: NVIDIA datasheet."
+      source="Browser tab: measured by the engine in this page (recorded M4 values when not running). M4 CPU: 98 GB/s measured, ~0.6 TFLOP/s (estimate: 4 performance cores × 4 FMA pipes × 4 lanes). M4 GPU: 105 GB/s measured, ~4.3 TFLOP/s f32 (Apple). H100 SXM: NVIDIA datasheet."
     >
       <div ref={ref}>
         {w > 0 && (
@@ -388,37 +388,37 @@ export default function BytesFlops() {
   return (
     <>
       <p>
-        Part one ended with a fact: every decode step uses every weight in the model. Here's why that matters. To do a
-        multiply-add, a processor needs two things: the numbers, and the time to do the arithmetic. The numbers live in
-        memory and have to be carried over. So every computation is waiting on one of two things: the <b>truck</b> (memory
-        bandwidth, bytes per second) or the <b>factory</b> (arithmetic, operations per second).
+        Every decode step reads every weight in the model. A multiply-add needs two things: the numbers, and time to do
+        the arithmetic. The numbers live in memory and have to be carried to the processor. So every computation waits on
+        one of two things. One is the <b>truck</b>, memory bandwidth in bytes per second. The other is the <b>factory</b>,
+        arithmetic in operations per second.
       </p>
       <Factory />
       <p>
-        Now apply it to decode. Each weight is 4 bytes. It's fetched, used for exactly one multiply and one add, and not
-        needed again until the next token. That's <span className="k">0.5 operations per byte</span>, and the crossover in a
-        browser tab is 1.6. Decode is <G k="memory-bound" />: the factory spends most of its time waiting for the truck. (Chapter
-        0.2 said ~1 per byte: that was for 2-byte weights. Halve the bytes and the work per byte doubles; it's still far
-        below any chip's crossover.)
+        Now apply it to decode. Each weight is 4 bytes. Decode reads it, uses it for one multiply and one add, and doesn't
+        need it again until the next token. That's <span className="k">0.5 operations per byte</span>, and the crossover in a
+        browser tab is 1.6. Decode is <G k="memory-bound" />, so the factory spends most of its time waiting for the truck.
+        Chapter 0.2 said about 1 per byte, because it used 2-byte weights. Halving the bytes doubles the work per byte, and
+        that is still far below any chip's crossover.
       </p>
       <p>
-        Prefill is different. With a 64-token prompt, each weight is fetched once and used 64 times, once per token. Same
-        bytes, 64 times the work: 32 operations per byte, far past the crossover. Prefill is <G k="compute-bound" />.
+        Prefill is different. With a 64-token prompt, prefill reads each weight once and uses it 64 times, once per token.
+        The same bytes do 64 times the work, 32 operations per byte, far past the crossover. Prefill is <G k="compute-bound" />.
       </p>
-      <Idea>Every program waits on memory or on maths. Decode does so little work per byte that it waits on memory: a faster processor won't help it, fewer bytes will.</Idea>
+      <Idea>Every program waits on memory or on arithmetic. Decode does so little work per byte that it waits on memory, so fewer bytes help it and a faster processor doesn't.</Idea>
       <p>
-        We saw exactly this in the engine. A browser build with faster multiply-add instructions (a faster factory) made
-        prefill <b>40% faster</b>, 255 → 370 tokens per second, and decode <b>not at all</b>: it stayed at 98–101. Decode was
-        never waiting on the arithmetic.
+        The engine shows this. A browser build with faster multiply-add instructions (a faster factory) made prefill{" "}
+        <b>40% faster</b>, from 255 to 370 tokens per second. Decode didn't move: it stayed at 98 to 101 tokens per second,
+        because it was never waiting on the arithmetic.
       </p>
       <Deeper title="The chart engineers draw for this: the roofline">
         <Roofline />
       </Deeper>
       <Deeper title="Same idea, other names">
         <p>
-          “Work per byte” is called <b>arithmetic intensity</b>, and the crossover is the <b>ridge point</b>. On real hardware
-          the ridge is far to the right: our M4's GPU is near 41 operations per byte, an H100 near 295 (fig 9.3). So for one
-          user at a time, decode is memory-bound on essentially every computer that exists.
+          “Work per byte” is called <b>arithmetic intensity</b>, and the crossover is the <b>ridge point</b>. On fast chips
+          the ridge is far to the right: near 41 operations per byte for the M4's GPU and 295 for an H100 (fig 9.3). So for
+          one user, decode is memory-bound on every common CPU and GPU.
         </p>
         <p>
           The two numbers for this tab are measured by the engine itself, compiled to WebAssembly: a big streaming read
@@ -426,10 +426,10 @@ export default function BytesFlops() {
         </p>
       </Deeper>
       <p>
-        The course quotes three different crossovers: about 1.6 for a browser tab on the M4, 41 for the M4's GPU and 295 for an H100. Each is right
-        for its machine. They differ because a ridge divides two separate design choices, the arithmetic on the chip (and the
-        number format it runs at) by the speed of its memory: an H100's tensor cores do bf16 matrix maths about 230× faster
-        than the M4's GPU does f32, while its memory is only about 32× faster.
+        The course quotes three crossovers: about 1.6 for a browser tab on the M4, 41 for the M4's GPU and 295 for an H100.
+        Each is right for its machine. A ridge divides two separate design choices: the chip's arithmetic (at its number
+        format) and its memory bandwidth. An H100's tensor cores do 16-bit matrix arithmetic about 230× faster than the M4's
+        GPU does 32-bit. Its memory is only about 32× faster.
       </p>
       <Ridges />
     </>

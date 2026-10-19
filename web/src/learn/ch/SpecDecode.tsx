@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Tip, useWidth } from "../../ui/Figure";
 import { usePalette } from "../../ui/theme";
-import { chartColors, Deeper, Fig, G, Idea, Seg, nf, useLearnData, useOnScreen, type SpecPair, type SpecPrompt, T } from "../kit";
+import { chartColors, Deeper, Fig, G, Idea, Seg, Swatch, nf, useLearnData, useOnScreen, type SpecPair, type SpecPrompt, T } from "../kit";
 
 // Speculative decoding on the M4 GPU (bench/specdec.json via public/learn/data.json):
 // a GPT-2 small drafter (4-bit) guessing for GPT-2 medium or large (16-bit).
@@ -88,20 +88,19 @@ function Playback({ pairs }: { pairs: SpecPair[] }) {
       prov="measured"
       caption={
         <>
-          A recorded run on the M4's GPU. GPT-2 small (4-bit) guesses 4 tokens at a time for {MODEL[pair.target]} ({PARAMS[pair.target]} weights,
-          16-bit), which checks all 4 in one pass. Each group of squares is one pass; the text below is what those passes wrote. <span style={keptStyle}>Blue</span>: a guess the big model agreed with, kept
-          for free. <span style={ownStyle}>Ember</span>: the big model's own token, which every check adds: either the fix for the
-          first wrong guess, or a bonus when all 4 were right. <span style={{ color: pal.muted }}>✕</span> (an empty square above) marks each guess thrown away
-          (the recording keeps how many, not what they were). The text is exactly what {MODEL[pair.target]} writes on its own.
+          A recorded run on the M4's GPU. The drafter (GPT-2 small, 4-bit) guesses 4 tokens. {MODEL[pair.target]} ({PARAMS[pair.target]}{" "}
+          weights, 16-bit) checks all 4 in one pass. Each group of squares is one pass. <span style={keptStyle}>Blue squares</span>: guesses
+          the big model kept. <span style={ownStyle}>Ember</span>: the big model's own token, added on every pass.{" "}
+          <span style={{ color: pal.muted }}>✕</span>: a guess thrown away.
         </>
       }
-      tryit={<>Play the licence text, then an essay. Watch how many tokens each check adds.</>}
+      tryit={<>Play the licence text, then an essay. Notice how many tokens each check adds.</>}
     >
       <div className="lr-controls">
         <Seg options={ORDER.filter((o) => pair.prompts.some((p) => p.prompt === o)).map((v) => ({ v, label: SHORT[v] }))} value={kind} onChange={setKind} label="kind of text" />
       </div>
       <div className="lr-controls">
-        <Seg options={pairs.map((p) => ({ v: p.target, label: `checker: ${MODEL[p.target]}` }))} value={target} onChange={setTarget} label="big model" />
+        <Seg options={pairs.map((p) => ({ v: p.target, label: `big model: ${MODEL[p.target]}` }))} value={target} onChange={setTarget} label="big model" />
         <button className="lr-btn" onClick={() => (n >= rs.length ? (setN(0), setPlaying(true)) : setPlaying((p) => !p))}>
           {playing ? "❚❚ pause" : n >= rs.length ? "⟲ replay" : "▶ play"}
         </button>
@@ -179,12 +178,12 @@ function ByText({ pairs }: { pairs: SpecPair[] }) {
       prov="measured"
       caption={
         <>
-          One row per kind of text, 128 tokens each, on the M4's GPU. The bar is how much faster {MODEL[pair.target]} writes with a
-          GPT-2 small guesser than alone (best number of guesses per check, shown as k), so a bar at 1× means no help at all. On
-          the right: how often a guess was right, with 4 guesses per check.
+          One row per kind of text, 128 tokens each, on the M4's GPU. Each <Swatch c={cc.c1}>ember bar</Swatch> is how much
+          faster {MODEL[pair.target]} writes with a GPT-2 small drafter than alone, at its best number of guesses per check
+          (k). A bar at 1× means no help. Right column: how often a guess was right, at 4 guesses per check.
         </>
       }
-      tryit={<>Switch the checker to GPT-2 medium: the same texts, smaller gains, because the guesser is now a bigger share of the work.</>}
+      tryit={<>Switch the big model to GPT-2 medium. Notice which kinds of text change most, and think about what share of the work the drafter now is.</>}
     >
       <div className="lr-controls">
         <Seg options={pairs.map((p) => ({ v: p.target, label: MODEL[p.target] }))} value={target} onChange={setTarget} label="big model" />
@@ -259,69 +258,69 @@ export default function SpecDecode() {
     <>
       <h2 style={{ marginTop: "2.2rem" }}>The bottleneck</h2>
       <p>
-        Batching helps a server with many users. It does nothing for <i>one</i> user waiting on a big model: each token
-        needs the one before it, so the tokens of a single answer can't be put through the model together. Or can they?
+        Batching helps a server with many users. It does nothing for <i>one</i> user waiting on a big model. Each token
+        needs the one before it, so the tokens of a single answer can't go through the model together. Speculative decoding
+        gets around this by guessing.
       </p>
       <p>
         Chapter 17 showed the useful fact. While decode is waiting on memory, pushing 5 tokens through the model costs about
-        the same as pushing 1: the weights are read once either way. The trouble is only that we don't know the next 5 tokens
-        yet.
+        the same as pushing 1, because the weights are read once either way. The only problem is that the next 5 tokens
+        aren't known yet.
       </p>
       <h2>The idea: let a small model guess</h2>
       <p>
-        Most of the time, the next few tokens are easy: the end of a word, a comma, “the”. A model ten times smaller gets
+        Most of the time, the next few tokens are easy: the end of a word, a comma, “the”. A model 10 times smaller gets
         those right too. So let the small model, the <b>drafter</b>, quickly guess the next 4 tokens. Then run the big model
         once over all 4 guesses. In that one pass it says what <i>it</i> would have written at every position. Keep the
-        guesses up to the first one it disagrees with, and add the big model's own token at that point. This is{" "}
+        guesses up to the first one it disagrees with, and add the big model's own token there. This is{" "}
         <G k="speculative decoding" />.
       </p>
       <p>
-        Every check writes at least one token (the big model's own), so it is never slower in tokens per pass, and the text
-        comes out exactly as the big model alone would have written it, word for word. If 3 guesses are right, one pass
-        writes 4 tokens.
+        Every check writes at least one token, the big model's own, so it is never slower in tokens per pass. If 3 guesses
+        are right, one pass writes 4 tokens. And the text is exactly what the big model writes on its own, token for token.
       </p>
       {pairs.length ? <Playback pairs={pairs} /> : <div className="lr-empty">loading…</div>}
-      <h2>The result</h2>
+      <h2>The result: faster, with the same text</h2>
       {large && top && (
         <p>
-          With GPT-2 large checking (774 million weights, 16-bit), and GPT-2 small guessing, the best case went from{" "}
-          {nf(top.target)} to <span className="k">{nf(top.bestTokS)} tokens per second, {top.best.toFixed(2)}× faster</span>. That's
-          faster than GPT-2 medium, a model half the size, manages on its own ({nf(medAlone)}). The drafter costs little: one of
-          its steps takes about {Math.round(draftShare * 100)}% of the big model's.
+          With GPT-2 large checking (774 million weights, 16-bit) and GPT-2 small drafting, the best case went from{" "}
+          {nf(top.target)} to <span className="k">{nf(top.bestTokS)} tokens per second, {top.best.toFixed(2)}× faster</span>. That is
+          faster than GPT-2 medium, a model half the size, manages on its own ({nf(medAlone)}). The drafter costs little, because
+          one of its steps takes about {Math.round(draftShare * 100)}% of the big model's.
         </p>
       )}
-      <p>But that best case was a licence. How often the guesses are right depends on what is being written:</p>
+      <p>That best case was a licence. How often the guesses are right depends on what is being written:</p>
       {pairs.length ? <ByText pairs={pairs} /> : null}
       {lo && (
         <p>
-          Boilerplate and lists, where the next word is nearly forced, get almost every guess right. Stories and essays, with
-          more real choices, get fewer. Code was the odd one: GPT-2 medium agreed with the small model's code{" "}
-          {medCode ? `${Math.round(medCode.alpha * 100)}%` : ""} of the time, GPT-2 large only{" "}
-          {lgCode ? `${Math.round(lgCode.alpha * 100)}%` : ""}. Large simply writes different code from small. How well the trick
-          works is a property of the two models <i>and</i> the text, which is why it is measured, not assumed.
+          Boilerplate and lists, where the next token is nearly forced, get almost every guess right. Stories and essays, with
+          more real choices, get fewer. Code was the odd one. GPT-2 medium agreed with the drafter's code{" "}
+          {medCode ? `${Math.round(medCode.alpha * 100)}%` : ""} of the time, and GPT-2 large only{" "}
+          {lgCode ? `${Math.round(lgCode.alpha * 100)}%` : ""}. GPT-2 large writes different code from GPT-2 small. The speed-up
+          depends on both models <i>and</i> on the text, so you have to measure it.
         </p>
       )}
-      <Idea>A cheap guesser lets one pass of the big model write several tokens, without changing a word of its output. It pays off exactly as often as the small model can predict the big one.</Idea>
+      <Idea>A cheap drafter lets one pass of the big model write several tokens without changing a token of its output. It pays off as often as the drafter can predict the big model.</Idea>
       <Deeper title="How many guesses per check?">
         <p>
-          More guesses means more tokens per pass when they're right, but the drafter spends longer guessing and the check gets a
-          little more expensive. If a fraction α of guesses are right, one pass writes on average (1 − α<sup>k+1</sup>) ÷ (1 − α)
-          tokens with k guesses, and the measured tokens per pass match that closely.
+          More guesses means more tokens per pass when they're right. But the drafter spends longer guessing, and the check
+          costs a little more. If a fraction α of guesses are right, one pass writes on average (1 − α<sup>k+1</sup>) ÷ (1 −
+          α) tokens with k guesses. The measured tokens per pass match that closely.
         </p>
         {large && (
           <p>
             The best k was {Math.max(...large.prompts.map((p) => p.bestK))} where nearly every guess is right, and{" "}
-            {Math.min(...large.prompts.map((p) => p.bestK))}–6 elsewhere. For GPT-2 medium, checking 8 tokens took only 27% longer than checking 1;
-            the 9th makes the GPU switch to a bigger, slower kernel, which is where the gains stop.
+            {Math.min(...large.prompts.map((p) => p.bestK))} to 6 elsewhere. For GPT-2 medium, checking 8 tokens took only 27% longer
+            than checking 1. The 9th makes the GPU switch to a bigger, slower kernel, and the gains stop there.
           </p>
         )}
       </Deeper>
       <Deeper title="A caveat: GPT-2 repeats itself">
         <p>
-          Asked for the most likely next token every time, GPT-2 falls into loops after a few dozen tokens: the story in fig 18.1
-          keeps saying she was a very good cook. Repetition is easy to guess, so every acceptance rate here is higher than it would
-          be for a modern chat model writing something new. The mechanism and the measurement are real; treat the bigger
-          speed-ups as a best case.
+          Asked for the most likely next token every time, GPT-2 falls into loops after a few dozen tokens. The story in fig
+          18.1 keeps saying she was a very good cook. Repetition is easy to guess, so every acceptance rate here is higher than
+          it would be for a modern chat model writing something new. The mechanism and the measurement are real, but treat
+          the bigger speed-ups as a best case.
         </p>
       </Deeper>
     </>
