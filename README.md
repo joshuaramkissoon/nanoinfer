@@ -130,4 +130,7 @@ How the code fits together: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Licence
 
-TBD (MIT proposed). `Cargo.toml` says MIT, but there is no `LICENSE` file yet.
+- Code: MIT, see [`LICENSE`](LICENSE) (matches `license = "MIT"` in `Cargo.toml`).
+- Prose and figures (the course text in `web/src/learn/`, the writing in `docs/*.md`, and the figures as visual works):
+  CC BY 4.0, see [`LICENSE-CONTENT`](LICENSE-CONTENT). Where a file mixes the two, the code is MIT and the prose it
+  renders is CC BY 4.0.
