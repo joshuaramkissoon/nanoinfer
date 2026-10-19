@@ -116,7 +116,7 @@ export default function FieldGuide() {
       </header>
 
       <section className="fg-col fg-map" data-ask-section>
-        <h2 className="fg-h2">The map: limits → workarounds</h2>
+        <h2 className="fg-h2">The map: six limits and their workarounds</h2>
         <ConstraintMap onPick={(id) => openId(id)} />
         <p className="lr-small fg-legend">
           <span className="sw" style={{ background: cc.c2 }} /> memory <span className="sw" style={{ background: cc.c1 }} /> compute{" "}
@@ -149,7 +149,7 @@ export default function FieldGuide() {
       {!groups.length && <p className="fg-col nv-muted">No term matches “{q}”.</p>}
 
       <p className="fg-col lr-hint nv-muted">
-        New here? The course starts with{" "}
+        If you are new, the course starts with{" "}
         <a href="/learn/what-is-inference" onClick={linkTo("/learn/what-is-inference")}>
           part 0: inference for systems engineers
         </a>

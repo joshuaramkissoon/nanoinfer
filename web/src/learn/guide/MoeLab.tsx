@@ -87,7 +87,7 @@ export function MoeLab() {
           )),
         )}
         {Array.from({ length: shownTok }, (_, i) => (
-          <g key={i} onPointerEnter={() => setHov(i)} style={{ cursor: "pointer" }}>
+          <g key={i} onPointerEnter={() => setHov(i)} onClick={() => setHov(i)} style={{ cursor: "pointer" }}>
             <rect x={tx(i) - 26} y={tokY - 10} width={52} height={22} rx={5} fill={panel} stroke={sel === i ? pal.accent : pal.rule} strokeWidth={sel === i ? 1.6 : 1} />
             <text x={tx(i)} y={tokY + 5} textAnchor="middle" fontSize={T.xs} fill={pal.fg}>
               {WORDS[i % WORDS.length]}
@@ -120,16 +120,16 @@ export function MoeLab() {
         )}
       </svg>
       <div className="lr-stats">
-        <Stat k="compute per token" v={`${nf(active, 1)}B`} unit={`of ${nf(TOTAL, 1)}B params`} accent />
+        <Stat k="compute per token" v={`${nf(active, 1)}B`} unit={`of ${nf(TOTAL, 1)}B weights`} accent />
         <Stat k="must sit in memory" v={`${nf(TOTAL * 2)} GB`} unit="bf16, all experts" />
         <Stat k="read this step" v={`${nf(readGB)} GB`} unit={`${touched} of 8 experts touched`} />
         {n > 1 && <Stat k="busiest expert" v={`${(hot / fair).toFixed(1)}×`} unit="its fair share" />}
       </div>
       <p className="lr-note">
-        Lines (<Swatch c={cc.c3}>olive</Swatch>) are the router's dispatch; <Swatch c={cc.c1}>ember</Swatch> experts are doing
-        work, bars under them count tokens received (dashed line: a perfectly even share). Hover a token to see its route.
-        With one token per step, only {k} experts' weights are read: it decodes like a {nf(active, 0)}B model. At 64 tokens
-        nearly every expert is touched, so each step reads almost all {nf(TOTAL * 2)} GB, shared across the batch.
+        <Swatch c={cc.c3}>Olive</Swatch> lines: the router's dispatch. <Swatch c={cc.c1}>Ember</Swatch> experts are working; the
+        bar under each counts the tokens it received (dashed line: an even share). Select a token to see its route. With 1
+        token per step, only {k} experts' weights are read, so it decodes like a {nf(active, 0)}B model. At 64 tokens nearly
+        every expert is touched, so each step reads almost all {nf(TOTAL * 2)} GB, shared across the batch.
       </p>
     </div>
   );

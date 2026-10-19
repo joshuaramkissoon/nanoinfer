@@ -24,7 +24,7 @@ export const CONSTRAINTS: Constraint[] = [
     key: "bandwidth",
     role: "memory",
     name: "Memory bandwidth",
-    why: "Every token reads every weight. Decode waits on bytes, not maths.",
+    why: "Every token reads every weight, so decode waits on bytes arriving from memory.",
     techniques: [
       { label: "quantisation", to: "smaller-numbers" },
       { label: "batching", to: "batching" },
@@ -50,7 +50,7 @@ export const CONSTRAINTS: Constraint[] = [
     key: "sequential",
     role: "time",
     name: "Sequential decode",
-    why: "Token n+1 needs token n. One answer can't be parallelised across its tokens.",
+    why: "Token n+1 needs token n, so one answer can't compute its tokens in parallel.",
     techniques: [
       { label: "KV cache", to: "kv-cache" },
       { label: "speculative decoding", to: "#speculative" },
@@ -61,11 +61,11 @@ export const CONSTRAINTS: Constraint[] = [
     key: "compute",
     role: "compute",
     name: "Compute",
-    why: "Prefill and big batches do enough maths per byte to wait on arithmetic instead.",
+    why: "Prefill and big batches do enough arithmetic per byte that they wait on it instead of memory.",
     techniques: [
       { label: "tensor cores", to: "#tensor-cores" },
       { label: "FlashAttention", to: "#flashattention" },
-      { label: "SIMD + threads", to: "faster-arithmetic" },
+      { label: "SIMD and threads", to: "faster-arithmetic" },
       { label: "MoE (fewer FLOPs/token)", to: "#moe" },
     ],
   },
@@ -86,7 +86,7 @@ export const CONSTRAINTS: Constraint[] = [
     key: "traffic",
     role: "time",
     name: "Unpredictable traffic",
-    why: "Requests arrive at random, prompts and answers vary 100× in length, and users want low latency.",
+    why: "Requests arrive at random, prompts and answers vary 100× in length, and users expect low latency.",
     techniques: [
       { label: "continuous batching", to: "#continuous-batching" },
       { label: "prefix caching", to: "#prefix-caching" },

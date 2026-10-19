@@ -118,11 +118,11 @@ export function ParallelMini({ mode }: { mode: ParMode }) {
     return out;
   };
   const label: Record<ParMode, string> = {
-    data: "every GPU holds the whole model; each serves different requests",
-    tensor: "every GPU holds a slice of every layer; all-reduce after each",
-    pipeline: "every GPU holds some layers; activations hop GPU to GPU",
-    expert: "shared layer everywhere; each GPU holds different experts; tokens shuffle all-to-all",
-    sequence: "every GPU holds a chunk of one long sequence's tokens; attention exchanges keys/values",
+    data: "every GPU holds the whole model and serves its own requests",
+    tensor: "every GPU holds a slice of every layer; they all-reduce after each layer",
+    pipeline: "every GPU holds some layers; activations pass from GPU to GPU",
+    expert: "every GPU holds the shared layers and different experts; tokens move all-to-all",
+    sequence: "every GPU holds a chunk of one long sequence; attention exchanges keys and values",
   };
   return (
     <svg viewBox={`0 0 ${W} 140`} style={{ width: "100%", maxWidth: 480 }} role="img" aria-label={label[mode]}>

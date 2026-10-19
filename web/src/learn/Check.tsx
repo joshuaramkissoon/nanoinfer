@@ -56,7 +56,7 @@ export function CheckYourself({ qs, title = "Check yourself" }: { qs: Q[]; title
     <section className="lr-check" data-ask-section>
       <div className="lr-check-head">
         <h2>{title}</h2>
-        <span className="lr-small">intuition, not trivia · pick one to see why</span>
+        <span className="lr-small">pick an answer to see the reasoning</span>
       </div>
       <ol>
         {qs.map((q, i) => (
