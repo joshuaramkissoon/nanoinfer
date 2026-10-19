@@ -143,6 +143,35 @@ fn gpu_greedy_paths_agree_with_cpu_argmax() {
         let mut b = engine.session();
         assert_eq!(b.step_greedy(&prompt).unwrap(), first, "{stage}");
         assert_eq!(b.decode_greedy(first, 16).unwrap(), cpu, "{stage} decode_greedy");
+        // Streaming delivery, with and without lookahead, gives the same tokens;
+        // stopping early rolls the in-flight forwards back, so decoding resumes
+        // exactly where the delivered tokens end.
+        for depth in [1, 2, 3] {
+            let mut c = engine.session();
+            c.step_greedy(&prompt).unwrap();
+            let mut got = vec![];
+            assert_eq!(
+                c.decode_stream(first, 16, depth, |t| {
+                    got.push(t);
+                    true
+                })
+                .unwrap(),
+                16
+            );
+            assert_eq!(got, cpu, "{stage} decode_stream depth {depth}");
+            let mut d = engine.session();
+            d.step_greedy(&prompt).unwrap();
+            let mut got = vec![];
+            let k = d
+                .decode_stream(first, 16, depth, |t| {
+                    got.push(t);
+                    got.len() < 5
+                })
+                .unwrap();
+            assert_eq!((k, d.len()), (5, prompt.len() + 5), "{stage} stop at depth {depth}");
+            got.extend(d.decode_greedy(got[4], 11).unwrap());
+            assert_eq!(got, cpu, "{stage} resume after stop, depth {depth}");
+        }
     }
 }
 

@@ -230,6 +230,79 @@ impl<'e> MetalSession<'e> {
         Ok(self.gen.slice::<u32>(pos0 + n + 1)[pos0 + 1..].to_vec())
     }
 
+    /// Greedy decode that hands each token to `on_token` as soon as its
+    /// forward completes, the way a server streams to a client. At most
+    /// `depth` forwards are in flight: `depth = 1` commits a token, waits,
+    /// reads its argmax back and only then encodes the next (per-token sync,
+    /// like llama.cpp); `depth = 2` commits token t+1 before reading token t
+    /// (one token of lookahead, like MLX's async eval), so the GPU never idles
+    /// while the CPU reads back and encodes. `on_token` returning `false`
+    /// stops; forwards already in flight finish and are rolled back, so the
+    /// session ends just after the last delivered token. Returns the number of
+    /// tokens delivered. Stages without the pipelined recipe fall back to
+    /// [`step_greedy`](Self::step_greedy) per token (depth 1).
+    pub fn decode_stream(
+        &mut self,
+        first: u32,
+        n: usize,
+        depth: usize,
+        mut on_token: impl FnMut(u32) -> bool,
+    ) -> Result<usize, String> {
+        self.check(&[first])?;
+        let rec = self.e.recipe;
+        if !(rec.pipelined && rec.gpu_argmax && rec.fused != Fusion::None) {
+            let mut next = first;
+            for i in 0..n {
+                next = self.step_greedy(&[next])?;
+                if !on_token(next) {
+                    return Ok(i + 1);
+                }
+            }
+            return Ok(n);
+        }
+        if self.pos + n > self.max_seq {
+            return Err(format!("context full: {} > {}", self.pos + n, self.max_seq));
+        }
+        let depth = depth.max(1);
+        let pos0 = self.pos;
+        self.gen.write(pos0, &[first]);
+        let mut stats = RunStats::default();
+        let mut inflight = std::collections::VecDeque::with_capacity(depth);
+        let (mut committed, mut delivered, mut stopped) = (0, 0, false);
+        while delivered < n {
+            // Keep `depth` forwards queued; forward i reads gen[pos0 + i] (written
+            // by forward i-1's argmax on the GPU) and writes gen[pos0 + i + 1].
+            while !stopped && committed < n && inflight.len() < depth {
+                let mut r = self.e.gpu.runner(rec.sync);
+                self.encode_decode_fused(&mut r, true);
+                stats.dispatches += r.stats.dispatches;
+                inflight.extend(r.commit());
+                self.pos += 1;
+                committed += 1;
+            }
+            let Some(p) = inflight.pop_front() else { break };
+            stats.gpu_seconds += p.wait();
+            stats.command_buffers += 1;
+            if stopped {
+                continue; // draining forwards past the stop
+            }
+            // Forward `delivered` is complete; later ones only write later slots.
+            let slot = pos0 + delivered + 1;
+            let tok = self.gen.slice::<u32>(slot + 1)[slot];
+            delivered += 1;
+            if !on_token(tok) {
+                stopped = true;
+            }
+        }
+        for p in inflight {
+            stats.gpu_seconds += p.wait();
+            stats.command_buffers += 1;
+        }
+        self.pos = pos0 + delivered;
+        self.last = stats;
+        Ok(delivered)
+    }
+
     /// `out[n, rows] = x[n, cols] · Wᵀ (+ bias)`.
     #[allow(clippy::too_many_arguments)]
     fn linear(
