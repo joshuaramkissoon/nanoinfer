@@ -70,13 +70,13 @@ pub unsafe fn dot_hilo(w: &[BlockQ8], hi: &[BlockQ8], lo: &[BlockQ8]) -> f32 {
 }
 
 /// # Safety
-/// Always safe (scalar fallback); `unsafe` only to match the NEON signature.
+/// Always safe (simd128 on wasm, scalar elsewhere); `unsafe` only to match the NEON signature.
 #[cfg(not(target_arch = "aarch64"))]
 pub unsafe fn dot_hilo(w: &[BlockQ8], hi: &[BlockQ8], lo: &[BlockQ8]) -> f32 {
     let mut s = 0f32;
     for ((wb, h), l) in w.iter().zip(hi).zip(lo) {
-        let ih: i32 = wb.qs.iter().zip(&h.qs).map(|(&a, &b)| a as i32 * b as i32).sum();
-        let il: i32 = wb.qs.iter().zip(&l.qs).map(|(&a, &b)| a as i32 * b as i32).sum();
+        let ih = super::i8dot::isum_q8(&wb.qs, &h.qs);
+        let il = super::i8dot::isum_q8(&wb.qs, &l.qs);
         s += wb.d * (h.d * ih as f32 + l.d * il as f32);
     }
     s

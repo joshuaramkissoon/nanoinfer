@@ -27,6 +27,7 @@
 pub mod attn_neon;
 pub mod f16;
 pub mod fastops;
+pub mod i8dot;
 pub mod lowlat;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;

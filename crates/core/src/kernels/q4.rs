@@ -62,6 +62,7 @@ pub unsafe fn dot_q4(w: &[BlockQ4], x: &[BlockQ8]) -> f32 {
     s
 }
 
+#[cfg(target_arch = "aarch64")]
 fn dot_block_scalar(w: &BlockQ4, x: &BlockQ8) -> f32 {
     let mut isum = 0i32;
     for j in 0..QK / 2 {
@@ -74,8 +75,10 @@ fn dot_block_scalar(w: &BlockQ4, x: &BlockQ8) -> f32 {
 #[cfg(not(target_arch = "aarch64"))]
 /// # Safety
 /// Always safe (scalar fallback); `unsafe` only to match the NEON signature.
+/// Block sums from [`super::i8dot::isum_q4`] (simd128 / relaxed-SIMD on wasm), scaled
+/// in the same order as the scalar loop: bit-identical to it.
 pub unsafe fn dot_q4(w: &[BlockQ4], x: &[BlockQ8]) -> f32 {
-    w.iter().zip(x).map(|(a, b)| dot_block_scalar(a, b)).sum()
+    w.iter().zip(x).map(|(a, b)| super::i8dot::isum_q4(&a.qs, &b.qs) as f32 * a.d * b.d).sum()
 }
 
 /// One Q4_0 row → f32 (prefill panels).

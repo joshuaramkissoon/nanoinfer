@@ -11,7 +11,7 @@
 //!
 //! On aarch64 the inner sum is `sdot` (`vdotq_s32`): 16 int8 × int8 products
 //! summed into 4 int32 lanes in one instruction, i.e. 4× the multiply-adds of an
-//! f32 FMA per instruction, on data 4× smaller. Elsewhere (wasm) a scalar i32 loop.
+//! f32 FMA per instruction, on data 4× smaller. Elsewhere [`super::i8dot`] (simd128 on wasm).
 //! Prefill dequantises 4-row panels to f32 and uses the FMA tile (see
 //! [`super::packed`]): x stays f32 there.
 
@@ -74,6 +74,7 @@ pub unsafe fn dot_q8(w: &[BlockQ8], x: &[BlockQ8]) -> f32 {
     s
 }
 
+#[cfg(target_arch = "aarch64")]
 fn dot_block_scalar(w: &BlockQ8, x: &BlockQ8) -> f32 {
     let isum: i32 = w.qs.iter().zip(&x.qs).map(|(&a, &b)| a as i32 * b as i32).sum();
     isum as f32 * w.d * x.d
@@ -82,8 +83,10 @@ fn dot_block_scalar(w: &BlockQ8, x: &BlockQ8) -> f32 {
 #[cfg(not(target_arch = "aarch64"))]
 /// # Safety
 /// Always safe (scalar fallback); `unsafe` only to match the NEON signature.
+/// Each block's integer sum comes from [`super::i8dot::isum_q8`] (simd128 / relaxed-SIMD
+/// on wasm), scaled in the same order as the scalar loop: bit-identical to it.
 pub unsafe fn dot_q8(w: &[BlockQ8], x: &[BlockQ8]) -> f32 {
-    w.iter().zip(x).map(|(a, b)| dot_block_scalar(a, b)).sum()
+    w.iter().zip(x).map(|(a, b)| super::i8dot::isum_q8(&a.qs, &b.qs) as f32 * a.d * b.d).sum()
 }
 
 /// One Q8_0 row → f32 (prefill panels). Plain loop: LLVM vectorises it.
