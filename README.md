@@ -148,6 +148,22 @@ How the code fits together: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): crates, stages, traces and how to add a stage.
 - The course: <http://localhost:5199/learn> when the web dev server is running.
 
+## Stage tags
+
+Every stage is still runnable at `HEAD` (`--stage <name>`), but each also has an annotated git tag on the commit
+that introduced it, so you can read the code exactly as it was when that stage landed:
+
+- CPU: `stage-00-naive`, `stage-01-kv-cache`, … `stage-15-q8-prefill` (numbered as in the LOG)
+- Metal: `metal-01-naive` … `metal-11-spec` (numbered as the GPU stages in `docs/WRITEUP.md`), plus
+  `metal-12-pipelined-f32`
+- WebGPU: `webgpu-01-port`, `webgpu-02-round2`, `webgpu-03-vec`; the browser rungs: `browser-rungs`
+
+```sh
+git tag -n1 'stage-*'              # list them with a one-line description
+git checkout stage-09-q8           # read the code as it was (git checkout - to come back)
+git diff stage-08-f16 stage-09-q8  # exactly what one idea changed
+```
+
 ## Licence
 
 - Code: MIT, see [`LICENSE`](LICENSE) (matches `license = "MIT"` in `Cargo.toml`).
