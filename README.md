@@ -42,7 +42,23 @@ Where we stand:
   instructions; we use the older dot-product ones).
 - **CPU decode is roughly level.** Q8 and Q4 are within 1.5% of llama.cpp. f16 and f32 are 8% and 16% behind: those
   older stages never moved onto the low-latency thread pool the quantised ones use.
-- f32 decode on the GPU is 8% behind llama.cpp.
+- f32 decode on the GPU was 8% behind llama.cpp with `metal-mma`, which predates the fused, pipelined decode path.
+  `metal-pipelined-f32` (19 Oct) puts f32 on that path: +10% in an interleaved A/B (168 → 186 tok/s in a slower
+  session), about level with llama.cpp's 192 once scaled to head-to-head conditions (est.; the re-run will confirm).
+- **The GPU decode numbers are pipelined**: every token's work is queued up front and the CPU never waits, which is
+  what the GPU can do but not what a chat server sees. Reading each token back before encoding the next costs ~0.37 ms
+  per token, and then nanoinfer is *behind* llama.cpp and MLX at every format. Keeping one token in flight (commit
+  t+1 before reading t) gets it all back:
+
+  | format | pipelined | streaming, per-token sync | streaming, one token ahead |
+  |---|---|---|---|
+  | f32 | 186 | 174 | 185 |
+  | f16 | 347 | 305 | 339 |
+  | Q8 | 589 | 486 | 577 |
+  | Q4 + Q8 head | 760 | 593 | 760 |
+
+  Same session, 19 Oct, ~3–4% slower than the head-to-head session (metal-lanes 760 vs 787). Details:
+  [`docs/LOG.md`](docs/LOG.md#metal-f32-on-the-pipelined-path-and-what-streaming-costs-19-oct).
 - WebGPU (the same WGSL through `wgpu`) reaches 556–569 tok/s at Q8 natively and 558 in Chrome on the same machine,
   about 90% of the matching hand-written Metal stage.
 
@@ -62,7 +78,7 @@ cargo run --release -p nanoinfer-cli -- generate --stage naive --tokens 10 --pro
 
 # benchmark a stage: prefill and decode tok/s, plus its share of the memory-bandwidth ceiling
 cargo run --release -p nanoinfer-cli -- bench --stage q8-kv16 --tokens 64
-cargo run --release -p nanoinfer-cli -- bench --stage metal-lanes      # Apple GPU (macOS)
+cargo run --release -p nanoinfer-cli -- bench --stage metal-lanes      # Apple GPU (macOS): pipelined, streaming, lookahead
 cargo run --release -p nanoinfer-cli -- bench --stage webgpu-vec       # wgpu, native
 
 # quality gate for lossy stages: WikiText-2 perplexity, KL and top-1 against f32
@@ -72,6 +88,10 @@ cargo run --release -p nanoinfer-cli -- ppl --stage q8-kv16 --reference unrolled
 # every stage, on every backend, against Hugging Face reference logits
 cargo test --release -- --test-threads=2
 ```
+
+Each bench appends a line to `bench/results.jsonl` with the commit, rustc, build flags, load average, QoS and power
+source. It refuses to record when `crates/` or the Cargo files have uncommitted changes (`--allow-dirty` records anyway,
+marked `git_dirty`; `--no-record` skips the file).
 
 Without weights the reference tests print SKIP and pass. Set `NANOINFER_REQUIRE_WEIGHTS=1` to make that a failure
 (the WebGPU suite also fails then if any stage is unsupported on the GPU).

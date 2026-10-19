@@ -2604,3 +2604,58 @@ the weight and head formats are derived from the packed weights the session
 actually builds. A unit test checks `decode_bytes` against the packed matrices'
 real `bytes()` for every stage, so this can't drift silently again.
 `bench/results.jsonl` lines recorded before the fix keep the old figure.
+
+## Metal f32 on the pipelined path, and what streaming costs (19 Oct)
+
+Two things from the engine review (`docs/review/04-engine.md` §2.5 item 8, §3.2e).
+
+**Conditions.** Clean engine tree (records `2e20ebc`/`de3b77a`, `git_dirty: false`), load 1.4–2.9, AC power, a
+video encoder (screen sharing) running in the background. metal-lanes ran at 755–760 tok/s pipelined, against 787
+in the head-to-head, so absolute numbers here are ~3–4% low; compare within this session. Every row is the best of
+2–3 rounds of 7 runs (+2 warmup), stages strictly one at a time.
+
+### metal-pipelined-f32
+
+- **Hypothesis:** metal-mma (the f32 row of the head-to-head, 176 vs llama.cpp's 192) predates GPU argmax, epilogue
+  fusion and pipelining. The f32 fused-epilogue kernels already exist, so f32 on the pipelined path should gain
+  what Q4 gained there.
+- **Change:** one recipe line, `Recipe { dtype: F32, head_dtype: F32, attn: Flash, ..pipelined }` (f32 KV; lanes
+  don't apply to f32). Covered by `MetalStage::ALL` in every Metal reference test.
+- **Result** (interleaved A/B, 3 rounds): metal-mma **167.7–168.5** tok/s (69% of its 243 tok/s ceiling, 135
+  dispatches per token, GPU busy 93% of the wall); metal-pipelined-f32 **185.0–185.8** (76%, 101 dispatches, GPU
+  busy 100%). **+10%.** Prefill also moves a little (4.5k → 4.7k) from flash attention.
+- **Against llama.cpp:** its 192 was measured in the head-to-head session, where metal-mma made 176. Scaling by
+  today's deficit (176 / 168.5) puts metal-pipelined-f32 at ~194 in those conditions (est.), level with llama.cpp.
+  The randomised head-to-head re-run will settle it.
+
+### Streaming decode: pipelined isn't what a chat server sees
+
+Every metal-* decode number so far is **pipelined**: all 64 command buffers are committed up front and each forward
+reads the token the previous argmax wrote on the GPU, so the CPU never waits. That is a fair "what the GPU can do",
+but a server has to read every token back (to stream it, detokenise it, check for a stop) before it knows what comes
+next. `MetalSession::decode_stream(first, n, depth, on_token)` now does that, and `bench` reports it for pipelined
+stages:
+
+- **streaming** (depth 1): commit token t, wait, read the 4-byte argmax back, detokenise, then encode t+1. Per-token
+  sync, as llama-bench does (per the review; not verified in its source).
+- **lookahead** (depth 2): commit t+1 before reading t back, so the GPU never idles while the CPU reads and encodes.
+  MLX's async eval does the equivalent. A server can do this; a stop is noticed one token late and the in-flight
+  forward is rolled back (tested: stopping after 5 tokens and resuming reproduces the greedy sequence).
+
+| stage | pipelined | streaming (depth 1) | lookahead (depth 2) | MLX | llama.cpp |
+|---|---|---|---|---|---|
+| metal-pipelined-f32 | 185.8 | 173.5 (93%) | 184.5 (99%) | 178 | 192 |
+| metal-pipelined-f16 | 347.2 | 304.8 (88%) | 339.0 (98%) | 342 | 333 |
+| metal-pipelined-q8 | 589.0 | 485.8 (82%) | 576.9 (98%) | 534 | 502 |
+| metal-lanes (Q4 + Q8 head) | 759.8 | 593.2 (78%) | 759.8 (100%) | 694 | 622 |
+
+(tok/s; MLX and llama.cpp columns are the 18 Oct head-to-head, not this session.)
+
+- **Per-token sync costs a flat ~0.37 ms per token** at every format (1/593 − 1/760 = 0.37 ms; f32: 0.38 ms): the
+  CPU encoding ~100 dispatches after the readback while the GPU sits idle, plus commit-to-completion latency. The
+  review guessed ~130 µs and ~715 tok/s; it's nearly three times that, so the hit is 22% at Q4.
+- **Honest consequence:** with per-token sync this engine is *behind* llama.cpp at every format (593 vs 622 at Q4,
+  486 vs 502 at Q8, 305 vs 333 at f16) and behind MLX. Its decode lead over both holds only for a loop that keeps
+  one token in flight, and with that loop it holds in full: lookahead keeps 98–100% of pipelined.
+- **So the server design is settled:** depth-2 lookahead, not a sync loop. And llama.cpp encodes a token's work
+  faster than we do, which is worth a look (it splits encoding across threads; unverified here).

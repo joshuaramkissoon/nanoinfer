@@ -243,6 +243,23 @@ chart in this post is the real engine, running in your browser.
 - **Line:** "Halving the number of GPU kernels did nothing. Not asking the GPU whether it
   was done made it 30% faster."
 
+### GPU stage 6, revisited: f32 catches up, and what "not waiting" costs a real server (19 Oct)
+
+- **f32 on the pipelined path** (`metal-pipelined-f32`): the f32 row of the head-to-head was still the pre-fusion
+  `metal-mma`. One recipe line moves it onto the fused, pipelined decode: **168 → 186 tok/s (+10%)**, interleaved
+  in one session, GPU busy 100% of the wall. Scaled to head-to-head conditions that's ~194 (est.), level with
+  llama.cpp's 192.
+- **The catch in "not waiting".** A chat server must read every token back before it knows the next. Doing that
+  per token (commit, wait, read, detokenise, then encode the next) costs a flat **~0.37 ms per token**: Q4 drops
+  760 → **593 tok/s**, below llama.cpp (622) and MLX (694). Keep one token in flight (commit t+1 before reading t)
+  and it's back to **760**.
+- **Aha:** the whole GPU climb was about the GPU never waiting for the CPU. The same rule decides how you write
+  the server loop: a depth-2 lookahead is the difference between first and third.
+- **Viz:** three lanes per mode (pipelined / per-token sync / lookahead), CPU encode and GPU work for 4 tokens; the
+  sync lane shows the GPU gap after every token.
+- **Line:** "Our fastest number is real, but it assumes nobody is reading. Read every token and we're third; read
+  one token behind and we're first again."
+
 ### GPU stage 7: flash-decoding and flash attention
 
 - **Hypothesis:** at long context the KV cache, not the weights, is the problem. At 960
