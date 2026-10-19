@@ -32,8 +32,9 @@ function Question({ q, i }: { q: Q; i: number }) {
           return (
             <button key={j} className={`lr-q1-opt${state}`} onClick={() => setPick(j)} aria-pressed={pick === j}>
               <span className="m" aria-hidden>
-                {done && j === q.answer ? "✓" : done && j === pick ? "×" : String.fromCharCode(97 + pos)}
+                {done && j === q.answer ? "✓" : done && j === pick ? "×" : ""}
               </span>
+              <span className="nv-sr">{String.fromCharCode(97 + pos)}. </span>
               <span>{o}</span>
             </button>
           );
@@ -41,7 +42,7 @@ function Question({ q, i }: { q: Q; i: number }) {
       </div>
       {done && (
         <p className="lr-q1-why" aria-live="polite">
-          <span className="k">{pick === q.answer ? "yes" : "not quite"}</span>
+          <span className="k">{pick === q.answer ? "Yes." : "Not quite."}</span>
           {q.why}
         </p>
       )}
@@ -54,7 +55,7 @@ export function CheckYourself({ qs, title = "Check yourself" }: { qs: Q[]; title
   return (
     <section className="lr-check" data-ask-section>
       <div className="lr-check-head">
-        <span className="lr-idea-k">{title}</span>
+        <h2>{title}</h2>
         <span className="lr-small">intuition, not trivia · pick one to see why</span>
       </div>
       <ol>

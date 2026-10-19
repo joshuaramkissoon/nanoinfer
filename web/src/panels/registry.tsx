@@ -20,8 +20,10 @@ export interface PanelDef {
   id: string;
   title: string;
   Component: ComponentType;
-  /** 1–3 sentence learner caption under the figure */
+  /** 1–3 sentence learner caption under the figure: what you're looking at */
   caption: ReactNode;
+  /** one concrete thing to do with the figure (shown as "→ Try …") */
+  tryit?: ReactNode;
   /** optional prose shown before the figure */
   intro?: ReactNode;
   narrow?: boolean;
@@ -44,9 +46,13 @@ export const PANELS: PanelDef[] = [
     ),
     caption: (
       <>
-        <b>What you're looking at:</b> the prompt (grey) and what GPT-2 wrote, each token underlined by how confident the
-        model was. On the right, the probabilities behind the selected token. Below, speed and the time each token took.{" "}
-        <b>Try:</b> generate with <i>Starting point</i>, then <i>KV cache</i>, and compare the ms-per-token bars; click any token, then a rival,
+        The prompt (grey) and what GPT-2 wrote, each token underlined by how confident the
+        model was. On the right, the probabilities behind the selected token. Below, speed and the time each token took.
+      </>
+    ),
+    tryit: (
+      <>
+        Generate with <i>Starting point</i>, then <i>KV cache</i>, and compare the ms-per-token bars; click any token, then a rival,
         to branch the story.
       </>
     ),
@@ -66,8 +72,13 @@ export const PANELS: PanelDef[] = [
     ),
     caption: (
       <>
-        <b>What you're looking at:</b> one real decode step. Each row of the strip is a layer and each segment an operation,
-        its width the measured time; colours are operation kinds (legend below it). <b>Try:</b> scroll and watch the counters;
+        One real decode step. Each row of the strip is a layer and each segment an operation,
+        its width the measured time; colours are operation kinds (legend below it).
+      </>
+    ),
+    tryit: (
+      <>
+        Scroll and watch the counters;
         notice the last row, the LM head, is the single biggest block.
       </>
     ),
@@ -86,9 +97,13 @@ export const PANELS: PanelDef[] = [
     ),
     caption: (
       <>
-        <b>What you're looking at:</b> columns are positions in the text, rows are depths (top = after the embedding, bottom =
-        after layer 12). Each cell shows the top guess for the next token at that depth.{" "}
-        <b>Try:</b> click a column to see its guesses sharpen with depth.
+        Columns are positions in the text, rows are depths (top = after the embedding, bottom =
+        after layer 12). Each cell shows the top guess for the next token at that depth.
+      </>
+    ),
+    tryit: (
+      <>
+        Click a column to see its guesses sharpen with depth.
       </>
     ),
   },
@@ -107,8 +122,13 @@ export const PANELS: PanelDef[] = [
     ),
     caption: (
       <>
-        <b>What you're looking at:</b> each small square is one head's attention pattern: row = the token doing the looking,
-        column = the earlier token it looks at; the further a cell's colour is from the background, the more attention. <b>Try:</b> click a square to enlarge it; the
+        Each small square is one head's attention pattern: row = the token doing the looking,
+        column = the earlier token it looks at; the further a cell's colour is from the background, the more attention.
+      </>
+    ),
+    tryit: (
+      <>
+        Click a square to enlarge it; the
         diagonal-line heads look at the previous token, the left-edge heads at the first token.
       </>
     ),
@@ -129,8 +149,13 @@ export const PANELS: PanelDef[] = [
     ),
     caption: (
       <>
-        <b>What you're looking at:</b> the fastest decode this tab could manage for the run in fig 1 (its backend's memory
-        bandwidth ÷ the bytes its number format reads per token), and how close the engine got. <b>Try:</b> pick another
+        The fastest decode this tab could manage for the run in fig 1 (its backend's memory
+        bandwidth ÷ the bytes its number format reads per token), and how close the engine got.
+      </>
+    ),
+    tryit: (
+      <>
+        Pick another
         number format: halving the bytes doubles the speed limit.
       </>
     ),
@@ -150,9 +175,14 @@ export const PANELS: PanelDef[] = [
     ),
     caption: (
       <>
-        <b>What you're looking at:</b> across, work per byte; up, arithmetic per second achieved. Dots are operations from the
+        Across, work per byte; up, arithmetic per second achieved. Dots are operations from the
         last run. Dots near the slanted roof are memory-bound, near the flat roof compute-bound. A GPU stage runs the whole
-        token as one GPU job, so it shows as a single dot under the GPU's memory roof. <b>Try:</b> switch CPU stages in fig 1
+        token as one GPU job, so it shows as a single dot under the GPU's memory roof.
+      </>
+    ),
+    tryit: (
+      <>
+        Switch CPU stages in fig 1
         and rerun: the matmul dots climb toward the roof.
       </>
     ),
@@ -172,8 +202,13 @@ export const PANELS: PanelDef[] = [
     ),
     caption: (
       <>
-        <b>What you're looking at:</b> two lanes writing identical text, one without the cache and one with it. Watch the
-        time each token takes as the text grows: without the cache it climbs; with it, it stays flat. <b>Try:</b> let it run long and watch the gap widen.
+        Two lanes writing identical text, one without the cache and one with it. Watch the
+        time each token takes as the text grows: without the cache it climbs; with it, it stays flat.
+      </>
+    ),
+    tryit: (
+      <>
+        Let it run long and watch the gap widen.
       </>
     ),
   },
@@ -192,8 +227,13 @@ export const PANELS: PanelDef[] = [
     ),
     caption: (
       <>
-        <b>What you're looking at:</b> tokens per second for each stage. Dark bars are the native engine on our M4; orange are
-        the same Rust compiled for the browser (dashed = recorded, solid = measured in your tab). <b>Try:</b> switch to{" "}
+        Tokens per second for each stage. Dark bars are the native engine on our M4; orange are
+        the same Rust compiled for the browser (dashed = recorded, solid = measured in your tab).
+      </>
+    ),
+    tryit: (
+      <>
+        Switch to{" "}
         <b>prefill</b> to see which optimisations only help reading the prompt.
       </>
     ),

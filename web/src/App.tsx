@@ -8,14 +8,14 @@ import { fmtBytes, fmtMs, sig } from "./lib/fmt";
 
 export default function App() {
   useEffect(() => {
-    document.title = "The lab · nanoinfer";
+    document.title = "The lab · The Climb";
     void boot();
   }, []);
   return (
     <main className="nv lr" data-askable data-ask-title="The lab">
       <TopBar here="lab" crumb={<span> / lab</span>} />
 
-      <header className="nv-col nv-hero" data-ask-section>
+      <header className="nv-col nv-hero" id="content" tabIndex={-1} data-ask-section>
         <div className="nv-kicker">the lab</div>
         <h1 className="nv-h1">
           The lab: every stage of the engine, running in this tab.
@@ -31,14 +31,14 @@ export default function App() {
       {PANELS.map((p, i) => (
         <section key={p.id} data-ask-section>
           {p.intro && <div className="nv-col nv-prose">{p.intro}</div>}
-          <Figure id={p.id} n={i + 1} title={p.title} caption={p.caption} narrow={p.narrow}>
+          <Figure id={p.id} n={i + 1} title={p.title} caption={p.caption} tryit={p.tryit} wide={!p.narrow}>
             <p.Component />
           </Figure>
         </section>
       ))}
 
       <footer className="nv-col nv-footer">
-        nanoinfer · GPT-2 124M weights by OpenAI (MIT) · engine, kernels and tokenizer written from scratch · three wasm builds
+        The Climb · the nanoinfer engine · GPT-2 124M weights by OpenAI (MIT) · engine, kernels and tokenizer written from scratch · three wasm builds
         (simd128, relaxed-SIMD, threads), picked by what your browser supports · weights downloaded as f16 and widened to f32
         on load · WebGPU stages run where the browser supports them.
       </footer>
@@ -88,7 +88,7 @@ function EngineCard() {
           <PlusIcon />
           engine details
         </summary>
-      <div className="nv-engine-row nv-muted" style={{ fontSize: "0.72rem" }}>
+      <div className="nv-engine-row nv-muted" style={{ fontSize: "var(--t-xs)" }}>
         <span>stages: {s.stages.map((x) => x.name).join(" → ") || "…"}</span>
         <span>
           wasm build: {s.build ?? "…"}
@@ -103,7 +103,7 @@ function EngineCard() {
             loaded in {fmtMs(s.load.ms)} {s.load.fromCache ? "(from OPFS cache)" : ""}{" "}
             <button
               className="nv-iconbtn"
-              style={{ fontSize: "0.72rem", textDecoration: "underline", padding: 0 }}
+              style={{ fontSize: "var(--t-xs)", textDecoration: "underline", padding: 0 }}
               onClick={async () => {
                 await engine.clearCache();
                 setState({ load: { ...s.load!, fromCache: false } });

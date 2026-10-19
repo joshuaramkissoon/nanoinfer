@@ -8,6 +8,7 @@ import { CHAPTERS, GUIDE_HREF, chapterHref } from "../learn/chapters";
 import { linkTo } from "../learn/router";
 import { Journey } from "./Journey";
 import { TopBar } from "./TopBar";
+import { useAskAvailable } from "../ask/AskLayer";
 import "../learn/learn.css";
 import "../learn/p0.css";
 
@@ -190,17 +191,18 @@ function Demo() {
 
 export default function Landing() {
   useEffect(() => {
-    document.title = "nanoinfer · how a language model runs, and how fast";
+    document.title = "The Climb · an inference engine, climbing toward the speed limit";
     void boot();
   }, []);
   const first = CHAPTERS[0];
   const part1 = CHAPTERS.find((c) => c.part === 1)!;
   const factor = climbFactor(useLearnData());
+  const ask = useAskAvailable();
   return (
-    <main className="nv lr ld" data-askable data-ask-title="nanoinfer: home">
+    <main className="nv lr ld" data-askable data-ask-title="The Climb: home">
       <TopBar here="home" />
-      <header className="nv-col ld-hero" data-ask-section>
-        <div className="nv-kicker">an inference engine written from scratch · and a course in how it works</div>
+      <header className="nv-col ld-hero" id="content" tabIndex={-1} data-ask-section>
+        <div className="nv-kicker">an inference engine, climbing toward the speed limit · and a course in how it works</div>
         <h1 className="ld-h1">
           What happens when a model writes the next word, <em>and how fast can one computer do it?</em>
         </h1>
@@ -213,13 +215,10 @@ export default function Landing() {
       </header>
       <div className="nv-col">
         <Demo />
-        <div className="lr-start" style={{ marginTop: "2.2rem" }}>
+        <div className="lr-start">
           <a className="nv-btn" href={chapterHref(first)} onClick={linkTo(chapterHref(first))}>
             Start here · {first.title} →
           </a>
-          <span className="nv-muted" style={{ fontSize: "0.78rem" }}>
-            recommended: part 0 frames inference for engineers who know systems, not ML
-          </span>
         </div>
         <p className="ld-alt">
           Or jump to{" "}
@@ -230,15 +229,15 @@ export default function Landing() {
           <a href={GUIDE_HREF} onClick={linkTo(GUIDE_HREF)}>
             field guide
           </a>{" "}
-          of terms. {CHAPTERS.length} short chapters · select any text to ask about it.
+          of terms. {CHAPTERS.length} short chapters{ask ? " · select any text to ask about it" : ""}.
         </p>
       </div>
       <section className="nv-col ld-map">
         <h2 className="ld-h2">The journey</h2>
-        <Journey />
+        <Journey compact />
       </section>
       <footer className="nv-col nv-footer">
-        nanoinfer · GPT-2 124M weights by OpenAI (MIT) · engine, kernels and tokenizer written from scratch in Rust · every
+        The Climb · the nanoinfer engine · GPT-2 124M weights by OpenAI (MIT) · engine, kernels and tokenizer written from scratch in Rust · every
         number on this site comes from the engine's own measurements on an Apple M4 Mac mini, or from your tab.
       </footer>
     </main>

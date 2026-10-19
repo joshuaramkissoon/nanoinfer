@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { loadModel, useEngine, weightLabel } from "../engine/client";
+import { isGpu, loadModel, useEngine, weightLabel } from "../engine/client";
 import { fmtBytes } from "../lib/fmt";
+import { FigFrame } from "../learn/kit";
 
 export type FigSource = "live" | "recorded" | "none";
 const FigCtx = createContext<(s: FigSource) => void>(() => {});
@@ -12,22 +13,24 @@ export function useFigureSource(src: FigSource) {
   useLayoutEffect(() => set(src), [src, set]);
 }
 
-/** Frame shared by every panel: number, title, provenance, body, caption. */
+/** The lab's figure: the course template (kit.tsx FigFrame) with a provenance line that follows the engine. */
 export function Figure({
   id,
   n,
   title,
   caption,
+  tryit,
   children,
-  narrow,
+  wide,
   prov,
 }: {
   id: string;
   n: number;
   title: string;
   caption: ReactNode;
+  tryit?: ReactNode;
   children: ReactNode;
-  narrow?: boolean;
+  wide?: boolean;
   /** override the provenance line */
   prov?: ReactNode;
 }) {
@@ -35,23 +38,17 @@ export function Figure({
   const [src, setSrc] = useState<FigSource | null>(null);
   return (
     <FigCtx.Provider value={setSrc}>
-      <figure className={`nv-fig${narrow ? " narrow" : ""}`} id={id} style={{ margin: undefined }} data-source={src ?? global}>
-        <div className="nv-fig-head">
-          <div className="nv-fig-title">
-            <span className="n">fig {n}</span>
-            {title}
-          </div>
-          <div className="nv-prov">{prov ?? <Provenance source={src ?? global} />}</div>
-        </div>
-        <div className="nv-fig-body">{children}</div>
-        <figcaption className="nv-cap">{caption}</figcaption>
-      </figure>
+      <FigFrame id={id} n={String(n)} title={title} prov={prov ?? <Provenance source={src ?? global} />} caption={caption} tryit={tryit} wide={wide} dataSource={src ?? global}>
+        {children}
+      </FigFrame>
     </FigCtx.Provider>
   );
 }
 
 const BUILD_LABEL: Record<string, string> = { simd128: "wasm simd128", relaxed: "wasm relaxed-simd", threads: "wasm threads" };
 
+/** Where a lab figure's numbers come from, as plain text: the backend of the run it's drawing (WebGPU or which wasm
+ *  build), or the recording. */
 export function Provenance({ source }: { source: FigSource }) {
   const s = useEngine((s) => s.status);
   const iso = useEngine((s) => s.isolated);
@@ -60,19 +57,26 @@ export function Provenance({ source }: { source: FigSource }) {
   const threads = useEngine((s) => s.threads);
   const rec = useEngine((s) => s.recorded);
   const pr = useEngine((s) => s.progress);
-  if (source === "live" && s === "ready")
+  const stage = useEngine((s) => s.run?.stage ?? null);
+  const gpu = useEngine((s) => s.webgpu);
+  if (source === "live" && s === "ready") {
+    if (stage && isGpu(stage))
+      return (
+        <span>
+          live · this tab · WebGPU{gpu?.adapter ? ` · ${gpu.adapter}` : ""}
+        </span>
+      );
     return (
       <span>
-        <span className="nv-dot live" />
         live · this tab · {BUILD_LABEL[build ?? "simd128"]} · {threads > 1 ? `${threads} threads` : "1 thread"} · timer{" "}
         {res < 1 ? res.toFixed(2) : res.toFixed(0)} µs
         {iso ? "" : " (not isolated)"}
       </span>
     );
+  }
   if (source === "recorded" && rec)
     return (
       <span className="nv-prov-rec">
-        <span className="nv-dot rec" />
         <span title={`${rec.meta.runtime} · ${rec.meta.build} build · ${rec.meta.recordedAt}`}>
           recorded on an {rec.meta.machine.replace(/^Apple /, "")} · same wasm, in V8
         </span>
@@ -82,7 +86,6 @@ export function Provenance({ source }: { source: FigSource }) {
   if (s === "loading")
     return (
       <span>
-        <span className="nv-dot busy" />
         loading GPT-2{pr && pr.phase === "download" ? ` · ${fmtBytes(pr.loaded)} / ${fmtBytes(pr.total)}` : pr ? " · parsing" : "…"}
       </span>
     );
@@ -103,7 +106,7 @@ export function LiveButton({ label }: { label?: string }) {
     );
   return (
     <button className="nv-live-btn" onClick={() => loadModel()} disabled={s === "boot"} title="downloads GPT-2 once (cached in your browser) and runs it on your CPU">
-      ▶ {label ?? "run live in your tab"} <span className="nv-muted">· {weightLabel()}</span>
+      {label ?? "run live in your tab"} <span className="nv-muted">· {weightLabel()}</span>
     </button>
   );
 }

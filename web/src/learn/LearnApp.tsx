@@ -10,6 +10,7 @@ import { useLearnData } from "./kit";
 import { Journey } from "../site/Journey";
 import { linkTo, navigate, usePath } from "./router";
 import { TopBar } from "../site/TopBar";
+import { useAskAvailable } from "../ask/AskLayer";
 import "./learn.css";
 import "./p0.css";
 
@@ -41,7 +42,7 @@ export default function LearnApp() {
   const guide = slug === "field-guide";
 
   useEffect(() => {
-    document.title = ch ? `${ch.title} · nanoinfer` : guide ? "Field guide · nanoinfer" : "The course · nanoinfer";
+    document.title = ch ? `${ch.title} · The Climb` : guide ? "Field guide · The Climb" : "The course · The Climb";
     if (ch) markVisited(ch.slug);
   }, [ch, guide]);
 
@@ -66,16 +67,26 @@ export default function LearnApp() {
         here="learn"
         crumb={
           <>
-            {" / "}
-            <a href="/learn" onClick={linkTo("/learn")}>
-              course
-            </a>
+            <span className={ch || guide ? "lr-hide-sm" : undefined}>
+              {" / "}
+              <a href="/learn" onClick={linkTo("/learn")}>
+                course
+              </a>
+            </span>
             {ch && <span className="nv-muted"> / {chapterNum(ch)}</span>}
             {guide && <span className="nv-muted"> / field guide</span>}
           </>
         }
       />
-      {ch ? <ChapterPage ch={ch} idx={idx} key={ch.slug} /> : guide ? <FieldGuide /> : <Index />}
+      {ch ? (
+        <ChapterPage ch={ch} idx={idx} key={ch.slug} />
+      ) : guide ? (
+        <div id="content" tabIndex={-1}>
+          <FieldGuide />
+        </div>
+      ) : (
+        <Index />
+      )}
     </main>
   );
 }
@@ -109,10 +120,8 @@ function Rail({ idx }: { idx: number }) {
               aria-current={i === idx ? "page" : undefined}
               aria-label={`${chapterNum(c)} ${c.title}`}
             >
-              <span className="d" />
-              <span className="t">
-                <span className="nv-muted">{chapterNum(c)}</span> {c.title}
-              </span>
+              <span className="d">{chapterNum(c)}</span>
+              <span className="t">{c.title}</span>
             </a>
           </div>
         );
@@ -125,10 +134,11 @@ function ChapterPage({ ch, idx }: { ch: Chapter; idx: number }) {
   const prev = idx > 0 ? CHAPTERS[idx - 1] : null;
   const next = idx < CHAPTERS.length - 1 ? CHAPTERS[idx + 1] : null;
   const C = ch.Component;
+  const ask = useAskAvailable();
   return (
     <>
       <Rail idx={idx} />
-      <article className="lr-ch" data-askable data-ask-title={ch.title}>
+      <article className="lr-ch" id="content" tabIndex={-1} data-askable data-ask-title={ch.title}>
         <header className="lr-head" data-ask-section>
           <div className="lr-kicker">
             <span className="nv-accent">{chapterNum(ch)}</span>
@@ -143,10 +153,10 @@ function ChapterPage({ ch, idx }: { ch: Chapter; idx: number }) {
           <C />
           <CheckYourself qs={checksFor(ch.slug)} />
         </div>
-        <nav className="lr-pn">
+        <nav className="lr-pn" aria-label="previous and next chapter">
           {prev ? (
             <a href={chapterHref(prev)} onClick={linkTo(chapterHref(prev))} className="prev">
-              <span className="k">← {chapterNum(prev)}</span>
+              <span className="k">← previous · {chapterNum(prev)}</span>
               <span className="t">{prev.title}</span>
             </a>
           ) : (
@@ -170,7 +180,7 @@ function ChapterPage({ ch, idx }: { ch: Chapter; idx: number }) {
           )}
         </nav>
         <p className="lr-hint nv-muted">
-          ← → to move between chapters · select any text to ask about it ·{" "}
+          ← → to move between chapters ·{ask ? " select any text to ask about it ·" : ""}{" "}
           <a href={GUIDE_HREF} onClick={linkTo(GUIDE_HREF)}>
             field guide
           </a>
@@ -185,12 +195,10 @@ function Index() {
   const firstUnseen = CHAPTERS.find((c) => !visited.has(c.slug)) ?? CHAPTERS[0];
   const factor = climbFactor(useLearnData());
   return (
-    <div className="lr-index" data-askable data-ask-title="The course: contents">
+    <div className="lr-index" id="content" tabIndex={-1} data-askable data-ask-title="The course: contents">
       <header className="nv-col lr-ihero" data-ask-section>
         <div className="nv-kicker">The course · {CHAPTERS.length} short chapters in 4 parts · about 90 minutes</div>
-        <h1 className="nv-h1">
-          How a language model runs, <em>from the ground up</em>.
-        </h1>
+        <h1 className="nv-h1">How a language model runs, from the ground up.</h1>
         <p className="nv-lead">
           One idea per page, each with a figure you can poke. Part 0 frames the field for people who know systems but not
           ML: what a model is, why serving one is expensive, the hardware, and the jargon. Then a machine that guesses the next
@@ -202,7 +210,7 @@ function Index() {
             {visited.size ? "Continue" : "Start"} · {firstUnseen.title} →
           </a>
           {visited.size > 0 && (
-            <span className="nv-muted" style={{ fontSize: "0.78rem" }}>
+            <span className="nv-muted" style={{ fontSize: "var(--t-sm)" }}>
               {visited.size} of {CHAPTERS.length} read
             </span>
           )}

@@ -1,40 +1,45 @@
 // /learn/field-guide: the reference page. Entry point is the constraint map (what limits inference → the techniques
-// that work around it); below it, the terms grouped as calm cards that open into a compact explainer.
+// that work around it); below it, the terms grouped as a dictionary: term on the left, one plain sentence beside it,
+// the chapter on the right. An entry opens in place into why it exists and where you'll meet it.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ConstraintMap, useRoleColor } from "./ConstraintMap";
+import { useAskAvailable } from "../ask/AskLayer";
+import { ConstraintMap } from "./ConstraintMap";
 import { chapterBySlug, chapterHref, chapterNum } from "./chapters";
+import { chartColors } from "./kit";
 import { GROUPS, type Entry } from "./guide/entries";
 import { linkTo } from "./router";
+import { usePalette } from "../ui/theme";
 
-function Card({ e, open, onToggle }: { e: Entry; open: boolean; onToggle: () => void }) {
-  const color = useRoleColor();
+function Term({ e, open, onToggle }: { e: Entry; open: boolean; onToggle: () => void }) {
   const ch = e.ch ? chapterBySlug(e.ch) : undefined;
   return (
-    <div id={e.id} className={`fg-card${open ? " open" : ""}${open && e.big ? " big" : ""}`} style={{ ["--rc" as string]: color(e.role) }} data-ask-section>
-      <button className="fg-card-h" onClick={onToggle} aria-expanded={open}>
+    <div id={e.id} className={`fg-entry${open ? " open" : ""}${open && e.big ? " big" : ""}`} data-ask-section>
+      <button className="fg-entry-h" onClick={onToggle} aria-expanded={open}>
         <span className="fg-term">
-          <i className="dot" />
           {e.term}
+          {e.aka && <span className="fg-aka">{e.aka}</span>}
         </span>
-        {e.aka && <span className="fg-aka">{e.aka}</span>}
         <span className="fg-plain">{e.plain}</span>
+        <span className="fg-ch">{ch ? `ch ${chapterNum(ch)}` : ""}</span>
       </button>
       {open && (
-        <div className="fg-card-b">
+        <div className="fg-entry-b">
           <p>
-            <span className="lr-cap-k">why it exists</span>
+            <span className="lr-cap-k">Why it exists</span>
             {e.why}
           </p>
           {e.visual && <div className="fg-visual">{e.visual()}</div>}
           <p>
-            <span className="lr-cap-k">where you'll see it</span>
+            <span className="lr-cap-k">Where you'll see it</span>
             {e.where}
           </p>
           {ch && (
-            <a className="p0-tchip" href={chapterHref(ch)} onClick={linkTo(chapterHref(ch))}>
-              chapter {chapterNum(ch)} · {ch.title} →
-            </a>
+            <p>
+              <a className="p0-tchip" href={chapterHref(ch)} onClick={linkTo(chapterHref(ch))}>
+                chapter {chapterNum(ch)} · {ch.title} →
+              </a>
+            </p>
           )}
         </div>
       )}
@@ -96,14 +101,14 @@ export default function FieldGuide() {
     [needle],
   );
   const count = GROUPS.reduce((a, g) => a + g.entries.length, 0);
+  const ask = useAskAvailable();
+  const cc = chartColors(usePalette().dark);
 
   return (
     <div className="fg" data-askable data-ask-title="Field guide">
       <header className="fg-col fg-hero" data-ask-section>
         <div className="nv-kicker">reference · {count} terms</div>
-        <h1 className="nv-h1">
-          The field guide: <em>what people mean</em>.
-        </h1>
+        <h1 className="nv-h1">The field guide</h1>
         <p className="nv-lead">
           Each term in one plain sentence, the constraint it exists to work around, and where you'll meet it. Start from the
           map: almost every term is a workaround for one of six limits.
@@ -114,9 +119,8 @@ export default function FieldGuide() {
         <h2 className="fg-h2">The map: limits → workarounds</h2>
         <ConstraintMap onPick={(id) => openId(id)} />
         <p className="lr-small fg-legend">
-          <span className="sw" style={{ background: "var(--fg-mem)" }} /> memory <span className="sw" style={{ background: "var(--fg-cmp)" }} /> compute{" "}
-          <span className="sw" style={{ background: "var(--fg-comm)" }} /> communication <span className="sw" style={{ background: "var(--m-muted)" }} /> time · the
-          same colours mark every card below
+          <span className="sw" style={{ background: cc.c2 }} /> memory <span className="sw" style={{ background: cc.c1 }} /> compute{" "}
+          <span className="sw" style={{ background: cc.c3 }} /> communication
         </p>
       </section>
 
@@ -133,12 +137,11 @@ export default function FieldGuide() {
 
       {groups.map((g) => (
         <section key={g.key} id={`g-${g.key}`} className="fg-col fg-group">
-          <h2 className="fg-h2">
-            {g.name} <span className="nv-muted">· {g.blurb}</span>
-          </h2>
-          <div className="fg-grid">
+          <h2 className="fg-h2">{g.name}</h2>
+          <p className="fg-blurb">{g.blurb}</p>
+          <div className="fg-list">
             {g.entries.map((e) => (
-              <Card key={e.id} e={e} open={open === e.id} onToggle={() => (open === e.id ? setOpen(null) : openId(e.id, false))} />
+              <Term key={e.id} e={e} open={open === e.id} onToggle={() => (open === e.id ? setOpen(null) : openId(e.id, false))} />
             ))}
           </div>
         </section>
@@ -150,7 +153,7 @@ export default function FieldGuide() {
         <a href="/learn/what-is-inference" onClick={linkTo("/learn/what-is-inference")}>
           part 0: inference for systems engineers
         </a>
-        . Select any text to ask about it.
+        .{ask && " Select any text to ask about it."}
       </p>
     </div>
   );

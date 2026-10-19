@@ -1,9 +1,10 @@
-// Building blocks shared by the Foundations chapters: figure frame, controls,
-// callouts, and loaders for the two real data sources (the engine recording in
-// public/recorded/ and the precomputed public/learn/data.json).
+// Building blocks shared by the course, the landing and the lab: the figure template, controls, callouts, motion, and
+// loaders for the two real data sources (the engine recording in public/recorded/ and the precomputed
+// public/learn/data.json). The rules they implement are in web/DESIGN.md.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { linkTo } from "./router";
+import { useReducedMotion } from "../ui/theme";
 import { loadRecorded, type Recorded } from "../lib/recorded";
 import { claim, engine, getState, release } from "../engine/client";
 import type { ForwardTrace } from "../engine/types";
@@ -198,6 +199,100 @@ const PROV: Record<Prov, string> = {
   estimate: "estimate · arithmetic shown",
 };
 
+/** SVG text sizes (user units). Two, and no others: T.xs for ticks and small labels, T.sm for labels that matter.
+ *  T.num is the one display size, for a single hero number drawn inside a figure. */
+export const T = { xs: 11, sm: 12.5, num: 28 } as const;
+
+/** The figure template, shared by the course (<Fig>) and the lab (ui/Figure.tsx). No box: a hairline above, a meta line
+ *  (number, provenance), the title, the body at full figure width, then the caption in the text column: one paragraph,
+ *  a "→ Try" line, and the sources folded into a footnote. */
+export function FigFrame({
+  n,
+  title,
+  prov,
+  aside,
+  children,
+  caption,
+  tryit,
+  source,
+  alt,
+  wide,
+  id,
+  figRef,
+  dataSource,
+}: {
+  n: string;
+  title: string;
+  prov: ReactNode;
+  aside?: ReactNode;
+  children: ReactNode;
+  caption?: ReactNode;
+  tryit?: ReactNode;
+  source?: ReactNode;
+  /** one sentence stating the takeaway: the accessible name of the figure's drawings */
+  alt?: string;
+  wide?: boolean;
+  id?: string;
+  figRef?: (el: HTMLElement | null) => void;
+  dataSource?: string;
+}) {
+  const body = useRef<HTMLDivElement | null>(null);
+  // Every drawing gets an accessible name: SVGs with nothing focusable inside become role="img" labelled with the
+  // figure's alt (or its title); SVGs that already say what they are keep their own label.
+  useEffect(() => {
+    const el = body.current;
+    if (!el) return;
+    const label = () => {
+      el.querySelectorAll("svg").forEach((svg) => {
+        if (svg.closest("button, a, [role=button]") || svg.getAttribute("aria-hidden") === "true") return;
+        if (svg.hasAttribute("aria-label") || svg.hasAttribute("aria-labelledby")) return;
+        if (svg.querySelector("a, button, [tabindex], [role=button]")) return;
+        if (svg.clientWidth > 0 && svg.clientWidth < 20) return; // icons
+        svg.setAttribute("role", "img");
+        svg.setAttribute("aria-label", alt ?? title);
+      });
+    };
+    label();
+    const mo = new MutationObserver(label);
+    mo.observe(el, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, [alt, title]);
+  return (
+    <figure ref={figRef} id={id} className={`lr-fig${wide ? " wide" : ""}`} data-ask-section data-source={dataSource}>
+      <header className="lr-fig-head">
+        <div className="lr-fig-meta">
+          <span className="n">Figure {n}</span>
+          <span className="lr-fig-prov">
+            {aside}
+            <span className="lr-prov">{prov}</span>
+          </span>
+        </div>
+        <span className="lr-fig-title">{title}</span>
+      </header>
+      <div className="lr-fig-body" ref={body}>
+        {children}
+      </div>
+      {(caption || tryit || source) && (
+        <figcaption className="lr-cap">
+          {caption && <p>{caption}</p>}
+          {tryit && (
+            <p className="lr-try">
+              <span className="lr-try-k">→ Try</span>
+              {tryit}
+            </p>
+          )}
+          {source && (
+            <details className="lr-src">
+              <summary>Sources</summary>
+              <p>{source}</p>
+            </details>
+          )}
+        </figcaption>
+      )}
+    </figure>
+  );
+}
+
 export function Fig({
   n,
   title,
@@ -209,67 +304,38 @@ export function Fig({
   aside,
   source,
   figRef,
+  alt,
 }: {
   n: string;
   title: string;
   prov: Prov;
   children: ReactNode;
-  /** "what you're looking at": axes, colours, what to notice */
+  /** one paragraph: encodings (colours named with their swatches) and what to notice */
   caption?: ReactNode;
-  /** "try": one concrete thing to do with the figure */
+  /** one concrete thing to do with the figure (shown as "→ Try …") */
   tryit?: ReactNode;
   wide?: boolean;
   /** extra element in the header (e.g. a "run live" button) */
   aside?: ReactNode;
-  /** where external numbers come from (shown under the caption) */
+  /** where external numbers come from (a folded footnote under the caption) */
   source?: ReactNode;
   /** attach a useOnScreen ref to the figure, to pause its animation while it's off screen */
   figRef?: (el: HTMLElement | null) => void;
+  /** the takeaway in one sentence, for screen readers (defaults to the title) */
+  alt?: string;
 }) {
   return (
-    <figure ref={figRef} className={`lr-fig${wide ? " wide" : ""}`} data-ask-section>
-      <header className="lr-fig-head">
-        <span className="lr-fig-title">
-          <span className="n">fig {n}</span>
-          {title}
-        </span>
-        <span className="lr-fig-prov">
-          {aside}
-          <span className={`lr-prov ${prov}`}>{PROV[prov]}</span>
-        </span>
-      </header>
-      <div className="lr-fig-body">{children}</div>
-      {(caption || tryit || source) && (
-        <figcaption className="lr-cap">
-          {caption && (
-            <p>
-              <span className="lr-cap-k">what you're looking at</span>
-              {caption}
-            </p>
-          )}
-          {tryit && (
-            <p>
-              <span className="lr-cap-k">try</span>
-              {tryit}
-            </p>
-          )}
-          {source && (
-            <p className="lr-src">
-              <span className="lr-cap-k">sources</span>
-              {source}
-            </p>
-          )}
-        </figcaption>
-      )}
-    </figure>
+    <FigFrame n={n} title={title} prov={PROV[prov]} aside={aside} caption={caption} tryit={tryit} source={source} wide={wide} figRef={figRef} alt={alt}>
+      {children}
+    </FigFrame>
   );
 }
 
-/** The one sentence to remember from a section. */
+/** The one sentence to remember from a section: a step larger, in fg, with an ember mark in the margin. The label is
+ *  for screen readers only. */
 export function Idea({ children, label = "the idea" }: { children: ReactNode; label?: string }) {
   return (
-    <aside className="lr-idea">
-      <span className="lr-idea-k">{label}</span>
+    <aside className="lr-idea" aria-label={label}>
       <div>{children}</div>
     </aside>
   );
@@ -349,11 +415,13 @@ export function Seg<T extends string | number>({
   );
 }
 
-export function Stat({ k, v, unit, accent }: { k: ReactNode; v: ReactNode; unit?: ReactNode; accent?: boolean }) {
+/** A stat tile: number in fg, label muted. `accent` is accepted for old call sites but no longer colours the number:
+ *  stats never wear a series colour, and the figure's one ember element is in the drawing. */
+export function Stat({ k, v, unit }: { k: ReactNode; v: ReactNode; unit?: ReactNode; accent?: boolean }) {
   return (
     <div className="lr-stat">
       <div className="k">{k}</div>
-      <div className={`v${accent ? " accent" : ""}`}>
+      <div className="v">
         {v}
         {unit && <small> {unit}</small>}
       </div>
@@ -381,10 +449,19 @@ export function Chip({ children, tone, title, onClick, on }: { children: ReactNo
 
 // ---- motion --------------------------------------------------------------------------
 
-/** Calls fn(dtSeconds) every frame while `on`. Looping figures pass `onScreen && …` (see useOnScreen). */
-export function useFrame(on: boolean, fn: (dt: number) => void) {
+/** Calls fn(dtSeconds) every frame while `on`. Looping figures pass `onScreen && playing` (see useOnScreen,
+ *  usePlaying). Under prefers-reduced-motion nothing loops on its own (usePlaying starts paused); instead, on mount, the
+ *  hook advances `still` seconds of simulated time in one go, so the figure shows a representative still frame. */
+export function useFrame(on: boolean, fn: (dt: number) => void, still = 2.4) {
   const ref = useRef(fn);
   ref.current = fn;
+  const reduced = useReducedMotion();
+  const primed = useRef(false);
+  useEffect(() => {
+    if (!reduced || primed.current || still <= 0) return;
+    primed.current = true;
+    for (let i = 0; i < Math.round(still * 10); i++) ref.current(0.1);
+  }, [reduced, still]);
   useEffect(() => {
     if (!on) return;
     let raf = 0, last = performance.now();
@@ -396,6 +473,32 @@ export function useFrame(on: boolean, fn: (dt: number) => void) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [on]);
+}
+
+/** Play state for a looping figure: playing by default, paused by default under prefers-reduced-motion. */
+export function usePlaying(initial = true): [boolean, (v: boolean | ((p: boolean) => boolean)) => void] {
+  const reduced = useReducedMotion();
+  const [p, setP] = useState(() => initial && !(typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches));
+  useEffect(() => {
+    if (reduced) setP(false);
+  }, [reduced]);
+  return [p, setP];
+}
+
+/** The pause / play control every looping figure carries (WCAG 2.2.2). */
+export function PlayPause({ playing, onToggle, playLabel = "play" }: { playing: boolean; onToggle: () => void; playLabel?: string }) {
+  return (
+    <button className="lr-btn lr-pp" onClick={onToggle} aria-pressed={!playing} aria-label={playing ? "pause the animation" : `${playLabel}: start the animation`}>
+      <svg viewBox="0 0 10 10" width="9" height="9" aria-hidden>
+        {playing ? (
+          <path d="M2 1.5h2v7H2zM6 1.5h2v7H6z" fill="currentColor" />
+        ) : (
+          <path d="M2.5 1.2l6 3.8-6 3.8z" fill="currentColor" />
+        )}
+      </svg>
+      {playing ? "pause" : playLabel}
+    </button>
+  );
 }
 
 /** A step counter that advances every `ms` while playing. */
