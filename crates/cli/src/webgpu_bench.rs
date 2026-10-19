@@ -5,7 +5,7 @@
 //! `main` routes here before clap parses the CPU `bench` command, like
 //! `metal_bench.rs`.
 
-use crate::bench::{git_sha, machine, median, prefer_performance_cores, stddev, timestamp, BENCH_TEXT};
+use crate::bench::{begin, machine, median, prefer_performance_cores, stamp, stddev, timestamp, BENCH_TEXT};
 use clap::Parser;
 use nanoinfer_webgpu::gpu::block_on;
 use nanoinfer_webgpu::{probe, Engine, Gpu, WgpuStage};
@@ -36,6 +36,9 @@ struct Args {
     out: PathBuf,
     #[arg(long)]
     no_record: bool,
+    /// Record even if the engine sources have uncommitted changes (marked dirty).
+    #[arg(long)]
+    allow_dirty: bool,
     #[arg(long, default_value = "")]
     note: String,
     /// PerOp stages: print wall time per op for one decode step.
@@ -74,6 +77,7 @@ fn run_probe() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run(a: Args) -> Result<(), Box<dyn std::error::Error>> {
+    begin(!a.no_record, a.allow_dirty)?;
     prefer_performance_cores();
     let tok = crate::load_tokenizer(&a.weights)?;
     let model = crate::load_model(&a.weights)?;
@@ -180,9 +184,8 @@ fn run(a: Args) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if !a.no_record {
-        let line = json!({
+        let mut line = json!({
             "timestamp": timestamp(),
-            "git_sha": git_sha(),
             "stage": a.stage.name(),
             "kernels": a.stage.kernels(),
             "backend": "wgpu-metal",
@@ -209,6 +212,7 @@ fn run(a: Args) -> Result<(), Box<dyn std::error::Error>> {
             "traced": false,
             "note": a.note,
         });
+        stamp(&mut line, "interactive");
         if let Some(dir) = a.out.parent() {
             std::fs::create_dir_all(dir)?;
         }

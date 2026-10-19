@@ -52,6 +52,9 @@ pub struct BenchArgs {
     /// Free-form note stored with the result.
     #[arg(long, default_value = "")]
     note: String,
+    /// Record even if the engine sources have uncommitted changes (marked dirty).
+    #[arg(long)]
+    allow_dirty: bool,
 }
 
 /// Prompt text for benchmarking: ordinary English, repeated to the requested length.
@@ -80,14 +83,95 @@ fn cmd_output(cmd: &str, args: &[&str]) -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// The paths whose changes can move a benchmark number: the engine and its
+/// build. Edits elsewhere (web/, docs/) don't make a record dirty.
+const ENGINE_PATHS: &[&str] = &["crates", "Cargo.toml", "Cargo.lock", "rustfmt.toml"];
+
+/// Uncommitted changes to [`ENGINE_PATHS`] (tracked edits and new files), as
+/// `git status --porcelain` lines; empty when the engine sources are clean.
+fn engine_changes() -> String {
+    let mut args = vec!["status", "--porcelain", "--untracked-files=normal", "--"];
+    args.extend_from_slice(ENGINE_PATHS);
+    cmd_output("git", &args).unwrap_or_default()
+}
+
+/// Short HEAD sha, with `-dirty` when the engine sources have uncommitted changes.
 pub(crate) fn git_sha() -> String {
     let sha = cmd_output("git", &["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
-    let dirty = cmd_output("git", &["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
-    if dirty {
-        format!("{sha}-dirty")
-    } else {
+    if engine_changes().is_empty() {
         sha
+    } else {
+        format!("{sha}-dirty")
     }
+}
+
+static LOAD_START: std::sync::OnceLock<Option<[f64; 3]>> = std::sync::OnceLock::new();
+
+/// Call before a bench starts. Samples the load average for the record and,
+/// when the bench will write a record, refuses to go on if no commit could
+/// reproduce the number (checked up front so a long run isn't wasted). With
+/// `--allow-dirty` it records anyway, warns loudly, and the record carries
+/// `git_dirty: true` plus a hash of the diff (see [`stamp`]).
+pub(crate) fn begin(record: bool, allow_dirty: bool) -> Result<(), String> {
+    LOAD_START.get_or_init(load_avg);
+    let changes = engine_changes();
+    if !record || changes.is_empty() {
+        return Ok(());
+    }
+    let n = changes.lines().count();
+    if !allow_dirty {
+        eprintln!(
+            "refusing to record: {n} uncommitted change(s) under {} would make this number unreproducible:\n{changes}\n\
+             commit first, pass --no-record, or pass --allow-dirty to record it marked dirty",
+            ENGINE_PATHS.join(", ")
+        );
+        return Err("dirty tree (see above)".into());
+    }
+    eprintln!("\n!!! WARNING: recording from a DIRTY tree ({n} uncommitted engine change(s)); the record is marked git_dirty\n");
+    Ok(())
+}
+
+/// 1, 5 and 15-minute load averages (macOS `vm.loadavg`, else /proc/loadavg).
+pub(crate) fn load_avg() -> Option<[f64; 3]> {
+    let raw = cmd_output("sysctl", &["-n", "vm.loadavg"]).or_else(|| std::fs::read_to_string("/proc/loadavg").ok())?;
+    let v: Vec<f64> = raw.split_whitespace().filter_map(|t| t.trim_matches(['{', '}']).parse().ok()).take(3).collect();
+    (v.len() == 3).then(|| [v[0], v[1], v[2]])
+}
+
+/// "AC" or "battery" (macOS `pmset`); battery runs throttle differently.
+fn power_source() -> Option<String> {
+    let out = cmd_output("pmset", &["-g", "batt"])?;
+    Some(if out.contains("'AC Power'") { "AC".into() } else { "battery".into() })
+}
+
+/// Provenance for a bench record: the commit and whether the engine was dirty
+/// (with a hash of the diff so two dirty records can be told apart), how the
+/// binary was built, and the machine's state: `load_start` is the load average
+/// [`begin`] sampled, `load_end` is sampled now.
+pub(crate) fn stamp(line: &mut serde_json::Value, qos: &str) {
+    let changes = engine_changes();
+    let dirty = !changes.is_empty();
+    let diff_hash = dirty.then(|| {
+        let mut args = vec!["diff", "HEAD", "--"];
+        args.extend_from_slice(ENGINE_PATHS);
+        let diff = cmd_output("git", &args).unwrap_or_default() + &changes;
+        // FNV-1a: stable across runs, no hashing crate needed.
+        let h = diff.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+        format!("{h:016x}")
+    });
+    let Some(obj) = line.as_object_mut() else { return };
+    obj.insert("git_sha".into(), json!(git_sha()));
+    obj.insert("git_dirty".into(), json!(dirty));
+    if let Some(h) = diff_hash {
+        obj.insert("git_diff_hash".into(), json!(h));
+    }
+    obj.insert("rustc".into(), json!(env!("NANOINFER_RUSTC")));
+    obj.insert("build_profile".into(), json!(env!("NANOINFER_PROFILE")));
+    obj.insert("rustflags".into(), json!(env!("NANOINFER_RUSTFLAGS")));
+    obj.insert("qos".into(), json!(qos));
+    obj.insert("load_start".into(), json!(LOAD_START.get().copied().flatten()));
+    obj.insert("load_end".into(), json!(load_avg()));
+    obj.insert("power".into(), json!(power_source()));
 }
 
 pub(crate) fn machine() -> String {
@@ -161,6 +245,7 @@ pub fn run(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Only the threaded stages use the pool; everything else is one thread.
     let threads = if a.stage.multithreaded() { pool_threads } else { 1 };
+    begin(!a.no_record, a.allow_dirty)?;
     let tok = crate::load_tokenizer(weights)?;
     let model = crate::load_model(weights)?;
     let cfg = model.config;
@@ -251,15 +336,13 @@ pub fn run(
     );
 
     if !a.no_record {
-        let line = json!({
+        let mut line = json!({
             "timestamp": timestamp(),
-            "git_sha": git_sha(),
             "stage": a.stage.name(),
             "kernels": a.stage.kernels(),
             "model": "gpt2-124m",
             "dtype": fmt.name(),
             "threads": threads,
-            "qos": qos.name(),
             "prompt_len": a.prompt_len,
             "gen_tokens": a.tokens,
             "runs": a.runs,
@@ -278,6 +361,7 @@ pub fn run(
             "traced": a.with_trace,
             "note": a.note,
         });
+        stamp(&mut line, qos.name());
         if let Some(dir) = a.out.parent() {
             std::fs::create_dir_all(dir)?;
         }

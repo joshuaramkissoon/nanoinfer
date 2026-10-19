@@ -71,6 +71,9 @@ pub struct ServeArgs {
     summary: PathBuf,
     #[arg(long)]
     no_record: bool,
+    /// Record even if the engine sources have uncommitted changes (marked dirty).
+    #[arg(long)]
+    allow_dirty: bool,
     #[arg(long, default_value = "")]
     note: String,
 }
@@ -466,6 +469,7 @@ fn summarise(name: &str, reqs: &[Req], o: &Outcome, gantt: usize) -> Value {
 }
 
 pub fn run(a: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
+    crate::bench::begin(!a.no_record, a.allow_dirty)?;
     crate::bench::prefer_performance_cores();
     let tok = crate::load_tokenizer(&a.weights)?;
     let model = crate::load_model(&a.weights)?;
@@ -510,7 +514,6 @@ pub fn run(a: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
         for s in [&s_static, &s_cont] {
             let line = json!({
                 "timestamp": timestamp(),
-                "git_sha": git_sha(),
                 "stage": format!("metal-serve-{}", s["policy"].as_str().unwrap()),
                 "kernels": format!("metal/batch/{}", dtype.name()),
                 "backend": "metal",

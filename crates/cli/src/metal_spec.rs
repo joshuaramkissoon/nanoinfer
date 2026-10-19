@@ -50,6 +50,9 @@ pub struct SpecArgs {
     summary: PathBuf,
     #[arg(long)]
     no_record: bool,
+    /// Record even if the engine sources have uncommitted changes (marked dirty).
+    #[arg(long)]
+    allow_dirty: bool,
     #[arg(long, default_value = "")]
     note: String,
 }
@@ -175,6 +178,7 @@ fn piece(tok: &Tokenizer, id: u32) -> String {
 }
 
 pub fn run(a: SpecArgs) -> Result<(), Box<dyn std::error::Error>> {
+    crate::bench::begin(!a.no_record, a.allow_dirty)?;
     prefer_performance_cores();
     let tok = crate::load_tokenizer(&a.draft)?;
     let tmodel = crate::load_model(&a.target)?;
@@ -287,7 +291,6 @@ pub fn run(a: SpecArgs) -> Result<(), Box<dyn std::error::Error>> {
                     &a.out,
                     &json!({
                         "timestamp": timestamp(),
-                        "git_sha": git_sha(),
                         "stage": "metal-spec",
                         "kernels": format!("metal/batch/spec/{}+{}", tdt.name(), ddt.name()),
                         "backend": "metal",

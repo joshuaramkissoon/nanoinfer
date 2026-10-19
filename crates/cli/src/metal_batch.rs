@@ -6,7 +6,7 @@
 //! per step, and appends to `bench/results.jsonl` (stage `metal-batch`) and
 //! a small summary for the web page (`bench/batching.json`).
 
-use crate::bench::{git_sha, machine, median, prefer_performance_cores, stddev, timestamp, BENCH_TEXT};
+use crate::bench::{begin, git_sha, machine, median, prefer_performance_cores, stamp, stddev, timestamp, BENCH_TEXT};
 use clap::Parser;
 use nanoinfer_metal::batch::KV_BLOCK;
 use nanoinfer_metal::{BatchEngine, BatchOpts, DType};
@@ -50,6 +50,9 @@ pub struct BatchArgs {
     summary: PathBuf,
     #[arg(long)]
     no_record: bool,
+    /// Record even if the engine sources have uncommitted changes (marked dirty).
+    #[arg(long)]
+    allow_dirty: bool,
     #[arg(long, default_value = "")]
     note: String,
 }
@@ -83,6 +86,7 @@ pub fn prompts(tok: &nanoinfer_core::Tokenizer, n: usize, len: usize) -> Vec<Vec
 }
 
 pub fn run(a: BatchArgs) -> Result<(), Box<dyn std::error::Error>> {
+    begin(!a.no_record, a.allow_dirty)?;
     prefer_performance_cores();
     let tok = crate::load_tokenizer(&a.weights)?;
     let model = crate::load_model(&a.weights)?;
@@ -175,7 +179,6 @@ pub fn run(a: BatchArgs) -> Result<(), Box<dyn std::error::Error>> {
             if !a.no_record {
                 let line = json!({
                     "timestamp": timestamp(),
-                    "git_sha": git_sha(),
                     "stage": "metal-batch",
                     "kernels": format!("metal/batch/{}/gemm>={}", dtype.name(), a.gemm_min_rows),
                     "backend": "metal",
@@ -238,7 +241,11 @@ pub fn model_label(weights: &Path) -> String {
     }
 }
 
+/// Append one bench record, stamped with its provenance ([`stamp`]; the GPU
+/// benches drive the GPU from one user-interactive thread).
 pub fn append_jsonl(path: &Path, line: &Value) -> Result<(), Box<dyn std::error::Error>> {
+    let mut line = line.clone();
+    stamp(&mut line, "interactive");
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }

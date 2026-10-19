@@ -6,6 +6,14 @@
 //! wall-clock tok/s it records what the GPU itself reports: summed
 //! `GPUEndTime - GPUStartTime` per token, dispatches and command buffers per
 //! token, and achieved GB/s against the bandwidth ceiling.
+//!
+//! Two decode numbers for pipelined stages. **Pipelined** (`decode_tok_s`):
+//! every token's command buffer is committed up front and the GPU feeds its
+//! own argmax into the next forward, so the CPU never waits; that is "what the
+//! GPU can do". **Streaming** (`decode_stream_tok_s`): what a chat server sees.
+//! One command buffer per token, committed, waited on, the 4-byte argmax read
+//! back and the token detokenised before the next one is encoded. Non-pipelined
+//! stages already decode that way, so their two numbers are the same thing.
 
 #[path = "metal_batch.rs"]
 pub mod metal_batch;
@@ -14,7 +22,7 @@ pub mod metal_serve;
 #[path = "metal_spec.rs"]
 pub mod metal_spec;
 
-use crate::bench::{git_sha, machine, median, prefer_performance_cores, stddev, timestamp, BENCH_TEXT};
+use crate::bench::{begin, machine, median, prefer_performance_cores, stamp, stddev, timestamp, BENCH_TEXT};
 use clap::Parser;
 use nanoinfer_metal::{MetalEngine, MetalStage};
 use serde_json::json;
@@ -45,6 +53,12 @@ struct MetalBenchArgs {
     no_record: bool,
     #[arg(long, default_value = "")]
     note: String,
+    /// Record even if the engine sources have uncommitted changes (marked dirty).
+    #[arg(long)]
+    allow_dirty: bool,
+    /// Skip the streaming-mode decode measurement on pipelined stages.
+    #[arg(long)]
+    no_stream: bool,
     /// Print steady-state GPU time per op for one decode step (each op timed
     /// alone, repeated back to back in its own command buffer).
     #[arg(long)]
@@ -78,9 +92,38 @@ struct RunResult {
     decode_gpu_s: f64,
     dispatches: usize,
     command_buffers: usize,
+    /// Streaming-mode decode seconds (pipelined stages only).
+    stream_s: Option<f64>,
 }
 
-fn time_run(engine: &MetalEngine, prompt: &[u32], tokens: usize) -> Result<RunResult, String> {
+/// Streaming decode: per token, commit + wait + read the argmax back +
+/// detokenise, like a server streaming tokens to a client.
+fn time_stream(
+    engine: &MetalEngine,
+    tok: &nanoinfer_core::Tokenizer,
+    prompt: &[u32],
+    tokens: usize,
+) -> Result<f64, String> {
+    let mut s = engine.session();
+    let mut next = s.step_greedy(prompt)?;
+    let mut text = Vec::with_capacity(tokens * 4);
+    let t = Instant::now();
+    for _ in 0..tokens {
+        next = s.step_greedy(&[next])?;
+        text.extend_from_slice(tok.token_bytes(next));
+    }
+    let secs = t.elapsed().as_secs_f64();
+    std::hint::black_box(&text);
+    Ok(secs)
+}
+
+fn time_run(
+    engine: &MetalEngine,
+    tok: &nanoinfer_core::Tokenizer,
+    prompt: &[u32],
+    tokens: usize,
+    stream: bool,
+) -> Result<RunResult, String> {
     let mut s = engine.session();
     let t = Instant::now();
     let mut next = s.step_greedy(prompt)?;
@@ -102,17 +145,15 @@ fn time_run(engine: &MetalEngine, prompt: &[u32], tokens: usize) -> Result<RunRe
             command_buffers = s.last.command_buffers;
         }
     }
-    Ok(RunResult {
-        prefill_s,
-        decode_s: t.elapsed().as_secs_f64(),
-        prefill_gpu_s,
-        decode_gpu_s,
-        dispatches,
-        command_buffers,
-    })
+    let decode_s = t.elapsed().as_secs_f64();
+    drop(s);
+    let stream_s =
+        if stream && engine.stage.recipe().pipelined { Some(time_stream(engine, tok, prompt, tokens)?) } else { None };
+    Ok(RunResult { prefill_s, decode_s, prefill_gpu_s, decode_gpu_s, dispatches, command_buffers, stream_s })
 }
 
 fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
+    begin(!a.no_record, a.allow_dirty)?;
     prefer_performance_cores();
     let tok = crate::load_tokenizer(&a.weights)?;
     let model = crate::load_model(&a.weights)?;
@@ -149,14 +190,16 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let (mut prefill, mut decode, mut gpu_ms, mut prefill_gpu_ms) = (vec![], vec![], vec![], vec![]);
+    let mut stream = vec![];
     let mut last = None;
     for run in 0..a.warmup + a.runs {
-        let r = time_run(&engine, &prompt, a.tokens)?;
+        let r = time_run(&engine, &tok, &prompt, a.tokens, !a.no_stream)?;
         let (p, d) = (a.prompt_len as f64 / r.prefill_s, a.tokens as f64 / r.decode_s);
         let g = 1e3 * r.decode_gpu_s / a.tokens as f64;
         let label = if run < a.warmup { "warmup" } else { "run" };
+        let st = r.stream_s.map(|s| format!("   streaming {:>8.3} tok/s", a.tokens as f64 / s)).unwrap_or_default();
         eprintln!(
-            "  {label:<6} prefill {p:>9.2} tok/s   decode {d:>8.3} tok/s   (wall {:.3} ms/tok, GPU {g:.3} ms/tok)",
+            "  {label:<6} prefill {p:>9.2} tok/s   decode {d:>8.3} tok/s   (wall {:.3} ms/tok, GPU {g:.3} ms/tok){st}",
             1e3 / d
         );
         if run >= a.warmup {
@@ -164,10 +207,16 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
             decode.push(d);
             gpu_ms.push(g);
             prefill_gpu_ms.push(1e3 * r.prefill_gpu_s);
+            if let Some(s) = r.stream_s {
+                stream.push(a.tokens as f64 / s);
+            }
         }
         last = Some(r);
     }
     let last = last.unwrap();
+    let pipelined = a.stage.recipe().pipelined;
+    let (sm, ss) =
+        if stream.is_empty() { (dm_or_nan(&decode, pipelined), f64::NAN) } else { (median(&stream), stddev(&stream)) };
 
     let (pm, ps, dm, ds) = (median(&prefill), stddev(&prefill), median(&decode), stddev(&decode));
     let gm = median(&gpu_ms);
@@ -187,6 +236,12 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
         100.0 * dm / ceiling,
         ceiling
     );
+    if pipelined && !stream.is_empty() {
+        println!(
+            "  streaming decode (commit + wait + readback + detokenise per token): {sm:.3} ± {ss:.3} tok/s, {:.1}% of pipelined",
+            100.0 * sm / dm
+        );
+    }
     println!(
         "  per decode token: wall {wall_ms:.3} ms, GPU busy {gm:.3} ms ({:.0}% of wall, {gpu_gbs:.1} GB/s while busy), {} dispatches, {} command buffers",
         100.0 * gm / wall_ms,
@@ -208,9 +263,8 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if !a.no_record {
-        let line = json!({
+        let mut line = json!({
             "timestamp": timestamp(),
-            "git_sha": git_sha(),
             "stage": a.stage.name(),
             "kernels": a.stage.kernels(),
             "backend": "metal",
@@ -224,6 +278,9 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
             "prefill_tok_s_std": ps,
             "decode_tok_s": dm,
             "decode_tok_s_std": ds,
+            "decode_mode": if pipelined { "pipelined" } else { "streaming" },
+            "decode_stream_tok_s": if sm.is_nan() { serde_json::Value::Null } else { json!(sm) },
+            "decode_stream_tok_s_std": if ss.is_nan() { serde_json::Value::Null } else { json!(ss) },
             "decode_ceiling_tok_s": ceiling,
             "decode_gbs": decode_gbs,
             "prefill_gflops": prefill_gflops,
@@ -239,6 +296,7 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
             "traced": false,
             "note": a.note,
         });
+        stamp(&mut line, "interactive");
         if let Some(dir) = a.out.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -285,5 +343,15 @@ fn print_profile(title: &str, prof: &[(&'static str, f64)], cfg: &nanoinfer_core
             })
             .unwrap_or_default();
         println!("    {name:<11} {:>9.1} us  {:>5.1}%  ({k:>2} dispatches)  {rate}", t * 1e6, 100.0 * t / total);
+    }
+}
+
+/// Streaming tok/s when it wasn't measured separately: a non-pipelined stage's
+/// decode already is streaming; a pipelined one run with `--no-stream` has none.
+fn dm_or_nan(decode: &[f64], pipelined: bool) -> f64 {
+    if pipelined {
+        f64::NAN
+    } else {
+        median(decode)
     }
 }

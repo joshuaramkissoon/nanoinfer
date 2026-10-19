@@ -9,7 +9,7 @@
 //!
 //! `VECLIB_MAXIMUM_THREADS=1` limits Accelerate to one thread.
 
-use crate::bench::{git_sha, machine, median, stddev, timestamp, BENCH_TEXT};
+use crate::bench::{begin, machine, median, stamp, stddev, timestamp, BENCH_TEXT};
 use clap::Args;
 use nanoinfer_core::kernels::Kernels;
 use nanoinfer_core::stages::{kv_cache, Activations, KvCache, WeightFormat};
@@ -35,6 +35,9 @@ pub struct AccelArgs {
     out: PathBuf,
     #[arg(long)]
     no_record: bool,
+    /// Record even if the engine sources have uncommitted changes (marked dirty).
+    #[arg(long)]
+    allow_dirty: bool,
     #[arg(long, default_value = "")]
     note: String,
 }
@@ -143,6 +146,7 @@ impl Kernels for Accelerate {
 }
 
 pub fn run(weights: &Path, a: AccelArgs) -> Result<(), Box<dyn std::error::Error>> {
+    begin(!a.no_record, a.allow_dirty)?;
     let tok = crate::load_tokenizer(weights)?;
     let model = crate::load_model(weights)?;
     let cfg = model.config;
@@ -187,14 +191,15 @@ pub fn run(weights: &Path, a: AccelArgs) -> Result<(), Box<dyn std::error::Error
         100.0 * dm / ceiling
     );
     if !a.no_record {
-        let line = json!({
-            "timestamp": timestamp(), "git_sha": git_sha(), "stage": "accelerate", "kernels": "accelerate (cli only)",
+        let mut line = json!({
+            "timestamp": timestamp(), "stage": "accelerate", "kernels": "accelerate (cli only)",
             "model": "gpt2-124m", "dtype": "f32", "threads": veclib_threads, "prompt_len": a.prompt_len,
             "gen_tokens": a.tokens, "runs": a.runs, "prefill_tok_s": pm, "prefill_tok_s_std": ps,
             "decode_tok_s": dm, "decode_tok_s_std": ds, "decode_ceiling_tok_s": ceiling, "decode_gbs": decode_gbs,
             "pct_of_ceiling": 100.0 * dm / ceiling, "bandwidth_gbs": a.bandwidth_gbs, "machine": machine(),
             "traced": false, "note": a.note,
         });
+        stamp(&mut line, "main thread interactive, vecLib threads default");
         let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&a.out)?;
         writeln!(f, "{line}")?;
     }
