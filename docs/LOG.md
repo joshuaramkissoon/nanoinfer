@@ -2659,3 +2659,16 @@ stages:
   one token in flight, and with that loop it holds in full: lookahead keeps 98–100% of pipelined.
 - **So the server design is settled:** depth-2 lookahead, not a sync loop. And llama.cpp encodes a token's work
   faster than we do, which is worth a look (it splits encoding across threads; unverified here).
+
+### Browser recording re-made on a quiet machine (19 Oct)
+
+`node web/scripts/record.mjs` (relaxed build of the current engine, Node 25.5 / V8 14.1, best of 4 interleaved
+rounds, load 1.9–3.0, nothing else benchmarking). Roofs: 71 GB/s, 110 GFLOP/s (18 Oct, shared machine: 59, 97).
+Decode / prefill tok/s: unrolled 111.7 / 179, fast-ops 118.9 / 201, wasm-simd 111.4 / 285, wasm-fma 113.1 / 422, f16
+14.4 / 165, **q8 25.7 / 196, q4 34.6 / 190** (q8-kv16 25.6, q4-kv16 34.6, q8-prefill 25.6 / 56).
+
+The quantised rungs are a **regression in wasm** against the "as they landed" numbers above (q8 36–38, q4 91–106):
+stages 9–10 moved decode to int8 activations and `sdot`, and the non-aarch64 fallback of that int8 dot is scalar, so
+wasm (no NEON) now pays a scalar multiply-add per weight where the old path dequantised nibbles to f32 SIMD. Fix: a
+simd128 int8 dot (`i16x8_extmul` + `i32x4_dot_i16x8`) in the `cfg(not(target_arch = "aarch64"))` path of
+`kernels/q8.rs` / `q4.rs`. Not done here.

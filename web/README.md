@@ -168,11 +168,17 @@ The panels only depend on React, `src/engine/*`, `src/ui/*` and `src/lib/*`, plu
 - `wasm-threads` speeds up prefill ~2× over wasm-fma but not decode (fork/join cost per small matmul).
 - The live stage race time-slices one engine thread, so its clock runs slower than real time until the slow lanes
   finish (the page says so); the recorded race plays at true speed.
-- The CPU recording (`meta.json`, `run.json`, `bench.json`, `attention.bin`, 18 Oct) was made on a shared machine, best of
-  4 interleaved rounds per stage. Its *timings* feed the landing hero's replay speed, chapter 8's loop timeline, and in
-  the lab, until the reader goes live: figs 1, 2, 5 (59 GB/s probe), 6, 7 and the ladder's dashed browser bars. Content
-  (tokens, attention maps, logits) is unaffected. Re-run `node scripts/record.mjs` on a quiet machine before launch. The
-  WebGPU recording (`webgpu.json`) was made with nothing else benchmarking.
+- The CPU recording (`meta.json`, `run.json`, `bench.json`, `attention.bin`) was re-made on 19 Oct at 02:00 with
+  nothing else benchmarking (1-min load 1.9 at the start, 3.0 at the end; a screen-sharing video encoder was running),
+  from the engine at `6b77446`, Node 25.5 / V8 14.1, relaxed build, best of 4 interleaved rounds per stage. Against the
+  18 Oct shared-machine recording: roofs 59 → 71 GB/s and 97 → 110 GFLOP/s; f32 rungs ~94–104 → 111–119 tok/s; and it
+  now covers all 22 stages (it had 13). Its timings feed the landing hero's replay speed, chapter 8's loop timeline, and
+  in the lab, until the reader goes live: figs 1, 2, 5, 6, 7 and the ladder's dashed browser bars. The WebGPU
+  recording (`webgpu.json`, 18 Oct) was made with nothing else benchmarking.
+- **Quantised stages are slow in wasm.** In the new recording q8 decodes at 26 tok/s and q4 at 35, against 111–119 for
+  the f32 rungs (the old recording's q8 38 / q4 91 predate the int8 `sdot` rework of stages 9–10, which has no wasm
+  SIMD path: wasm runs the scalar fallback of the int8 dot). Anything on the page that says 4-bit is fastest in the
+  browser is out of date until core grows a simd128 int8 dot.
 - Some browsers' storage quota is too small to cache 548 MB (incognito-like profiles cap OPFS at about 64 MB). The page
   still works there; it just downloads again next time.
 - The first bandwidth probe right after loading reads about 40% low, so the page takes the best of two probes. It's still
