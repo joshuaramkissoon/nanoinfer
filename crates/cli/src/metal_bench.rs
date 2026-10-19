@@ -14,6 +14,10 @@
 //! One command buffer per token, committed, waited on, the 4-byte argmax read
 //! back and the token detokenised before the next one is encoded. Non-pipelined
 //! stages already decode that way, so their two numbers are the same thing.
+//! **Lookahead** (`decode_lookahead_tok_s`): streaming, but token t+1 is
+//! committed before token t is read back (depth 2), so the GPU never idles
+//! while the CPU reads and encodes; a server can do this (a stop is noticed one
+//! token late and rolled back).
 
 #[path = "metal_batch.rs"]
 pub mod metal_batch;
@@ -92,26 +96,28 @@ struct RunResult {
     decode_gpu_s: f64,
     dispatches: usize,
     command_buffers: usize,
-    /// Streaming-mode decode seconds (pipelined stages only).
-    stream_s: Option<f64>,
+    /// Streaming-mode decode seconds at depth 1 and 2 (pipelined stages only).
+    stream_s: Option<(f64, f64)>,
 }
 
-/// Streaming decode: per token, commit + wait + read the argmax back +
-/// detokenise, like a server streaming tokens to a client.
+/// Streaming decode with `depth` forwards in flight: each token is read back
+/// and detokenised as soon as its forward completes, like a server streaming
+/// tokens to a client (see `MetalSession::decode_stream`).
 fn time_stream(
     engine: &MetalEngine,
     tok: &nanoinfer_core::Tokenizer,
     prompt: &[u32],
     tokens: usize,
+    depth: usize,
 ) -> Result<f64, String> {
     let mut s = engine.session();
-    let mut next = s.step_greedy(prompt)?;
+    let first = s.step_greedy(prompt)?;
     let mut text = Vec::with_capacity(tokens * 4);
     let t = Instant::now();
-    for _ in 0..tokens {
-        next = s.step_greedy(&[next])?;
-        text.extend_from_slice(tok.token_bytes(next));
-    }
+    s.decode_stream(first, tokens, depth, |id| {
+        text.extend_from_slice(tok.token_bytes(id));
+        true
+    })?;
     let secs = t.elapsed().as_secs_f64();
     std::hint::black_box(&text);
     Ok(secs)
@@ -147,8 +153,11 @@ fn time_run(
     }
     let decode_s = t.elapsed().as_secs_f64();
     drop(s);
-    let stream_s =
-        if stream && engine.stage.recipe().pipelined { Some(time_stream(engine, tok, prompt, tokens)?) } else { None };
+    let stream_s = if stream && engine.stage.recipe().pipelined {
+        Some((time_stream(engine, tok, prompt, tokens, 1)?, time_stream(engine, tok, prompt, tokens, 2)?))
+    } else {
+        None
+    };
     Ok(RunResult { prefill_s, decode_s, prefill_gpu_s, decode_gpu_s, dispatches, command_buffers, stream_s })
 }
 
@@ -190,14 +199,19 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let (mut prefill, mut decode, mut gpu_ms, mut prefill_gpu_ms) = (vec![], vec![], vec![], vec![]);
-    let mut stream = vec![];
+    let (mut stream, mut ahead) = (vec![], vec![]);
     let mut last = None;
     for run in 0..a.warmup + a.runs {
         let r = time_run(&engine, &tok, &prompt, a.tokens, !a.no_stream)?;
         let (p, d) = (a.prompt_len as f64 / r.prefill_s, a.tokens as f64 / r.decode_s);
         let g = 1e3 * r.decode_gpu_s / a.tokens as f64;
         let label = if run < a.warmup { "warmup" } else { "run" };
-        let st = r.stream_s.map(|s| format!("   streaming {:>8.3} tok/s", a.tokens as f64 / s)).unwrap_or_default();
+        let st = r
+            .stream_s
+            .map(|(s1, s2)| {
+                format!("   streaming {:.1} / lookahead {:.1} tok/s", a.tokens as f64 / s1, a.tokens as f64 / s2)
+            })
+            .unwrap_or_default();
         eprintln!(
             "  {label:<6} prefill {p:>9.2} tok/s   decode {d:>8.3} tok/s   (wall {:.3} ms/tok, GPU {g:.3} ms/tok){st}",
             1e3 / d
@@ -207,8 +221,9 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
             decode.push(d);
             gpu_ms.push(g);
             prefill_gpu_ms.push(1e3 * r.prefill_gpu_s);
-            if let Some(s) = r.stream_s {
-                stream.push(a.tokens as f64 / s);
+            if let Some((s1, s2)) = r.stream_s {
+                stream.push(a.tokens as f64 / s1);
+                ahead.push(a.tokens as f64 / s2);
             }
         }
         last = Some(r);
@@ -217,6 +232,7 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     let pipelined = a.stage.recipe().pipelined;
     let (sm, ss) =
         if stream.is_empty() { (dm_or_nan(&decode, pipelined), f64::NAN) } else { (median(&stream), stddev(&stream)) };
+    let (lm, ls) = if ahead.is_empty() { (f64::NAN, f64::NAN) } else { (median(&ahead), stddev(&ahead)) };
 
     let (pm, ps, dm, ds) = (median(&prefill), stddev(&prefill), median(&decode), stddev(&decode));
     let gm = median(&gpu_ms);
@@ -240,6 +256,10 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "  streaming decode (commit + wait + readback + detokenise per token): {sm:.3} ± {ss:.3} tok/s, {:.1}% of pipelined",
             100.0 * sm / dm
+        );
+        println!(
+            "  lookahead decode (as streaming, token t+1 committed before t is read back): {lm:.3} ± {ls:.3} tok/s, {:.1}% of pipelined",
+            100.0 * lm / dm
         );
     }
     println!(
@@ -281,6 +301,8 @@ fn run(a: MetalBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
             "decode_mode": if pipelined { "pipelined" } else { "streaming" },
             "decode_stream_tok_s": if sm.is_nan() { serde_json::Value::Null } else { json!(sm) },
             "decode_stream_tok_s_std": if ss.is_nan() { serde_json::Value::Null } else { json!(ss) },
+            "decode_lookahead_tok_s": if lm.is_nan() { serde_json::Value::Null } else { json!(lm) },
+            "decode_lookahead_tok_s_std": if ls.is_nan() { serde_json::Value::Null } else { json!(ls) },
             "decode_ceiling_tok_s": ceiling,
             "decode_gbs": decode_gbs,
             "prefill_gflops": prefill_gflops,

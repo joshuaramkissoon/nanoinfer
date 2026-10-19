@@ -44,6 +44,8 @@ for f in sorted(glob.glob(os.path.join(h2h, "raw", "round*.jsonl"))) + glob.glob
             a["pp"].append(d["prefill_tok_s"]); a["tg"].append(d["decode_tok_s"]); a.setdefault("load1", []).append(d["load1"])
             if d.get("decode_stream_tok_s") is not None:  # metal pipelined stages: per-token readback decode
                 a.setdefault("stream", []).append(d["decode_stream_tok_s"])
+            if d.get("decode_lookahead_tok_s") is not None:  # ... with token t+1 committed before t is read
+                a.setdefault("ahead", []).append(d["decode_lookahead_tok_s"])
             a.setdefault("dirty", []).append(d.get("git_dirty", "-dirty" in d["git_sha"]))
         else:
             eng, lab = d["engine"], d["label"]
@@ -63,6 +65,7 @@ for (eng, dev, cfg, thr), a in acc.items():
                  "version": a.get("build"), **({"head_type": a["head_type"]} if "head_type" in a else {}),
                  "max_load1": max(a["load1"]),
                  **({"decode_stream_tok_s": round(max(a["stream"]), 1)} if a.get("stream") else {}),
+                 **({"decode_lookahead_tok_s": round(max(a["ahead"]), 1)} if a.get("ahead") else {}),
                  **({"git_dirty": any(a["dirty"])} if "dirty" in a else {})})
 rows.sort(key=lambda r: (r["device"].split()[0] != "metal" and r["device"] != "mps", r["family"], r["threads"] or 0, -r["decode_tok_s"]))
 res = {
@@ -71,7 +74,7 @@ res = {
     "method": {"prompt_len": 64, "decode_tokens": 64, "decode_context": "64..128", "batch": 1, "greedy": True,
                "reps": "1 warmup + 7 timed per config, median; 3 rounds (whole suite, strictly sequential), best round reported",
                "order": "each round: GPU jobs then CPU jobs, each block shuffled with a per-round seed (rows carry order + seed); CPU jobs wait for 1-min load <= 2, GPU jobs <= 8",
-               "streaming": "nanoinfer metal pipelined stages also report decode_stream_tok_s: one command buffer per token, committed, waited on and read back before the next (what a chat server sees)",
+               "streaming": "nanoinfer metal pipelined stages also report decode_stream_tok_s: one command buffer per token, committed, waited on and read back before the next (what a chat server sees); decode_lookahead_tok_s commits token t+1 before reading t back",
                "llama_bench": "pp: -p 64 -n 0; tg: -p 0 -n 64 -d 64 (decode after 64 tokens of context); KV f16; -fa auto; -ngl 99 GPU, -ngl 0 -nopo 1 CPU",
                "llama_metal_warm": "llama.cpp Metal tg also re-measured after heating the GPU (warm_check.sh, 15 reps); its decode is the max over rounds and the warm check",
                "bandwidth_ceiling": "120 GB/s spec / bytes per token (weights read per decode step, position table excluded, tied head counted once)"},
