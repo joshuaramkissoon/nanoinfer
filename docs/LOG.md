@@ -2667,8 +2667,8 @@ rounds, load 1.9–3.0, nothing else benchmarking). Roofs: 71 GB/s, 110 GFLOP/s 
 Decode / prefill tok/s: unrolled 111.7 / 179, fast-ops 118.9 / 201, wasm-simd 111.4 / 285, wasm-fma 113.1 / 422, f16
 14.4 / 165, **q8 25.7 / 196, q4 34.6 / 190** (q8-kv16 25.6, q4-kv16 34.6, q8-prefill 25.6 / 56).
 
-The quantised rungs are a **regression in wasm** against the "as they landed" numbers above (q8 36–38, q4 91–106):
-stages 9–10 moved decode to int8 activations and `sdot`, and the non-aarch64 fallback of that int8 dot is scalar, so
-wasm (no NEON) now pays a scalar multiply-add per weight where the old path dequantised nibbles to f32 SIMD. Fix: a
-simd128 int8 dot (`i16x8_extmul` + `i32x4_dot_i16x8`) in the `cfg(not(target_arch = "aarch64"))` path of
-`kernels/q8.rs` / `q4.rs`. Not done here.
+The quantised rungs are a **regression in wasm** against the "as they landed" numbers above (q8 36–38, q4 91–106).
+Decode on stages 9+ is int8 activations × int8 weights, and off aarch64 that dot is the scalar fallback
+(`dot_block_scalar` in `kernels/q4.rs`, likewise `q8.rs`), so wasm pays a scalar multiply-add per weight. The older
+numbers came from an earlier build of those stages; the cause is not bisected. Fix: a simd128 int8 dot
+(`i16x8_extmul` + `i32x4_dot_i16x8`) in the `cfg(not(target_arch = "aarch64"))` paths. Not done here.

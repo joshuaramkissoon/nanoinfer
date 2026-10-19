@@ -176,9 +176,9 @@ The panels only depend on React, `src/engine/*`, `src/ui/*` and `src/lib/*`, plu
   in the lab, until the reader goes live: figs 1, 2, 5, 6, 7 and the ladder's dashed browser bars. The WebGPU
   recording (`webgpu.json`, 18 Oct) was made with nothing else benchmarking.
 - **Quantised stages are slow in wasm.** In the new recording q8 decodes at 26 tok/s and q4 at 35, against 111–119 for
-  the f32 rungs (the old recording's q8 38 / q4 91 predate the int8 `sdot` rework of stages 9–10, which has no wasm
-  SIMD path: wasm runs the scalar fallback of the int8 dot). Anything on the page that says 4-bit is fastest in the
-  browser is out of date until core grows a simd128 int8 dot.
+  the f32 rungs (the old recording had q8 38 / q4 91 from an earlier build; not bisected). Off aarch64 the int8 dot
+  these stages decode with is a scalar fallback, so wasm gets no SIMD on it. Anything on the page that says 4-bit is
+  fastest in the browser is out of date until core grows a simd128 int8 dot.
 - Some browsers' storage quota is too small to cache 548 MB (incognito-like profiles cap OPFS at about 64 MB). The page
   still works there; it just downloads again next time.
 - The first bandwidth probe right after loading reads about 40% low, so the page takes the best of two probes. It's still
