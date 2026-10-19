@@ -130,8 +130,8 @@ export const PANELS: PanelDef[] = [
       <>
         <h2>Your machine's speed limit</h2>
         <p>
-          The division from <a href="/learn/speed-limit">chapter 10</a>, done with the memory bandwidth this tab measures for
-          the backend that ran fig 1: the CPU probe for a CPU stage, the WebGPU probe for a GPU stage.
+          The division from <a href="/learn/speed-limit">chapter 10</a>, done with the memory bandwidth this tab measures. The
+          probe follows the backend that ran fig 1: the CPU probe for a CPU stage, the WebGPU probe for a GPU stage.
         </p>
       </>
     ),

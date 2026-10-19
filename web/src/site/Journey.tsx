@@ -76,8 +76,8 @@ export function Journey({ showQuestions = false, compact = false }: { showQuesti
             </a>
           </h3>
           <p>
-            For after the course: every stage of the engine running in your tab, real per-operation timings, all 144 attention
-            heads, the roofline and the full ladder of results.
+            For after the course. Every stage of the engine runs in your tab, with real per-operation timings, all 144
+            attention heads, the roofline and the full ladder of results.
           </p>
         </div>
       </li>

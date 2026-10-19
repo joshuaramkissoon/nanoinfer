@@ -156,8 +156,8 @@ export default function Gpu() {
           about 1.6 to 1.9× faster on this GPU, because it stages its matrix tiles in 16-bit and ours are 32-bit.
         </p>
         <p>
-          Our rows come from one session on 19 Oct that ran about 3% slower than the 18 Oct head-to-head, where MLX and
-          llama.cpp were measured (nanoinfer's pipelined 4-bit made 787 there). Every engine read the same bytes per token
+          Our rows come from one session on 19 Oct, which ran about 3% slower than the 18 Oct head-to-head. MLX and
+          llama.cpp were measured in that head-to-head, where nanoinfer's pipelined 4-bit made 787. Every engine read the same bytes per token
           and had its quality checked against its own 32-bit model.
         </p>
       </Deeper>
