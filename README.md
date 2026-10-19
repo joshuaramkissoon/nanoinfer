@@ -2,7 +2,7 @@
 
 A GPT-2 inference engine written from scratch in Rust, for CPU, Metal and WebGPU, made fast one measured step at a time.
 
-It starts at a naive forward pass (0.37 tok/s) and climbs, one stage per idea, to 787 tok/s on an M4's GPU. Every
+It starts at a naive forward pass (0.37 tok/s) and climbs, one stage per idea, to 792 tok/s on an M4's GPU. Every
 stage is still in the code and still runs, so you can compare any two. The journal of how it got there, including the
 dead ends, is [`docs/LOG.md`](docs/LOG.md).
 
@@ -10,57 +10,57 @@ dead ends, is [`docs/LOG.md`](docs/LOG.md).
 
 GPT-2 124M on one Apple M4 (base: 4P + 6E cores, 10-core GPU, 24 GB). Same job for every engine: read a 64-token
 prompt, then write 64 tokens greedily, batch 1. Each engine gets the same bytes per token where the formats allow it,
-and its quality is checked against its own f32 model. Three rounds, strictly one engine at a time, best round for
-everyone. Method, every row and the quality table: [`docs/LOG.md`](docs/LOG.md#head-to-head-nanoinfer-vs-llamacpp-mlx-pytorch-mps-18-oct-evening)
+and its quality is checked against its own f32 model. Three rounds in a random order, strictly one engine at a time,
+best round for everyone; re-run 19 Oct on a quiet machine (1-min load ≤ 2 before CPU jobs, ≤ 2.5 before GPU jobs).
+Method, conditions, every row and the quality table: [`docs/LOG.md`](docs/LOG.md#head-to-head-re-run-19-oct-night)
 and [`bench/headtohead.json`](bench/headtohead.json).
 
-**GPU (Metal), tok/s**
+**GPU (Metal) decode, tok/s.** nanoinfer has three decode loops, and which one you compare matters:
 
-| format | nanoinfer decode | MLX | llama.cpp | nanoinfer prefill | llama.cpp prefill |
+- **per-token sync**: commit a token, wait, read it back, then encode the next. llama-bench's `tg` does exactly this
+  (`llama_synchronize` after every token), so **this column is the apples-to-apples one against llama.cpp**.
+- **one in flight**: token t+1 is committed before t is read back. A real server can run this (a stop is noticed one
+  token late and rolled back); MLX's async `stream_generate` does the same, so it's the fair one against MLX.
+- **pipelined**: all 64 tokens queued up front, the CPU never waits. What the GPU can do; no streaming server sees it.
+
+| format | nanoinfer per-token sync | llama.cpp (syncs per token) | nanoinfer one in flight | MLX (one ahead) | nanoinfer pipelined |
 |---|---|---|---|---|---|
-| f32 | 176 | 178 | **192** | 4,509 | **8,271** |
-| f16 | **364** | 342 | 333 | 5,208 | **10,283** |
-| Q8 | **612** (WebGPU: 569) | 534 | 502 | 5,856 | **10,706** |
-| Q4 + Q8 head | **787** | 694 | 622 | 6,725 | **10,935** |
+| f32 | 179.5 | **192.0** | 191.1 | 177.5 | 194.6 |
+| f16 | 315.2 | **334.0** | **360.0** | 339.8 | 360.9 |
+| Q8 | 504.5 | **510.8** | **607.8** | 546.3 | 610.8 (WebGPU: 571) |
+| Q4 + Q8 head | 611.2 | **636.3** | **789.1** | 700.2 | 792.1 |
+
+**GPU prefill (P = 64), tok/s:** llama.cpp **8,040 / 9,967 / 10,336 / 10,604** (f32 / f16 / Q8 / Q4); nanoinfer
+4,857 / 5,251 / 6,054 / 6,870; MLX 3,557 / 5,457 / 6,278 / 7,448.
 
 **CPU, tok/s at each engine's best thread count**
 
 | format | nanoinfer decode | llama.cpp decode | nanoinfer prefill | llama.cpp prefill |
 |---|---|---|---|---|
-| f32 | 165 | **197** | 2,242 | 1,249 (pure NEON), 2,724 (Accelerate) |
-| f16 | 328 | **358** | 2,237 | **2,357** |
-| Q8 | 585 | **593** | 3,548 | **5,423** |
-| Q4 + Q8 head | 742 | **753** | 2,274 | **5,683** |
+| f32 | 168 | **199** | 2,274 | 1,231 (pure NEON), 2,729 (Accelerate) |
+| f16 | 328 | **361** | 2,232 | **2,281** |
+| Q8 | 578 | **596** | 3,475 | **5,579** |
+| Q4 + Q8 head | 736 | **764** | 2,290 | **5,787** |
 
 Where we stand:
 
-- **GPU decode is the win.** nanoinfer is the fastest of the four engines at f16, Q8 and Q4, at the same bytes and
-  quality. On a model this small most of a token is fixed cost between kernels, and the Metal climb removed most of
-  it (one command buffer per token, argmax on the GPU, no CPU wait between tokens).
-- **Prefill is the loss: about 2× slower than llama.cpp.** 1.6–1.9× on the GPU (llama.cpp stages its matrix tiles in
-  half precision; ours are f32) and 1.5–2.5× on the CPU for quantised formats (it uses the M4's int8 matrix
-  instructions; we use the older dot-product ones).
-- **CPU decode is roughly level.** Q8 and Q4 are within 1.5% of llama.cpp. f16 and f32 are 8% and 16% behind: those
-  older stages never moved onto the low-latency thread pool the quantised ones use.
-- f32 decode on the GPU was 8% behind llama.cpp with `metal-mma`, which predates the fused, pipelined decode path.
-  `metal-pipelined-f32` (19 Oct) puts f32 on that path: +10% in an interleaved A/B (168 → 186 tok/s in a slower
-  session), about level with llama.cpp's 192 once scaled to head-to-head conditions (est.; the re-run will confirm).
-- **The GPU decode numbers are pipelined**: every token's work is queued up front and the CPU never waits, which is
-  what the GPU can do but not what a chat server sees. Reading each token back before encoding the next costs ~0.37 ms
-  per token, and then nanoinfer is *behind* llama.cpp and MLX at every format. Keeping one token in flight (commit
-  t+1 before reading t) gets it all back:
-
-  | format | pipelined | streaming, per-token sync | streaming, one token ahead |
-  |---|---|---|---|
-  | f32 | 186 | 174 | 185 |
-  | f16 | 347 | 305 | 339 |
-  | Q8 | 589 | 486 | 577 |
-  | Q4 + Q8 head | 760 | 593 | 760 |
-
-  Same session, 19 Oct, ~3–4% slower than the head-to-head session (metal-lanes 760 vs 787). Details:
-  [`docs/LOG.md`](docs/LOG.md#metal-f32-on-the-pipelined-path-and-what-streaming-costs-19-oct).
-- WebGPU (the same WGSL through `wgpu`) reaches 556–569 tok/s at Q8 natively and 558 in Chrome on the same machine,
-  about 90% of the matching hand-written Metal stage.
+- **Like for like with llama.cpp, nanoinfer is slightly behind at every format.** With per-token sync it trails by
+  1% (Q8, a tie), 4% (Q4), 6% (f16) and 7% (f32). Reading each token back costs it ~0.36 ms, more than llama.cpp
+  pays for the same round trip.
+- **With one token in flight, it's the fastest of the four at f16, Q8 and Q4, and level at f32**: 789 tok/s at Q4 vs
+  MLX 700 (+13%) and llama.cpp's per-token-sync 636; 608 at Q8 vs 546 / 511. On a model this small most of a token
+  is fixed cost between kernels; the Metal climb removed most of it (one command buffer per token, argmax on the GPU),
+  and keeping one token in flight hides the rest. That's a fair comparison with MLX (same idea); against llama.cpp
+  it compares our server loop with its benchmark loop.
+- **Prefill is the loss: 1.5–1.9× slower than llama.cpp on the GPU** (it stages its matrix tiles in half precision;
+  ours are f32) and 1.6–2.5× on the CPU for quantised formats (it uses the M4's int8 matrix instructions; we use the
+  older dot-product ones).
+- **CPU decode is close but behind:** 3–4% at Q8 and Q4, 9% at f16, 16% at f32 (older stages that never moved onto
+  the low-latency thread pool). At 10 threads the order flips (llama.cpp drops with the E-cores).
+- WebGPU (the same WGSL through `wgpu`) reaches 571 tok/s at Q8 natively and 558 in Chrome on the same machine,
+  about 93% of the matching hand-written Metal stage. In the browser's CPU fallback (wasm, one thread) the quantised
+  stages now decode at ~195 tok/s with simd128 int8 dots, 1.5× the best f32 rung
+  ([`docs/LOG.md`](docs/LOG.md#browser-stage-4-simd128-int8-dots-and-f16-widening-in-core-19-oct)).
 
 All of this is GPT-2 small, where per-token fixed costs dominate, and that favours this design. On a 7B model every
 engine would be bandwidth-bound and the gaps would shrink.

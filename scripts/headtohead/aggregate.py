@@ -88,6 +88,15 @@ res = {
         "candle: not run, candle-transformers has no GPT-2 model (bigcode = GPT-BigCode/MQA)",
     ],
 }
+cond = os.path.join(h2h, "conditions.json")  # hand-written per run: date, commit, load, background processes
+if os.path.exists(cond):
+    res["conditions"] = json.load(open(cond))
+res["decode_modes"] = {
+    "decode_tok_s": "nanoinfer metal pipelined stages: all 64 forwards committed up front, argmax feeds the next on the GPU, CPU never waits (what the GPU can do)",
+    "decode_stream_tok_s": "per-token sync: commit, wait, read the token back, detokenise, then encode the next. Apples-to-apples with llama-bench tg, which syncs after every token",
+    "decode_lookahead_tok_s": "one token in flight: t+1 committed before t is read back (a server design; MLX's async eval in stream_generate is the same idea)",
+    "other engines": "llama.cpp tg = per-token sync; MLX = one in flight (async eval); PyTorch = no per-token readback (argmax stays on device, one sync per phase), eager dispatch per token",
+}
 pp = os.path.join(h2h, "ppl.json")
 if os.path.exists(pp):
     res["quality"] = json.load(open(pp))

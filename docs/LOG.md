@@ -2640,6 +2640,74 @@ llama.cpp CPU-only into `~/.cache/nanoinfer-h2h`), then `run.sh`
 (`ROUNDS=3`), `warm_check.sh`, `ppl.sh`, and
 `aggregate.py ~/.cache/nanoinfer-h2h bench/headtohead.json`.
 
+## Head-to-head, re-run (19 Oct, night)
+
+Run 02:38–03:50.
+
+Same harness, same model files, same method as the 18 Oct section above (which stays as it was): `run.sh`
+(`ROUNDS=3`, `SEED=20261019`, GPU block then CPU block per round, each shuffled), then `warm_check.sh`, then
+`aggregate.py` → `bench/headtohead.json` (now with a `conditions` and a `decode_modes` block). New in this run:
+`metal-pipelined-f32`, and every Metal pipelined stage reports its three decode modes.
+
+**Conditions.** Engine at `8cc2804`, clean tree (`git_dirty: false` on every nanoinfer row). AC power. Load gates
+kept: CPU jobs start at 1-min load ≤ 2.0, GPU jobs ≤ 8 (they actually started at 1.8–2.5). Sampled every 60 s with
+`ps` for the whole run: a VideoToolbox encoder process (`VTEncoderXPCService`, screen sharing) was present but at
+~0% CPU, `avconferenced` at 0% (earlier in the evening both ran at 20–28%). Load during the run 1.8–3.2. Quality
+(`ppl.json`) was not re-run; the formats are unchanged.
+
+**Which comparison is which.** llama-bench `tg` calls `llama_synchronize` after every token (verified in
+`tools/llama-bench/llama-bench.cpp`, `test_gen`, at ff5a233; it feeds random tokens and never samples). So the
+**apples-to-apples** row for llama.cpp is nanoinfer's **per-token sync** (commit, wait, read the argmax back,
+detokenise, encode the next), which does slightly *more* CPU work per token than llama-bench. MLX's
+`stream_generate` evaluates asynchronously, one token ahead: its match is our **one-in-flight** (lookahead) mode.
+**Pipelined** (all 64 forwards queued, the CPU never waits) is what the GPU can do; no streaming server can run it,
+because it never sees a token before the next one is queued. One-in-flight is a server design (a stop is noticed one
+token late and rolled back), not a benchmark trick, but it is not what llama-bench measures.
+
+**GPU decode, tok/s** (best round; llama.cpp = max of rounds and the warm check):
+
+| format | nanoinfer pipelined | per-token sync | one in flight | llama.cpp tg (syncs per token) | MLX (async, one ahead) | PyTorch MPS |
+|---|---|---|---|---|---|---|
+| f32 (495 MB) | 194.6 (metal-pipelined-f32; metal-mma 175.2) | 179.5 | 191.1 | **192.0** | 177.5 | 156.4 |
+| f16 (247 MB) | 360.9 | 315.2 | **360.0** | 334.0 | 339.8 | 252.9 |
+| Q8 (132 MB) | 610.8 (webgpu-vec 570.7) | 504.5 | **607.8** | 510.8 | 546.3 (139 MB) | |
+| Q4 + Q8 head (89 MB) | 792.1 | 611.2 | **789.1** | 636.3 | 700.2 (97 MB) | |
+| other 4-bit | | | | 660.2 (Q6_K head) | 763.4 (4-bit head, broken model) | |
+
+**GPU prefill, P = 64, tok/s:** llama.cpp 8,040 / 9,967 / 10,336 / 10,604 (f32 / f16 / Q8 / Q4); nanoinfer 4,857
+(metal-pipelined-f32; mma 4,707) / 5,251 / 6,054 / 6,870; MLX 3,557 / 5,457 / 6,278 / 7,448; PyTorch 5,085 / 6,378.
+
+**CPU, best thread count** (decode at 4 / 6 / 10 threads; prefill best):
+
+| format | llama.cpp NEON decode | nanoinfer decode | llama.cpp prefill | nanoinfer prefill |
+|---|---|---|---|---|
+| f32 | **198.6** @6 (142 / 199 / 157) | 167.5 @6 (136 / 168 / 166) fast-ops | 1,231 NEON; **2,729** Accelerate | 2,274 |
+| f16 | **360.8** @6 (273 / 361 / 284) | 328.1 @6 (254 / 328 / 312) | **2,281** | 2,232 |
+| Q8 | **595.9** @6 (489 / 596 / 468) | 578.4 @6 (476 / 578 / 568) q8-prefill | **5,579** | 3,475 |
+| Q4 + Q8 head | **763.5** @6 (751 / 764 / 634) | 736.2 @10 (639 / 706 / 736) q4-kv16 | **5,787** | 2,290 |
+| Q4, Q6_K head | 815.2 @4 | | 5,784 | |
+
+**Against 18 Oct.** Everything reproduces within ~3%: metal-lanes 787 → 792, metal-pipelined-q8 612 → 611, f16
+364 → 361, llama.cpp Metal 622 → 636 (Q4), 502 → 511 (Q8), MLX 694 → 700. llama.cpp's Metal decode was bimodal
+again (Q4_0 default: 660 / 499 / 628 across rounds). CPU rows within 1–2%. metal-pipelined-f32 lands at 194.6, as
+the 19 Oct estimate (~194) said.
+
+**Verdict (honest).**
+
+- **Like for like with llama-bench (per-token sync), nanoinfer is slightly behind llama.cpp at every format:** −6.5%
+  f32 (179.5 vs 192.0), −5.6% f16, −1.2% Q8 (a tie), −3.9% Q4. Per-token sync costs us ~0.36 ms a token (1/611 −
+  1/792), and llama.cpp evidently pays less for the same round trip. The 18 Oct verdict ("fastest of the four at f16,
+  Q8 and Q4") holds only for pipelined decode, which isn't a like-for-like with llama-bench.
+- **As a server design (one token in flight), nanoinfer is the fastest at f16, Q8 and Q4 and level at f32:** 789 vs
+  MLX 700 (+13%) and llama.cpp 636 (+24%) at Q4; 608 vs 546 / 511 at Q8; 360 vs 340 / 334 at f16; 191.1 vs 192.0 at
+  f32. MLX runs the same one-ahead idea, so the MLX comparison is fair in this mode; llama.cpp's would need its
+  server's own loop, which wasn't measured.
+- **Prefill and CPU are unchanged losses:** 1.5–1.9× behind llama.cpp's Metal prefill, 1.6–2.5× behind its
+  quantised CPU prefill; CPU decode 3–16% behind at the best thread count (we lead only at 10 threads).
+- What would close the sync gap: encode faster (fewer dispatches per token, or encoding on another thread while the
+  GPU runs; llama.cpp reportedly splits encoding across threads, not verified here), so the readback round trip
+  shrinks.
+
 ## Correction: q8-prefill's bytes per token (19 Oct)
 
 `Stage::head_format` fell through to f16 for q8-prefill, so its bench lines

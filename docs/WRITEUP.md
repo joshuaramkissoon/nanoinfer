@@ -791,6 +791,14 @@ hillclimb agents had the machine at load average ~25, so treat them as lower bou
   someone else's engine.
 - **Line:** "On the GPU the from-scratch engine writes faster than llama.cpp and MLX; it still reads slower, and now
   we know exactly why."
+- **Re-run, 19 Oct (quiet machine, randomised order, three decode loops): the headline needs a qualifier.**
+  llama-bench syncs after every token, so the like-for-like row is our per-token-sync loop, and there we're slightly
+  *behind* llama.cpp everywhere (Q8 505 vs 511, Q4 611 vs 636, f16 315 vs 334, f32 180 vs 192). The "first at every
+  compressed size" numbers (792 / 611 / 361 pipelined) are what the GPU can do with every token queued up front.
+  With one token in flight, which a server can actually run and which MLX also does, we keep it all: 789 / 608 /
+  360, ahead of MLX's 700 / 546 / 340. f32 on the pipelined path (194.6) now matches llama.cpp's 192.
+- **Line (revised):** "Keep one token in flight and the from-scratch engine writes fastest; wait for every token like
+  llama-bench does and llama.cpp is a few percent ahead, because it turns a token around faster."
 
 ## The learner path (web: /, /learn, /lab)
 
